@@ -22,6 +22,12 @@ class Router
 
     public function dispatch(): void
     {
+        try {
+            (new \Mapa\Models\ConfigRepository())->lembrarAppUrlDoPedido();
+        } catch (\Throwable $e) {
+            // Sem BD ainda ou falha pontual: nao impede a navegacao.
+        }
+
         $method = $_SERVER['REQUEST_METHOD'] ?? 'GET';
         $path = $this->currentPath();
         $key = $method . ' ' . $path;

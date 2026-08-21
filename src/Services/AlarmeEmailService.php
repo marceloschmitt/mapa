@@ -202,12 +202,13 @@ class AlarmeEmailService
         return $app['short_name'] . ' — Queremos te apoiar a continuar nos estudos';
     }
 
-    public function montarAssuntoStaffResumo(int $totalAlunos): string
+    public function montarAssuntoStaffResumo(int $totalAlunos, array $papeis = []): string
     {
         $app = $this->stringsApp();
-        $rotulo = $totalAlunos === 1 ? '1 estudante' : "{$totalAlunos} estudantes";
+        $destino = $this->rotuloDestinatarioStaff($papeis);
+        $rotulo = $totalAlunos === 1 ? '1 aluno' : "{$totalAlunos} alunos";
 
-        return $app['short_name'] . " — Acompanhamento: {$rotulo} contatados hoje";
+        return $app['short_name'] . " — Aviso para {$destino}: {$rotulo} com risco de evasão";
     }
 
     /**
@@ -215,64 +216,71 @@ class AlarmeEmailService
      *   nome: string,
      *   matricula: string,
      *   nome_curso: string,
-     *   alarmes: list<array<string, mixed>>
+     *   alarmes?: list<array<string, mixed>>
      * }> $entradas
+     * @param list<string> $papeis
      */
-    public function montarMensagemStaffResumo(array $entradas): string
+    public function montarMensagemStaffResumo(array $entradas, array $papeis = []): string
     {
         $app = $this->stringsApp();
         $nomeMapa = $app['full_name'];
         $nomeCurto = $app['short_name'];
+        $destino = $this->rotuloDestinatarioStaff($papeis);
 
-        $blocos = [];
+        $hoje = new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo'));
+        $data = $hoje->format('d/m/Y');
+
+        $linhas = [];
         foreach ($entradas as $entrada) {
             $nomeAluno = trim((string)($entrada['nome'] ?? 'estudante'));
-            $matricula = trim((string)($entrada['matricula'] ?? ''));
             $nomeCurso = trim((string)($entrada['nome_curso'] ?? ''));
-
-            $identificacao = $nomeAluno;
-            if ($matricula !== '') {
-                $identificacao .= ' (matrícula ' . $matricula . ')';
-            }
-            if ($nomeCurso !== '') {
-                $identificacao .= ' — ' . $nomeCurso;
-            }
-
-            $linhas = [];
-            foreach ($entrada['alarmes'] as $alarme) {
-                $linhas[] = '  • ' . $this->descreverAlarme($alarme, true);
-            }
-
-            $blocos[] = $identificacao . "\n" . implode("\n", $linhas);
+            $linhas[] = $nomeCurso !== ''
+                ? "• {$nomeAluno} — {$nomeCurso}"
+                : "• {$nomeAluno}";
         }
 
-        $total = count($entradas);
-        $introAlunos = $total === 1
-            ? '1 estudante recebeu'
-            : "{$total} estudantes receberam";
+        $linkServidor = $this->urlPublicaServidor();
+        $instrucaoAcesso = $linkServidor !== ''
+            ? "Se desejar visualizar os detalhes associados aos riscos, entre em {$linkServidor} e selecione Alarmes."
+            : 'Se desejar visualizar os detalhes associados aos riscos, acesse o sistema MAPA e selecione Alarmes.';
 
-        $modoTeste = $this->emailStaffApenas() !== null;
-        $bannerTeste = $modoTeste
-            ? "Modo piloto: avisos restritos ao seu e-mail como professor "
-                . "e/ou coordenador (demais destinatarios nao recebem).\n\n"
-            : '';
-
-        return "Esta é uma mensagem automática do {$nomeMapa} ({$nomeCurto}).\n\n"
-            . $bannerTeste
-            . "Olá,\n\n"
-            . "Hoje, {$introAlunos} um e-mail de acolhimento sobre frequência "
-            . "e permanência. Segue o resumo dos estudantes que podem precisar "
-            . "do seu contato:\n\n"
-            . implode("\n\n", $blocos)
+        return "Esta é uma mensagem automática do {$nomeMapa} ({$nomeCurto}), "
+            . "destinada a {$destino}.\n\n"
+            . "No dia {$data}, constatou-se algum risco de abandono ou evasão "
+            . "dos alunos listados abaixo. Foi-lhes enviado um e-mail automático. "
+            . $instrucaoAcesso
             . "\n\n"
-            . "O(A)s estudante(s) foi(ram) orientado(a)s a procurar professores, "
-            . "a coordenação do curso ou a Assistência Estudantil. "
-            . "Se puder, convidamos você a reforçar esse acolhimento com uma "
-            . "conversa ou encaminhamento.\n\n"
-            . "Obrigado pelo cuidado com a permanência dos nossos estudantes.\n\n"
+            . implode("\n", $linhas)
+            . "\n\n"
             . "Este e-mail é apenas informativo. Por favor, não responda a esta mensagem.\n\n"
             . "Atenciosamente,\n"
             . $nomeCurto;
+    }
+
+    /**
+     * @param list<string> $papeis
+     */
+    private function rotuloDestinatarioStaff(array $papeis): string
+    {
+        $temCoord = in_array('coordenador', $papeis, true);
+        $temProf = in_array('professor', $papeis, true);
+
+        if ($temCoord && $temProf) {
+            return 'coordenador(a) e professor(a)';
+        }
+        if ($temCoord) {
+            return 'coordenador(a)';
+        }
+        if ($temProf) {
+            return 'professor(a)';
+        }
+
+        return 'coordenador(a) ou professor(a)';
+    }
+
+    private function urlPublicaServidor(): string
+    {
+        return $this->config->getAppUrl();
     }
 
     /**
@@ -367,13 +375,15 @@ class AlarmeEmailService
 
         $registrosAvisados = [];
 
-        foreach ($digest as $email => $entradas) {
+        foreach ($digest as $email => $pacote) {
+            $entradas = $pacote['entradas'] ?? [];
+            $papeis = $pacote['papeis'] ?? [];
             if ($entradas === []) {
                 continue;
             }
 
-            $assunto = $this->montarAssuntoStaffResumo(count($entradas));
-            $corpo = $this->montarMensagemStaffResumo($entradas);
+            $assunto = $this->montarAssuntoStaffResumo(count($entradas), $papeis);
+            $corpo = $this->montarMensagemStaffResumo($entradas, $papeis);
 
             try {
                 $mailer->send([$email], $assunto, $corpo);
@@ -403,18 +413,24 @@ class AlarmeEmailService
      * Piloto (.env EMAIL_ALARMES_STAFF_APENAS): so envia ao e-mail indicado,
      * com conteudo filtrado pelas disciplinas/cursos dele (sem avisos de terceiros).
      *
-     * @param array<string, list<array{
-     *   nome: string,
-     *   matricula: string,
-     *   nome_curso: string,
-     *   alarmes: list<array<string, mixed>>
-     * }>> $digest
-     * @return array<string, list<array{
-     *   nome: string,
-     *   matricula: string,
-     *   nome_curso: string,
-     *   alarmes: list<array<string, mixed>>
-     * }>>
+     * @param array<string, array{
+     *   papeis: list<string>,
+     *   entradas: list<array{
+     *     nome: string,
+     *     matricula: string,
+     *     nome_curso: string,
+     *     alarmes: list<array<string, mixed>>
+     *   }>
+     * }> $digest
+     * @return array<string, array{
+     *   papeis: list<string>,
+     *   entradas: list<array{
+     *     nome: string,
+     *     matricula: string,
+     *     nome_curso: string,
+     *     alarmes: list<array<string, mixed>>
+     *   }>
+     * }>
      */
     private function filtrarDestinatariosStaff(array $digest): array
     {
@@ -424,9 +440,9 @@ class AlarmeEmailService
         }
 
         $apenasNorm = strtolower($apenas);
-        foreach ($digest as $email => $entradas) {
+        foreach ($digest as $email => $pacote) {
             if (strtolower($email) === $apenasNorm) {
-                return [$email => $entradas];
+                return [$email => $pacote];
             }
         }
 
@@ -677,12 +693,15 @@ class AlarmeEmailService
      *   alarme_ids: list<int>,
      *   alarmes: list<array<string, mixed>>
      * }> $gruposEnviados
-     * @return array<string, list<array{
-     *   nome: string,
-     *   matricula: string,
-     *   nome_curso: string,
-     *   alarmes: list<array<string, mixed>>
-     * }>>
+     * @return array<string, array{
+     *   papeis: list<string>,
+     *   entradas: list<array{
+     *     nome: string,
+     *     matricula: string,
+     *     nome_curso: string,
+     *     alarmes: list<array<string, mixed>>
+     *   }>
+     * }>
      */
     private function montarDigestStaff(array $gruposEnviados): array
     {
@@ -713,7 +732,8 @@ class AlarmeEmailService
                     $emailCoord,
                     $chaveAluno,
                     $grupo,
-                    $grupo['alarmes']
+                    $grupo['alarmes'],
+                    'coordenador'
                 );
             }
 
@@ -737,26 +757,33 @@ class AlarmeEmailService
                     $emailProf,
                     $chaveAluno,
                     $grupo,
-                    $alarmes
+                    $alarmes,
+                    'professor'
                 );
             }
         }
 
         $saida = [];
-        foreach ($digest as $email => $porAluno) {
-            $saida[$email] = array_values($porAluno);
+        foreach ($digest as $email => $dados) {
+            $saida[$email] = [
+                'papeis' => array_keys($dados['papeis']),
+                'entradas' => array_values($dados['por_aluno']),
+            ];
         }
 
         return $saida;
     }
 
     /**
-     * @param array<string, list<array{
-     *   nome: string,
-     *   matricula: string,
-     *   nome_curso: string,
-     *   alarmes: list<array<string, mixed>>
-     * }>> $digest
+     * @param array<string, array{
+     *   papeis: array<string, true>,
+     *   por_aluno: array<string, array{
+     *     nome: string,
+     *     matricula: string,
+     *     nome_curso: string,
+     *     alarmes: list<array<string, mixed>>
+     *   }>
+     * }> $digest
      * @param list<array<string, mixed>> $alarmes
      * @param array{
      *   nome: string,
@@ -770,18 +797,24 @@ class AlarmeEmailService
         string $email,
         string $chaveAluno,
         array $grupo,
-        array $alarmes
+        array $alarmes,
+        string $papel
     ): void {
         if ($alarmes === []) {
             return;
         }
 
         if (!isset($digest[$email])) {
-            $digest[$email] = [];
+            $digest[$email] = [
+                'papeis' => [],
+                'por_aluno' => [],
+            ];
         }
 
-        if (!isset($digest[$email][$chaveAluno])) {
-            $digest[$email][$chaveAluno] = [
+        $digest[$email]['papeis'][$papel] = true;
+
+        if (!isset($digest[$email]['por_aluno'][$chaveAluno])) {
+            $digest[$email]['por_aluno'][$chaveAluno] = [
                 'registro_id' => (int)($grupo['registro_id'] ?? 0),
                 'nome' => $grupo['nome'],
                 'matricula' => $grupo['matricula'],
@@ -791,7 +824,7 @@ class AlarmeEmailService
         }
 
         $idsExistentes = [];
-        foreach ($digest[$email][$chaveAluno]['alarmes'] as $existente) {
+        foreach ($digest[$email]['por_aluno'][$chaveAluno]['alarmes'] as $existente) {
             $idsExistentes[(int)($existente['id'] ?? 0)] = true;
         }
 
@@ -800,7 +833,7 @@ class AlarmeEmailService
             if ($id > 0 && isset($idsExistentes[$id])) {
                 continue;
             }
-            $digest[$email][$chaveAluno]['alarmes'][] = $alarme;
+            $digest[$email]['por_aluno'][$chaveAluno]['alarmes'][] = $alarme;
             if ($id > 0) {
                 $idsExistentes[$id] = true;
             }

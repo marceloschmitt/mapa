@@ -37,6 +37,8 @@ class ConfigRepository
     public const EMAIL_FROM_ADDRESS = 'email_from_address';
     public const EMAIL_FROM_NAME = 'email_from_name';
 
+    public const APP_URL = 'app_url';
+
     /** @var PDO */
     private $pdo;
 
@@ -362,6 +364,37 @@ class ConfigRepository
     public function hasEmailPassword(): bool
     {
         return trim($this->get(self::EMAIL_PASSWORD)) !== '';
+    }
+
+    /**
+     * URL pública do portal (descoberta nas visitas web; usada nos e-mails CLI).
+     * APP_URL no .env, se preenchido, tem prioridade.
+     */
+    public function getAppUrl(): string
+    {
+        $env = rtrim(trim(\Mapa\Core\Env::get('APP_URL', '')), '/');
+        if ($env !== '') {
+            return $env;
+        }
+
+        return rtrim(trim($this->get(self::APP_URL)), '/');
+    }
+
+    /**
+     * Grava a URL pública detectada no pedido HTTP atual (no-op em CLI).
+     */
+    public function lembrarAppUrlDoPedido(): void
+    {
+        $detectada = \Mapa\Core\Url::detectPublicBase();
+        if ($detectada === null || $detectada === '') {
+            return;
+        }
+
+        if ($this->get(self::APP_URL) === $detectada) {
+            return;
+        }
+
+        $this->set(self::APP_URL, $detectada, 'URL pública do portal (detectada automaticamente)');
     }
 
     public function isEmailConfigured(): bool
