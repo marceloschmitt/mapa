@@ -1,0 +1,20 @@
+# Segredos e configuração local (use .env.example como modelo)
+.env
+
+# Dados locais (BD, JSON da coleta, CSV, logs)
+/data/*
+!/data/.gitkeep
+
+# Python
+python/__pycache__/
+*.pyc
+*.pyo
+.Python
+
+# IDE / SO
+.DS_Store
+.cursor/
+.idea/
+.vscode/
+*.swp
+*~
