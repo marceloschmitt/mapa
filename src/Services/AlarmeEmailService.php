@@ -8,6 +8,7 @@ use Mapa\Core\Env;
 use Mapa\Lib\SmtpMailer;
 use Mapa\Models\AnalyticsRepository;
 use Mapa\Models\ConfigRepository;
+use Mapa\Models\CursoCoordenacaoRepository;
 use PDO;
 use Throwable;
 
@@ -20,15 +21,18 @@ class AlarmeEmailService
     private PDO $pdo;
     private ConfigRepository $config;
     private AnalyticsRepository $analytics;
+    private CursoCoordenacaoRepository $cursoCoordenacao;
 
     public function __construct(
         ?PDO $pdo = null,
         ?ConfigRepository $config = null,
-        ?AnalyticsRepository $analytics = null
+        ?AnalyticsRepository $analytics = null,
+        ?CursoCoordenacaoRepository $cursoCoordenacao = null
     ) {
         $this->pdo = $pdo ?? Database::connection();
         $this->config = $config ?? new ConfigRepository($this->pdo);
         $this->analytics = $analytics ?? new AnalyticsRepository();
+        $this->cursoCoordenacao = $cursoCoordenacao ?? new CursoCoordenacaoRepository($this->pdo);
     }
 
     /**
@@ -230,14 +234,7 @@ class AlarmeEmailService
         $hoje = new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo'));
         $data = $hoje->format('d/m/Y');
 
-        $linhas = [];
-        foreach ($entradas as $entrada) {
-            $nomeAluno = trim((string)($entrada['nome'] ?? 'estudante'));
-            $nomeCurso = trim((string)($entrada['nome_curso'] ?? ''));
-            $linhas[] = $nomeCurso !== ''
-                ? "• {$nomeAluno} — {$nomeCurso}"
-                : "• {$nomeAluno}";
-        }
+        $linhas = $this->linhasAlunosStaff($entradas, $papeis);
 
         $linkServidor = $this->urlPublicaServidor();
         $instrucaoAcesso = $linkServidor !== ''
@@ -265,17 +262,95 @@ class AlarmeEmailService
         $temCoord = in_array('coordenador', $papeis, true);
         $temProf = in_array('professor', $papeis, true);
 
-        if ($temCoord && $temProf) {
-            return 'coordenador(a) e professor(a)';
-        }
         if ($temCoord) {
-            return 'coordenador(a)';
+            return 'coordenadores de curso';
         }
         if ($temProf) {
-            return 'professor(a)';
+            return 'professores';
         }
 
-        return 'coordenador(a) ou professor(a)';
+        return 'coordenadores de curso ou professores';
+    }
+
+    /**
+     * @param list<array{
+     *   nome: string,
+     *   matricula: string,
+     *   nome_curso: string,
+     *   alarmes?: list<array<string, mixed>>
+     * }> $entradas
+     * @param list<string> $papeis
+     * @return list<string>
+     */
+    private function linhasAlunosStaff(array $entradas, array $papeis): array
+    {
+        $somenteProfessor = in_array('professor', $papeis, true);
+
+        $itens = [];
+        foreach ($entradas as $entrada) {
+            $nomeAluno = trim((string)($entrada['nome'] ?? 'estudante'));
+
+            if ($somenteProfessor) {
+                $disciplinas = $this->disciplinasEntrada($entrada);
+                if ($disciplinas === []) {
+                    $itens[] = ['nome' => $nomeAluno, 'sufixo' => ''];
+                    continue;
+                }
+                foreach ($disciplinas as $disciplina) {
+                    $itens[] = ['nome' => $nomeAluno, 'sufixo' => $disciplina];
+                }
+                continue;
+            }
+
+            $nomeCurso = trim((string)($entrada['nome_curso'] ?? ''));
+            $itens[] = ['nome' => $nomeAluno, 'sufixo' => $nomeCurso];
+        }
+
+        usort(
+            $itens,
+            static function (array $a, array $b): int {
+                $cmp = strcasecmp($a['nome'], $b['nome']);
+                if ($cmp !== 0) {
+                    return $cmp;
+                }
+
+                return strcasecmp($a['sufixo'], $b['sufixo']);
+            }
+        );
+
+        $linhas = [];
+        foreach ($itens as $item) {
+            $sufixo = trim((string)($item['sufixo'] ?? ''));
+            $linhas[] = $sufixo !== ''
+                ? '• ' . $item['nome'] . ' — ' . $sufixo
+                : '• ' . $item['nome'];
+        }
+
+        return $linhas;
+    }
+
+    /**
+     * @param array{alarmes?: list<array<string, mixed>>} $entrada
+     * @return list<string>
+     */
+    private function disciplinasEntrada(array $entrada): array
+    {
+        $disciplinas = [];
+        foreach ($entrada['alarmes'] ?? [] as $alarme) {
+            $nome = trim((string)($alarme['disciplina'] ?? ''));
+            $codigo = trim((string)($alarme['codigo_disciplina'] ?? ''));
+            if ($nome === '' && $codigo !== '') {
+                $nome = $codigo;
+            }
+            if ($nome !== '') {
+                $disciplinas[$nome] = $nome;
+            }
+        }
+
+        $lista = array_values($disciplinas);
+        sort($lista, SORT_FLAG_CASE | SORT_STRING);
+
+        return $lista;
     }
 
     private function urlPublicaServidor(): string
@@ -375,10 +450,11 @@ class AlarmeEmailService
 
         $registrosAvisados = [];
 
-        foreach ($digest as $email => $pacote) {
+        foreach ($digest as $pacote) {
+            $email = (string)($pacote['email'] ?? '');
             $entradas = $pacote['entradas'] ?? [];
             $papeis = $pacote['papeis'] ?? [];
-            if ($entradas === []) {
+            if ($email === '' || $entradas === []) {
                 continue;
             }
 
@@ -413,7 +489,8 @@ class AlarmeEmailService
      * Piloto (.env EMAIL_ALARMES_STAFF_APENAS): so envia ao e-mail indicado,
      * com conteudo filtrado pelas disciplinas/cursos dele (sem avisos de terceiros).
      *
-     * @param array<string, array{
+     * @param list<array{
+     *   email: string,
      *   papeis: list<string>,
      *   entradas: list<array{
      *     nome: string,
@@ -422,7 +499,8 @@ class AlarmeEmailService
      *     alarmes: list<array<string, mixed>>
      *   }>
      * }> $digest
-     * @return array<string, array{
+     * @return list<array{
+     *   email: string,
      *   papeis: list<string>,
      *   entradas: list<array{
      *     nome: string,
@@ -440,13 +518,15 @@ class AlarmeEmailService
         }
 
         $apenasNorm = strtolower($apenas);
-        foreach ($digest as $email => $pacote) {
-            if (strtolower($email) === $apenasNorm) {
-                return [$email => $pacote];
+        $filtrado = [];
+        foreach ($digest as $pacote) {
+            $email = strtolower(trim((string)($pacote['email'] ?? '')));
+            if ($email === $apenasNorm) {
+                $filtrado[] = $pacote;
             }
         }
 
-        return [];
+        return $filtrado;
     }
 
     private function emailStaffApenas(): ?string
@@ -693,7 +773,8 @@ class AlarmeEmailService
      *   alarme_ids: list<int>,
      *   alarmes: list<array<string, mixed>>
      * }> $gruposEnviados
-     * @return array<string, array{
+     * @return list<array{
+     *   email: string,
      *   papeis: list<string>,
      *   entradas: list<array{
      *     nome: string,
@@ -737,7 +818,6 @@ class AlarmeEmailService
                 );
             }
 
-            $alarmesPorProfessor = [];
             foreach ($grupo['alarmes'] as $alarme) {
                 $codigo = trim((string)($alarme['codigo_disciplina'] ?? ''));
                 if ($codigo === '') {
@@ -747,43 +827,45 @@ class AlarmeEmailService
                     if (strtolower($emailProf) === $emailAluno) {
                         continue;
                     }
-                    $alarmesPorProfessor[$emailProf][] = $alarme;
+                    $this->adicionarEntradaDigest(
+                        $digest,
+                        $emailProf,
+                        $chaveAluno,
+                        $grupo,
+                        [$alarme],
+                        'professor'
+                    );
                 }
-            }
-
-            foreach ($alarmesPorProfessor as $emailProf => $alarmes) {
-                $this->adicionarEntradaDigest(
-                    $digest,
-                    $emailProf,
-                    $chaveAluno,
-                    $grupo,
-                    $alarmes,
-                    'professor'
-                );
             }
         }
 
         $saida = [];
-        foreach ($digest as $email => $dados) {
-            $saida[$email] = [
-                'papeis' => array_keys($dados['papeis']),
-                'entradas' => array_values($dados['por_aluno']),
-            ];
+        foreach ($digest as $email => $porPapel) {
+            foreach ($porPapel as $papel => $dados) {
+                $entradas = array_values($dados['por_aluno']);
+                if ($entradas === []) {
+                    continue;
+                }
+                $saida[] = [
+                    'email' => $email,
+                    'papeis' => [$papel],
+                    'entradas' => $entradas,
+                ];
+            }
         }
 
         return $saida;
     }
 
     /**
-     * @param array<string, array{
-     *   papeis: array<string, true>,
+     * @param array<string, array<string, array{
      *   por_aluno: array<string, array{
      *     nome: string,
      *     matricula: string,
      *     nome_curso: string,
      *     alarmes: list<array<string, mixed>>
      *   }>
-     * }> $digest
+     * }>> $digest
      * @param list<array<string, mixed>> $alarmes
      * @param array{
      *   nome: string,
@@ -804,17 +886,14 @@ class AlarmeEmailService
             return;
         }
 
-        if (!isset($digest[$email])) {
-            $digest[$email] = [
-                'papeis' => [],
+        if (!isset($digest[$email][$papel])) {
+            $digest[$email][$papel] = [
                 'por_aluno' => [],
             ];
         }
 
-        $digest[$email]['papeis'][$papel] = true;
-
-        if (!isset($digest[$email]['por_aluno'][$chaveAluno])) {
-            $digest[$email]['por_aluno'][$chaveAluno] = [
+        if (!isset($digest[$email][$papel]['por_aluno'][$chaveAluno])) {
+            $digest[$email][$papel]['por_aluno'][$chaveAluno] = [
                 'registro_id' => (int)($grupo['registro_id'] ?? 0),
                 'nome' => $grupo['nome'],
                 'matricula' => $grupo['matricula'],
@@ -824,7 +903,7 @@ class AlarmeEmailService
         }
 
         $idsExistentes = [];
-        foreach ($digest[$email]['por_aluno'][$chaveAluno]['alarmes'] as $existente) {
+        foreach ($digest[$email][$papel]['por_aluno'][$chaveAluno]['alarmes'] as $existente) {
             $idsExistentes[(int)($existente['id'] ?? 0)] = true;
         }
 
@@ -833,7 +912,7 @@ class AlarmeEmailService
             if ($id > 0 && isset($idsExistentes[$id])) {
                 continue;
             }
-            $digest[$email]['por_aluno'][$chaveAluno]['alarmes'][] = $alarme;
+            $digest[$email][$papel]['por_aluno'][$chaveAluno]['alarmes'][] = $alarme;
             if ($id > 0) {
                 $idsExistentes[$id] = true;
             }
@@ -1030,6 +1109,11 @@ class AlarmeEmailService
     {
         if ($cursoId <= 0) {
             return [];
+        }
+
+        $emailsInstitucionais = $this->cursoCoordenacao->emailsCoordenacaoCurso($cursoId);
+        if ($emailsInstitucionais !== []) {
+            return $emailsInstitucionais;
         }
 
         $statement = $this->pdo->prepare(

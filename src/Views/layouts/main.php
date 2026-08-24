@@ -74,6 +74,9 @@
                             <li>
                                 <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/email'), ENT_QUOTES, 'UTF-8') ?>">E-mail</a>
                             </li>
+                            <li>
+                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/coordenacao'), ENT_QUOTES, 'UTF-8') ?>">Coordenação</a>
+                            </li>
                         </ul>
                     </li>
                 <?php endif; ?>

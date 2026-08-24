@@ -61,6 +61,14 @@ CREATE TABLE IF NOT EXISTS usuario_cursos (
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE
 );
 
+-- E-mail institucional da coordenacao por curso (avisos automaticos ao staff).
+CREATE TABLE IF NOT EXISTS curso_coordenacao (
+    curso_id INTEGER PRIMARY KEY,
+    email_coordenacao TEXT NOT NULL DEFAULT '',
+    atualizado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE
+);
+
 -- Docentes vindos da consulta de matriculados (resposta_matriculas.json).
 CREATE TABLE IF NOT EXISTS professores (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

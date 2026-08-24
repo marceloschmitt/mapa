@@ -7,6 +7,7 @@ use Mapa\Controllers\ApiConfigController;
 use Mapa\Controllers\AuthController;
 use Mapa\Controllers\ChamadasController;
 use Mapa\Controllers\DashboardController;
+use Mapa\Controllers\CoordenacaoConfigController;
 use Mapa\Controllers\EmailConfigController;
 use Mapa\Controllers\IngressantesController;
 use Mapa\Controllers\LdapConfigController;
@@ -45,4 +46,6 @@ return static function (Router $router): void {
     $router->post('/configuracoes/api', [ApiConfigController::class, 'save']);
     $router->get('/configuracoes/email', [EmailConfigController::class, 'form']);
     $router->post('/configuracoes/email', [EmailConfigController::class, 'save']);
+    $router->get('/configuracoes/coordenacao', [CoordenacaoConfigController::class, 'form']);
+    $router->post('/configuracoes/coordenacao', [CoordenacaoConfigController::class, 'save']);
 };
