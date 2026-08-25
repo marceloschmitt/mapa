@@ -449,12 +449,21 @@ class AlarmeEmailService
         }
 
         $registrosAvisados = [];
+        $recentes = $this->enviosStaffRecentes();
 
         foreach ($digest as $pacote) {
-            $email = (string)($pacote['email'] ?? '');
+            $email = trim((string)($pacote['email'] ?? ''));
+            $emailNorm = strtolower($email);
             $entradas = $pacote['entradas'] ?? [];
             $papeis = $pacote['papeis'] ?? [];
-            if ($email === '' || $entradas === []) {
+            $papel = (string)($papeis[0] ?? '');
+            if ($email === '' || $entradas === [] || $papel === '') {
+                continue;
+            }
+
+            $chaveRecente = $emailNorm . '|' . $papel;
+            if (isset($recentes[$chaveRecente])) {
+                $resumo['ignorados']++;
                 continue;
             }
 
@@ -463,6 +472,8 @@ class AlarmeEmailService
 
             try {
                 $mailer->send([$email], $assunto, $corpo);
+                $this->registrarEnvioStaff($email, $papel, count($entradas));
+                $recentes[$chaveRecente] = true;
                 $resumo['enviados']++;
                 foreach ($entradas as $entrada) {
                     $registroId = (int)($entrada['registro_id'] ?? 0);
@@ -1146,6 +1157,51 @@ class AlarmeEmailService
         }
 
         return array_keys($emails);
+    }
+
+    /**
+     * Destinatarios staff que ja receberam aviso na janela de 7 dias (por e-mail + papel).
+     *
+     * @return array<string, true> chave "email|papel"
+     */
+    private function enviosStaffRecentes(): array
+    {
+        $dias = (int)self::INTERVALO_DIAS;
+        $statement = $this->pdo->query(
+            "SELECT destinatario, papel
+             FROM staff_alarme_emails
+             WHERE datetime(enviado_em) >= datetime('now', '-{$dias} days')"
+        );
+
+        $chaves = [];
+        foreach ($statement->fetchAll() as $row) {
+            $email = strtolower(trim((string)($row['destinatario'] ?? '')));
+            $papel = trim((string)($row['papel'] ?? ''));
+            if ($email !== '' && $papel !== '') {
+                $chaves[$email . '|' . $papel] = true;
+            }
+        }
+
+        return $chaves;
+    }
+
+    /**
+     * @param list<string> $papeis
+     */
+    private function registrarEnvioStaff(string $destinatario, string $papel, int $totalAlunos): void
+    {
+        $statement = $this->pdo->prepare(
+            'INSERT INTO staff_alarme_emails (
+                destinatario, papel, total_alunos, enviado_em
+             ) VALUES (
+                :destinatario, :papel, :total_alunos, datetime(\'now\')
+             )'
+        );
+        $statement->execute([
+            'destinatario' => $destinatario,
+            'papel' => $papel,
+            'total_alunos' => $totalAlunos,
+        ]);
     }
 
     /**

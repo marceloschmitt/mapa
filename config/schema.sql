@@ -276,3 +276,15 @@ CREATE INDEX IF NOT EXISTS idx_alarme_emails_coleta
 
 CREATE INDEX IF NOT EXISTS idx_alarme_emails_aluno_enviado
     ON alarme_emails(aluno_id, enviado_em);
+
+-- Historico de e-mails de aviso ao staff (max. 1 por destinatario a cada 7 dias).
+CREATE TABLE IF NOT EXISTS staff_alarme_emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    destinatario TEXT NOT NULL,
+    papel TEXT NOT NULL DEFAULT '',
+    total_alunos INTEGER NOT NULL DEFAULT 0,
+    enviado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_staff_alarme_emails_destinatario_enviado
+    ON staff_alarme_emails(destinatario, enviado_em);
