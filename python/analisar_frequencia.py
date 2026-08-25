@@ -16,12 +16,46 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from paths import JSON_RESPOSTA_ALUNOS, JSON_TABELA_FREQUENCIA, garantir_diretorios
+from paths import (
+    JSON_ALUNOS_TRANCADOS,
+    JSON_RESPOSTA_ALUNOS,
+    JSON_TABELA_FREQUENCIA,
+    garantir_diretorios,
+)
 
 ARQUIVO_ENTRADA = JSON_RESPOSTA_ALUNOS
 ARQUIVO_SAIDA_JSON = JSON_TABELA_FREQUENCIA
+ARQUIVO_TRANCADOS_JSON = JSON_ALUNOS_TRANCADOS
 
 LIMITE_PREVIEW = 20
+
+# Status que nao entram em frequencia/alarmes/e-mails (provavel trancamento).
+STATUS_TRANCADOS = frozenset({
+    "TRANC. AUTOMÁTICO",
+    "TRANC. AUTOMATICO",
+    "TRANCADO",
+})
+
+
+def status_eh_trancado(status: str) -> bool:
+    """Indica se o status_discente e de trancamento."""
+    normalizado = " ".join(str(status or "").strip().upper().split())
+    if normalizado in STATUS_TRANCADOS:
+        return True
+    # Aceita variantes com acentuacao diferente.
+    sem_acento = (
+        normalizado.replace("Á", "A")
+        .replace("À", "A")
+        .replace("Ã", "A")
+        .replace("É", "E")
+        .replace("Í", "I")
+        .replace("Ó", "O")
+        .replace("Ú", "U")
+    )
+    return sem_acento in {
+        "TRANC. AUTOMATICO",
+        "TRANCADO",
+    }
 
 
 def carregar_alunos(caminho: Path) -> list[dict[str, Any]]:
@@ -133,17 +167,19 @@ def extrair_disciplinas(frequencias: dict[str, Any]) -> list[dict[str, Any]]:
     return linhas
 
 
-def extrair_registros_aluno(aluno: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extrai os registros de frequencia de um aluno (um por curso).
+def extrair_registros_aluno(
+    aluno: dict[str, Any],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Extrai registros de frequencia e de trancamento de um aluno.
 
     Args:
         aluno: Registro individual de resposta_alunos.json.
 
     Returns:
-        Lista com dados gerais e disciplinas de cada curso com frequencia.
+        Tupla (registros_frequencia, registros_trancados).
     """
     if aluno.get("status") != 200:
-        return []
+        return [], []
 
     nome = str(aluno.get("nome", ""))
     login = str(aluno.get("login", ""))
@@ -151,9 +187,10 @@ def extrair_registros_aluno(aluno: dict[str, Any]) -> list[dict[str, Any]]:
     dados = aluno.get("dados")
 
     if not isinstance(dados, dict):
-        return []
+        return [], []
 
     registros: list[dict[str, Any]] = []
+    trancados: list[dict[str, Any]] = []
 
     for perfil in dados.values():
         if not isinstance(perfil, dict):
@@ -172,6 +209,25 @@ def extrair_registros_aluno(aluno: dict[str, Any]) -> list[dict[str, Any]]:
             if not isinstance(curso, dict):
                 continue
 
+            status_discente = str(curso.get("status_discente") or "").strip()
+            base = {
+                "nome": nome_civil or nome or login,
+                "nome_social": nome_social,
+                "login": login,
+                "matricula": matricula,
+                "email": email,
+                "nome_curso": curso.get("nome_curso"),
+                "ano_semestre_ingresso": str(
+                    curso.get("ano_semestre_ingresso") or ""
+                ).strip() or None,
+                "turma_entrada": str(curso.get("turma_entrada") or "").strip() or None,
+                "status_discente": status_discente,
+            }
+
+            if status_eh_trancado(status_discente):
+                trancados.append(base)
+                continue
+
             frequencias = curso.get("frequencias", {})
             if not isinstance(frequencias, dict):
                 continue
@@ -183,40 +239,39 @@ def extrair_registros_aluno(aluno: dict[str, Any]) -> list[dict[str, Any]]:
                 continue
 
             registros.append({
-                "nome": nome_civil or nome or login,
-                "nome_social": nome_social,
-                "login": login,
-                "matricula": matricula,
-                "email": email,
-                "nome_curso": curso.get("nome_curso"),
-                "ano_semestre_ingresso": str(
-                    curso.get("ano_semestre_ingresso") or ""
-                ).strip() or None,
-                "turma_entrada": str(curso.get("turma_entrada") or "").strip() or None,
+                **base,
                 "frequencia_geral": frequencia_geral,
                 "disciplinas": disciplinas,
             })
 
-    return registros
+    return registros, trancados
 
 
-def montar_resultado(alunos: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Monta a lista completa de frequencia a partir de todos os alunos.
+def montar_resultado(
+    alunos: list[dict[str, Any]],
+) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
+    """Monta frequencia e lista de trancados a partir de todos os alunos.
 
     Args:
         alunos: Lista de registros de resposta_alunos.json.
 
     Returns:
-        Lista ordenada por nome do aluno.
+        Tupla (frequencia ordenada, trancados ordenados).
     """
     resultado: list[dict[str, Any]] = []
+    trancados: list[dict[str, Any]] = []
 
     for aluno in alunos:
-        resultado.extend(extrair_registros_aluno(aluno))
+        regs, trancs = extrair_registros_aluno(aluno)
+        resultado.extend(regs)
+        trancados.extend(trancs)
 
     resultado.sort(key=lambda registro: registro["nome"])
-    return resultado
-
+    trancados.sort(key=lambda registro: (
+        str(registro.get("nome") or ""),
+        str(registro.get("nome_curso") or ""),
+    ))
+    return resultado, trancados
 
 def salvar_json(resultado: list[dict[str, Any]], caminho: Path) -> None:
     """Salva o resultado em formato JSON indentado.
@@ -300,12 +355,17 @@ def formatar_preview(resultado: list[dict[str, Any]], limite: int = LIMITE_PREVI
     return "\n".join(linhas)
 
 
-def resumir(alunos: list[dict[str, Any]], resultado: list[dict[str, Any]]) -> str:
+def resumir(
+    alunos: list[dict[str, Any]],
+    resultado: list[dict[str, Any]],
+    trancados: list[dict[str, Any]],
+) -> str:
     """Monta um resumo textual da analise.
 
     Args:
         alunos: Lista original de alunos.
         resultado: Resultado gerado.
+        trancados: Registros com status de trancamento.
 
     Returns:
         Texto com totais e contagens uteis.
@@ -313,13 +373,16 @@ def resumir(alunos: list[dict[str, Any]], resultado: list[dict[str, Any]]) -> st
     alunos_com_sucesso = sum(1 for aluno in alunos if aluno.get("status") == 200)
     alunos_com_frequencia = len({registro["login"] for registro in resultado})
     total_disciplinas = sum(len(registro.get("disciplinas", [])) for registro in resultado)
+    alunos_trancados = len({str(r.get("login") or "") for r in trancados})
 
     return (
         f"Alunos no arquivo: {len(alunos)}\n"
         f"Alunos com consulta OK: {alunos_com_sucesso}\n"
         f"Alunos com frequencia: {alunos_com_frequencia}\n"
         f"Registros (aluno/curso): {len(resultado)}\n"
-        f"Linhas de disciplina: {total_disciplinas}"
+        f"Linhas de disciplina: {total_disciplinas}\n"
+        f"Alunos trancados (excluidos): {alunos_trancados}\n"
+        f"Registros trancados: {len(trancados)}"
     )
 
 
@@ -342,16 +405,18 @@ def main() -> int:
         print(f"Erro ao ler entrada: {error}", file=sys.stderr)
         return 1
 
-    resultado = montar_resultado(alunos)
+    resultado, trancados = montar_resultado(alunos)
     garantir_diretorios()
     salvar_json(resultado, ARQUIVO_SAIDA_JSON)
+    salvar_json(trancados, ARQUIVO_TRANCADOS_JSON)
 
     print("Analise de frequencia por aluno")
-    print(resumir(alunos, resultado))
+    print(resumir(alunos, resultado, trancados))
     print()
     print(formatar_preview(resultado))
     print()
     print(f"JSON salvo em: {ARQUIVO_SAIDA_JSON}")
+    print(f"Trancados salvos em: {ARQUIVO_TRANCADOS_JSON}")
 
     return 0
 

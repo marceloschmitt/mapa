@@ -25,6 +25,7 @@ PASSOS = (
     "consulta_alunos.py",
     "analisar_frequencia.py",
     "importar_frequencia.py",
+    "importar_trancados.py",
     "importar_professores.py",
     "importar_grade.py",
     "importar_chamadas.py",

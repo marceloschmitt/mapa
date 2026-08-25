@@ -25,6 +25,7 @@ JSON_RESPOSTA_MATRICULAS = DIR_JSON / "resposta_matriculas.json"
 JSON_RESPOSTA_ALUNOS = DIR_JSON / "resposta_alunos.json"
 JSON_ERROS_ALUNOS = DIR_JSON / "erros_alunos.json"
 JSON_TABELA_FREQUENCIA = DIR_JSON / "tabela_frequencia.json"
+JSON_ALUNOS_TRANCADOS = DIR_JSON / "alunos_trancados.json"
 
 
 def garantir_diretorios() -> None:

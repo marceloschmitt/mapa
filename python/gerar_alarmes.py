@@ -165,7 +165,8 @@ def coleta_anterior_id(cursor: Any, coleta_id: int) -> int | None:
 def trazer_alarmes_tratados(cursor: Any, coleta_id: int) -> int:
     """Copia alarmes ja tratados da coleta anterior para a atual.
 
-    Assim o contato permanece visivel na ultima coleta do portal.
+    So copia se o aluno/curso ainda aparece na frequencia da coleta atual
+    (alunos que sumiram — ex.: trancamento — nao reaparecem nos alarmes).
 
     Args:
         cursor: Cursor SQLite.
@@ -186,12 +187,19 @@ def trazer_alarmes_tratados(cursor: Any, coleta_id: int) -> int:
             visualizado, visualizado_em, visualizado_por, contato_tipo, gerado_em
         )
         SELECT
-            ?, aluno_id, curso_id, codigo_disciplina, disciplina,
-            tipo, severidade, mensagem, detalhe_json,
-            visualizado, visualizado_em, visualizado_por, contato_tipo, gerado_em
-        FROM alarmes
-        WHERE coleta_id = ?
-          AND visualizado = 1
+            ?, a.aluno_id, a.curso_id, a.codigo_disciplina, a.disciplina,
+            a.tipo, a.severidade, a.mensagem, a.detalhe_json,
+            a.visualizado, a.visualizado_em, a.visualizado_por, a.contato_tipo, a.gerado_em
+        FROM alarmes a
+        WHERE a.coleta_id = ?
+          AND a.visualizado = 1
+          AND EXISTS (
+              SELECT 1
+              FROM frequencia_curso fc
+              WHERE fc.coleta_id = ?
+                AND fc.aluno_id = a.aluno_id
+                AND fc.curso_id = a.curso_id
+          )
         ON CONFLICT(coleta_id, aluno_id, curso_id, codigo_disciplina, tipo)
         DO UPDATE SET
             severidade = excluded.severidade,
@@ -204,7 +212,46 @@ def trazer_alarmes_tratados(cursor: Any, coleta_id: int) -> int:
             contato_tipo = excluded.contato_tipo,
             gerado_em = excluded.gerado_em
         """,
-        (coleta_id, anterior),
+        (coleta_id, anterior, coleta_id),
+    )
+    return int(cursor.rowcount or 0)
+
+
+def cancelar_avisos_staff_alunos_ausentes(cursor: Any, coleta_id: int) -> int:
+    """Fecha avisos pendentes ao staff de alunos fora da coleta atual.
+
+    Evita e-mail a professor/coordenador sobre quem provavelmente trancou.
+
+    Args:
+        cursor: Cursor SQLite.
+        coleta_id: Coleta de referencia (ultima).
+
+    Returns:
+        Quantidade de registros de alarme_emails fechados.
+    """
+    cursor.execute(
+        """
+        UPDATE alarme_emails
+        SET staff_avisado_em = datetime('now')
+        WHERE staff_avisado_em IS NULL
+          AND (
+              NOT EXISTS (
+                  SELECT 1
+                  FROM frequencia_curso fc
+                  WHERE fc.coleta_id = ?
+                    AND fc.aluno_id = alarme_emails.aluno_id
+                    AND fc.curso_id = alarme_emails.curso_id
+              )
+              OR EXISTS (
+                  SELECT 1
+                  FROM alunos_trancados at
+                  WHERE at.coleta_id = ?
+                    AND at.aluno_id = alarme_emails.aluno_id
+                    AND at.curso_id = alarme_emails.curso_id
+              )
+          )
+        """,
+        (coleta_id, coleta_id),
     )
     return int(cursor.rowcount or 0)
 
@@ -562,6 +609,7 @@ def gerar(coleta_id: int | None = None) -> dict[str, int]:
     n_percentual = gerar_percentual_baixo(cursor, coleta_id)
     n_4dias = gerar_faltas_4dias(cursor, coleta_id, referencia)
     n_3semanas = gerar_faltas_3semanas(cursor, coleta_id, referencia)
+    n_staff_cancelados = cancelar_avisos_staff_alunos_ausentes(cursor, coleta_id)
 
     conn.commit()
     return {
@@ -570,6 +618,7 @@ def gerar(coleta_id: int | None = None) -> dict[str, int]:
         "percentual_baixo": n_percentual,
         "faltas_4dias": n_4dias,
         "faltas_3semanas": n_3semanas,
+        "staff_cancelados_ausentes": n_staff_cancelados,
         "total": n_percentual + n_4dias + n_3semanas,
     }
 
@@ -599,6 +648,7 @@ def main() -> int:
     print(f"Percentual < 75%: {resumo['percentual_baixo']}")
     print(f"Faltas 4 dias: {resumo['faltas_4dias']}")
     print(f"Faltas 3 semanas: {resumo['faltas_3semanas']}")
+    print(f"Avisos staff cancelados (aluno ausente): {resumo['staff_cancelados_ausentes']}")
     print(f"Total (regras): {resumo['total']}")
     return 0
 

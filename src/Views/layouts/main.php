@@ -50,6 +50,9 @@
                 <li class="nav-item">
                     <a class="nav-link" href="<?= htmlspecialchars(url('/ingressantes'), ENT_QUOTES, 'UTF-8') ?>">Ingressantes</a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="<?= htmlspecialchars(url('/trancados'), ENT_QUOTES, 'UTF-8') ?>">Trancados</a>
+                </li>
                 <?php if (!empty($podeVerChamadas)): ?>
                     <li class="nav-item">
                         <a class="nav-link" href="<?= htmlspecialchars(url('/chamadas'), ENT_QUOTES, 'UTF-8') ?>">Chamadas</a>

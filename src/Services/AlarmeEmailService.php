@@ -146,6 +146,11 @@ class AlarmeEmailService
             return $resumo;
         }
 
+        $cancelados = $this->cancelarAvisosStaffAlunosAusentes();
+        if ($cancelados > 0) {
+            $resumo['mensagens'][] = "Avisos staff cancelados (aluno ausente da coleta): {$cancelados}.";
+        }
+
         $grupos = $this->gruposDeEnviosAlunoPendentesStaff();
         if ($grupos === []) {
             $resumo['mensagens'][] = 'Nenhum e-mail de aluno pendente de aviso ao staff.';
@@ -155,6 +160,47 @@ class AlarmeEmailService
         $this->enviarResumosStaff($mailer, $grupos, $resumo);
 
         return $resumo;
+    }
+
+    /**
+     * Fecha avisos pendentes ao staff para alunos que nao estao na ultima coleta.
+     *
+     * @return int Quantidade de registros fechados
+     */
+    private function cancelarAvisosStaffAlunosAusentes(): int
+    {
+        $coleta = $this->analytics->ultimaColeta();
+        if ($coleta === null) {
+            return 0;
+        }
+
+        $statement = $this->pdo->prepare(
+            'UPDATE alarme_emails
+             SET staff_avisado_em = datetime(\'now\')
+             WHERE staff_avisado_em IS NULL
+               AND (
+                   NOT EXISTS (
+                       SELECT 1
+                       FROM frequencia_curso fc
+                       WHERE fc.coleta_id = :coleta_id
+                         AND fc.aluno_id = alarme_emails.aluno_id
+                         AND fc.curso_id = alarme_emails.curso_id
+                   )
+                   OR EXISTS (
+                       SELECT 1
+                       FROM alunos_trancados at
+                       WHERE at.coleta_id = :coleta_id2
+                         AND at.aluno_id = alarme_emails.aluno_id
+                         AND at.curso_id = alarme_emails.curso_id
+                   )
+               )'
+        );
+        $statement->execute([
+            'coleta_id' => (int)$coleta['id'],
+            'coleta_id2' => (int)$coleta['id'],
+        ]);
+
+        return $statement->rowCount();
     }
 
     /**

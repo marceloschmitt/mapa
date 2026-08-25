@@ -288,3 +288,30 @@ CREATE TABLE IF NOT EXISTS staff_alarme_emails (
 
 CREATE INDEX IF NOT EXISTS idx_staff_alarme_emails_destinatario_enviado
     ON staff_alarme_emails(destinatario, enviado_em);
+
+-- Alunos com status TRANCADO / TRANC. AUTOMATICO na segunda consulta (fora de alarmes).
+CREATE TABLE IF NOT EXISTS alunos_trancados (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    coleta_id INTEGER NOT NULL,
+    aluno_id INTEGER NOT NULL,
+    curso_id INTEGER NOT NULL,
+    login TEXT NOT NULL,
+    matricula TEXT NOT NULL DEFAULT '',
+    nome TEXT NOT NULL DEFAULT '',
+    nome_social TEXT,
+    email TEXT,
+    nome_curso TEXT NOT NULL DEFAULT '',
+    status_discente TEXT NOT NULL,
+    ano_semestre_ingresso TEXT,
+    turma_entrada TEXT,
+    FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE CASCADE,
+    FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
+    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
+    UNIQUE (coleta_id, aluno_id, curso_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_alunos_trancados_coleta
+    ON alunos_trancados(coleta_id);
+
+CREATE INDEX IF NOT EXISTS idx_alunos_trancados_curso
+    ON alunos_trancados(curso_id);

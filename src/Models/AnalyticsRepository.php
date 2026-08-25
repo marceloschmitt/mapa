@@ -1501,4 +1501,65 @@ class AnalyticsRepository
 
         return $statement->fetchAll();
     }
+
+    /**
+     * Alunos com status TRANCADO / TRANC. AUTOMATICO na coleta.
+     *
+     * @param list<int>|null $cursoIds
+     * @param list<string>|null $codigosDisciplina cursos em que o professor leciona
+     * @return list<array<string, mixed>>
+     */
+    public function alunosTrancados(
+        int $coletaId,
+        ?array $cursoIds = null,
+        ?array $codigosDisciplina = null
+    ): array {
+        $sql = 'SELECT t.id, t.login, t.matricula, t.nome, t.nome_social, t.email,
+                       t.nome_curso, t.status_discente,
+                       t.ano_semestre_ingresso, t.turma_entrada,
+                       t.aluno_id, t.curso_id
+                FROM alunos_trancados t
+                WHERE t.coleta_id = :coleta_id';
+        $params = [];
+
+        if ($cursoIds !== null) {
+            if ($cursoIds === []) {
+                return [];
+            }
+            $placeholders = [];
+            foreach (array_values($cursoIds) as $i => $id) {
+                $key = 'curso_' . $i;
+                $placeholders[] = ':' . $key;
+                $params[$key] = (int)$id;
+            }
+            $sql .= ' AND t.curso_id IN (' . implode(', ', $placeholders) . ')';
+        }
+
+        if ($codigosDisciplina !== null) {
+            if ($codigosDisciplina === []) {
+                return [];
+            }
+            $placeholders = [];
+            foreach (array_values($codigosDisciplina) as $i => $codigo) {
+                $key = 'disc_' . $i;
+                $placeholders[] = ':' . $key;
+                $params[$key] = (string)$codigo;
+            }
+            $sql .= ' AND EXISTS (
+                        SELECT 1
+                        FROM disciplina_grade dg
+                        WHERE dg.curso_id = t.curso_id
+                          AND dg.codigo_disciplina IN (' . implode(', ', $placeholders) . ')
+                      )';
+        }
+
+        $sql .= ' ORDER BY t.nome_curso ASC, t.nome ASC, t.matricula ASC';
+
+        $statement = $this->db->prepare($sql);
+        $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $this->bindNamedParams($statement, $params);
+        $statement->execute();
+
+        return $statement->fetchAll();
+    }
 }
