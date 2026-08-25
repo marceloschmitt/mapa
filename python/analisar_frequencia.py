@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -25,7 +26,60 @@ ARQUIVO_ENTRADA = JSON_RESPOSTA_ALUNOS
 ARQUIVO_SAIDA_JSON = JSON_TABELA_FREQUENCIA
 ARQUIVO_TRANCADOS_JSON = JSON_ALUNOS_TRANCADOS
 
-LIMITE_PREVIEW = 20
+
+def parsear_data_br(texto: str) -> date | None:
+    """Converte DD/MM/AAAA ou DD-MM-AAAA em date."""
+    valor = str(texto or "").strip()
+    if valor == "":
+        return None
+    for fmt in ("%d/%m/%Y", "%d-%m-%Y", "%Y-%m-%d"):
+        try:
+            return datetime.strptime(valor, fmt).date()
+        except ValueError:
+            continue
+    return None
+
+
+def fim_matricula_atrasada(frequencias: dict[str, Any]) -> date | None:
+    """Ultimo dia do intervalo matricula_atrasada em ausencias_especiais, se houver."""
+    especiais = frequencias.get("ausencias_especiais")
+    if not isinstance(especiais, dict):
+        return None
+    atrasada = especiais.get("matricula_atrasada")
+    if not isinstance(atrasada, list) or not atrasada:
+        return None
+
+    fim: date | None = None
+    for item in atrasada:
+        textos: list[str] = []
+        if isinstance(item, str):
+            textos = [item]
+        elif isinstance(item, list):
+            textos = [str(x) for x in item if x]
+        else:
+            continue
+        for texto in textos:
+            # Ex.: "03/08/2026 a 23/08/2026"
+            partes = [p.strip() for p in str(texto).replace(" até ", " a ").split(" a ")]
+            if len(partes) >= 2:
+                candidato = parsear_data_br(partes[-1])
+            else:
+                candidato = parsear_data_br(partes[0]) if partes else None
+            if candidato is not None and (fim is None or candidato > fim):
+                fim = candidato
+    return fim
+
+
+def data_inicio_contagem_aluno(frequencias: dict[str, Any]) -> str | None:
+    """Dia a partir do qual as aulas passam a contar para o aluno (AAAA-MM-DD).
+
+    Matricula atrasada: dia seguinte ao fim do intervalo da API.
+    Aluno normal: None (usa o primeiro dia de aula da disciplina na grade).
+    """
+    fim_atraso = fim_matricula_atrasada(frequencias)
+    if fim_atraso is not None:
+        return (fim_atraso + timedelta(days=1)).isoformat()
+    return None
 
 
 def carregar_alunos(caminho: Path) -> list[dict[str, Any]]:
@@ -220,6 +274,7 @@ def extrair_registros_aluno(
                 **base,
                 "frequencia_geral": frequencia_geral,
                 "disciplinas": disciplinas,
+                "data_inicio_aulas": data_inicio_contagem_aluno(frequencias),
             })
 
     return registros, trancados
@@ -262,75 +317,6 @@ def salvar_json(resultado: list[dict[str, Any]], caminho: Path) -> None:
         json.dumps(resultado, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
-
-
-def formatar_preview(resultado: list[dict[str, Any]], limite: int = LIMITE_PREVIEW) -> str:
-    """Formata as primeiras linhas para exibicao no terminal.
-
-    Args:
-        resultado: Registros de frequencia por aluno.
-        limite: Quantidade maxima de disciplinas a exibir.
-
-    Returns:
-        Texto tabular com cabecalho e linhas alinhadas.
-    """
-    linhas_disciplina: list[dict[str, Any]] = []
-    for registro in resultado:
-        for disciplina in registro.get("disciplinas", []):
-            linhas_disciplina.append({
-                "nome": registro["nome"],
-                "email": registro.get("email") or "",
-                **disciplina,
-            })
-
-    if linhas_disciplina == []:
-        return "Nenhuma disciplina encontrada."
-
-    larguras = {
-        "nome": 24,
-        "email": 28,
-        "disciplina": 24,
-        "horarios": 8,
-        "ausencias": 9,
-        "presencas": 9,
-        "dias_falta": 20,
-    }
-
-    cabecalho = (
-        f"{'Nome':<{larguras['nome']}} "
-        f"{'Email':<{larguras['email']}} "
-        f"{'Disciplina':<{larguras['disciplina']}} "
-        f"{'Horarios':>{larguras['horarios']}} "
-        f"{'Ausencias':>{larguras['ausencias']}} "
-        f"{'Presencas':>{larguras['presencas']}} "
-        f"{'Dias falta':<{larguras['dias_falta']}}"
-    )
-    separador = "-" * len(cabecalho)
-    linhas = [cabecalho, separador]
-
-    for linha in linhas_disciplina[:limite]:
-        nome = str(linha["nome"])[: larguras["nome"]]
-        email = str(linha.get("email", ""))[: larguras["email"]]
-        disciplina = str(linha["disciplina"])[: larguras["disciplina"]]
-        dias_lista = linha.get("dias_falta", []) or []
-        dias = "; ".join(str(d) for d in dias_lista)[: larguras["dias_falta"]]
-        horarios = linha.get("horarios")
-        ausencias = linha.get("ausencias")
-        presencas = linha.get("presencas")
-        linhas.append(
-            f"{nome:<{larguras['nome']}} "
-            f"{email:<{larguras['email']}} "
-            f"{disciplina:<{larguras['disciplina']}} "
-            f"{'' if horarios is None else horarios:>{larguras['horarios']}} "
-            f"{'' if ausencias is None else ausencias:>{larguras['ausencias']}} "
-            f"{'' if presencas is None else presencas:>{larguras['presencas']}} "
-            f"{dias:<{larguras['dias_falta']}}"
-        )
-
-    if len(linhas_disciplina) > limite:
-        linhas.append(f"... e mais {len(linhas_disciplina) - limite} linha(s).")
-
-    return "\n".join(linhas)
 
 
 def resumir(
@@ -390,9 +376,6 @@ def main() -> int:
 
     print("Analise de frequencia por aluno")
     print(resumir(alunos, resultado, trancados))
-    print()
-    print(formatar_preview(resultado))
-    print()
     print(f"JSON salvo em: {ARQUIVO_SAIDA_JSON}")
     print(f"Trancados salvos em: {ARQUIVO_TRANCADOS_JSON}")
 

@@ -46,6 +46,32 @@
             </div>
         </a>
     </div>
+    <div class="col-md-4">
+        <a href="<?= htmlspecialchars(url('/trancados'), ENT_QUOTES, 'UTF-8') ?>" class="text-decoration-none">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h2 class="h5">Alunos trancados</h2>
+                    <p class="text-secondary mb-0 small">
+                        Alunos com status TRANCADO ou TRANC. AUTOMÁTICO na coleta —
+                        fora de alarmes e e-mails automáticos.
+                    </p>
+                </div>
+            </div>
+        </a>
+    </div>
+    <div class="col-md-4">
+        <a href="<?= htmlspecialchars(url('/perda-vaga'), ENT_QUOTES, 'UTF-8') ?>" class="text-decoration-none">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h2 class="h5">Perda de vaga</h2>
+                    <p class="text-secondary mb-0 small">
+                        Candidatos que reprovaram em todas as disciplinas nos dois
+                        semestres anteriores ao período atual.
+                    </p>
+                </div>
+            </div>
+        </a>
+    </div>
     <?php if (!empty($podeVerChamadas)): ?>
         <div class="col-md-4">
             <a href="<?= htmlspecialchars(url('/chamadas'), ENT_QUOTES, 'UTF-8') ?>" class="text-decoration-none">

@@ -66,4 +66,7 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 | `db.py` | Conexão SQLite (`DB_PATH`) e `schema.sql` |
 | `api_auth.py` | Token OAuth e URLs da API |
 | `config_consultas.py` | Lê `config/consultas.json` |
+| `status_aluno.py` | Regras ATIVO/FORMANDO/trancado |
 | `turno_turma.py` | Expande intervalos de aula (usado por `importar_grade.py`) |
+| `explorar_aprovacoes.py` | Fora do pipeline: consulta um período e resume aprovações/reprovações |
+| `gerar_perda_vaga.py` | Manual: candidatos a perda de vaga (2 semestres anteriores) → BD |

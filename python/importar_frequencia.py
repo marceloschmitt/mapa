@@ -149,17 +149,20 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
         geral = registro.get("frequencia_geral")
         if isinstance(geral, dict):
             percentual_curso = geral.get("percentual_frequencia_total")
+            data_inicio = str(registro.get("data_inicio_aulas") or "").strip() or None
             cursor.execute(
                 """
                 INSERT INTO frequencia_curso (
                     coleta_id, aluno_id, curso_id,
-                    horarios, ausencias, presencas, percentual_frequencia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?)
+                    horarios, ausencias, presencas, percentual_frequencia,
+                    data_inicio_aulas
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(coleta_id, aluno_id, curso_id) DO UPDATE SET
                     horarios = excluded.horarios,
                     ausencias = excluded.ausencias,
                     presencas = excluded.presencas,
-                    percentual_frequencia = excluded.percentual_frequencia
+                    percentual_frequencia = excluded.percentual_frequencia,
+                    data_inicio_aulas = excluded.data_inicio_aulas
                 """,
                 (
                     coleta_id,
@@ -169,8 +172,23 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
                     int(geral.get("ausencias_totais") or 0),
                     int(geral.get("presencas_totais") or 0),
                     float(percentual_curso) if percentual_curso is not None else None,
+                    data_inicio,
                 ),
             )
+        else:
+            # Garante data_inicio mesmo sem agregacao geral (raro).
+            data_inicio = str(registro.get("data_inicio_aulas") or "").strip() or None
+            if data_inicio:
+                cursor.execute(
+                    """
+                    INSERT INTO frequencia_curso (
+                        coleta_id, aluno_id, curso_id, data_inicio_aulas
+                    ) VALUES (?, ?, ?, ?)
+                    ON CONFLICT(coleta_id, aluno_id, curso_id) DO UPDATE SET
+                        data_inicio_aulas = excluded.data_inicio_aulas
+                    """,
+                    (coleta_id, aluno_id, curso_id, data_inicio),
+                )
 
         for disciplina in registro.get("disciplinas", []):
             if not isinstance(disciplina, dict):

@@ -2,7 +2,9 @@
 """Gera alarmes de risco de evasao a partir do SQLite.
 
 Regras:
-  - percentual_baixo: frequencia < 75% na disciplina
+  - percentual_baixo: frequencia < 75% na disciplina, so apos 3 semanas
+    do primeiro dia de aula da disciplina (ou do primeiro dia apos
+    matricula atrasada), e com horarios > 0
   - faltas_4dias: 3+ dias uteis consecutivos de falta, com a sequencia
     tocando a janela dos ultimos 4 dias uteis (segunda a sexta;
     sabado/domingo nao contam e nao quebram a sequencia — ex.:
@@ -315,24 +317,47 @@ def inserir_alarme(
     )
 
 
-def gerar_percentual_baixo(cursor: Any, coleta_id: int) -> int:
+def gerar_percentual_baixo(cursor: Any, coleta_id: int, referencia: date) -> int:
     """Gera alarmes de frequencia abaixo de 75%.
+
+    So conta apos 3 semanas do inicio efetivo da disciplina para o aluno:
+    - primeiro dia de aula da disciplina na grade; ou
+    - se houver matricula atrasada, o primeiro dia de aula a partir do
+      dia seguinte ao fim do intervalo de atraso.
 
     Args:
         cursor: Cursor SQLite.
         coleta_id: Coleta.
+        referencia: Data de referencia dos alarmes.
 
     Returns:
         Quantidade de alarmes gerados.
     """
     cursor.execute(
         """
-        SELECT aluno_id, curso_id, codigo_disciplina, disciplina,
-               percentual_frequencia, ausencias, horarios
-        FROM frequencia_disciplina
-        WHERE coleta_id = ?
-          AND percentual_frequencia IS NOT NULL
-          AND percentual_frequencia < ?
+        SELECT fd.aluno_id, fd.curso_id, fd.codigo_disciplina, fd.disciplina,
+               fd.percentual_frequencia, fd.ausencias, fd.horarios,
+               fc.data_inicio_aulas,
+               (
+                   SELECT MIN(da.data_aula)
+                   FROM disciplina_aulas da
+                   WHERE da.codigo_disciplina = fd.codigo_disciplina
+                     AND da.curso_id = fd.curso_id
+                     AND (
+                         fc.data_inicio_aulas IS NULL
+                         OR TRIM(fc.data_inicio_aulas) = ''
+                         OR da.data_aula >= fc.data_inicio_aulas
+                     )
+               ) AS primeira_aula
+        FROM frequencia_disciplina fd
+        LEFT JOIN frequencia_curso fc
+          ON fc.coleta_id = fd.coleta_id
+         AND fc.aluno_id = fd.aluno_id
+         AND fc.curso_id = fd.curso_id
+        WHERE fd.coleta_id = ?
+          AND fd.percentual_frequencia IS NOT NULL
+          AND fd.percentual_frequencia < ?
+          AND fd.horarios > 0
         """,
         (coleta_id, LIMITE_PERCENTUAL),
     )
@@ -340,6 +365,17 @@ def gerar_percentual_baixo(cursor: Any, coleta_id: int) -> int:
     total = 0
 
     for row in rows:
+        primeira_txt = row["primeira_aula"]
+        if not primeira_txt:
+            continue
+        try:
+            primeira = date.fromisoformat(str(primeira_txt)[:10])
+        except ValueError:
+            continue
+
+        if referencia < primeira + timedelta(weeks=3):
+            continue
+
         percentual = float(row["percentual_frequencia"])
         severidade = "critico" if percentual < 50 else "alto"
         inserir_alarme(
@@ -356,6 +392,8 @@ def gerar_percentual_baixo(cursor: Any, coleta_id: int) -> int:
                 "percentual_frequencia": percentual,
                 "ausencias": int(row["ausencias"]),
                 "horarios": int(row["horarios"]),
+                "primeira_aula": str(primeira_txt),
+                "data_inicio_aluno": row["data_inicio_aulas"],
             },
         )
         total += 1
@@ -606,7 +644,7 @@ def gerar(coleta_id: int | None = None) -> dict[str, int]:
 
     limpar_alarmes_coleta(cursor, coleta_id)
     n_tratados = trazer_alarmes_tratados(cursor, coleta_id)
-    n_percentual = gerar_percentual_baixo(cursor, coleta_id)
+    n_percentual = gerar_percentual_baixo(cursor, coleta_id, referencia)
     n_4dias = gerar_faltas_4dias(cursor, coleta_id, referencia)
     n_3semanas = gerar_faltas_3semanas(cursor, coleta_id, referencia)
     n_staff_cancelados = cancelar_avisos_staff_alunos_ausentes(cursor, coleta_id)

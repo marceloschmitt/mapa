@@ -143,6 +143,7 @@ def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
     # Coluna legada: mantida se existir; novas instalações não a criam.
     _ensure_column(conn, "disciplina_grade", "datas_aula", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "cursos", "curso_nivel", "TEXT")
+    _ensure_column(conn, "frequencia_curso", "data_inicio_aulas", "TEXT")
     _migrar_datas_aula_csv(conn)
     conn.commit()
 

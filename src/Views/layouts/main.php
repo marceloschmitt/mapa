@@ -80,6 +80,9 @@ $authLocal = ($usuario['auth_type'] ?? 'local') === 'local';
                 <li class="nav-item">
                     <a class="nav-link" href="<?= htmlspecialchars(url('/trancados'), ENT_QUOTES, 'UTF-8') ?>">Trancados</a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="<?= htmlspecialchars(url('/perda-vaga'), ENT_QUOTES, 'UTF-8') ?>">Perda de vaga</a>
+                </li>
                 <?php if (!empty($podeVerChamadas)): ?>
                     <li class="nav-item">
                         <a class="nav-link" href="<?= htmlspecialchars(url('/chamadas'), ENT_QUOTES, 'UTF-8') ?>">Chamadas</a>

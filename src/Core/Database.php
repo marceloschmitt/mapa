@@ -88,6 +88,7 @@ class Database
         self::ensureColumn('disciplina_grade', 'datas_aula', "TEXT NOT NULL DEFAULT ''");
         self::ensureColumn('cursos', 'curso_nivel', 'TEXT');
         self::ensureColumn('professores', 'email', 'TEXT');
+        self::ensureColumn('frequencia_curso', 'data_inicio_aulas', 'TEXT');
         self::migrarDatasAulaCsvParaTabela();
         self::seedAdminIfEmpty();
         self::migrateLdapConfigFromEnv();

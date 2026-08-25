@@ -379,17 +379,18 @@ def main() -> int:
 
     with ThreadPoolExecutor(max_workers=CONCORRENCIA) as executor:
         futuros = {executor.submit(consultar_aluno, aluno): aluno for aluno in alunos}
-        for concluido, futuro in enumerate(as_completed(futuros), start=1):
+        for futuro in as_completed(futuros):
             resultado = futuro.result()
             resultados.append(resultado)
             if resultado.get("status") == 200:
                 sucessos += 1
             else:
                 falhas += 1
-            print(
-                f"  {concluido}/{total} - login {resultado['login']} -> "
-                f"{descrever_resultado(resultado)}"
-            )
+                print(
+                    f"  ERRO login {resultado.get('login')} -> "
+                    f"{descrever_resultado(resultado)}",
+                    flush=True,
+                )
 
     erros = [item for item in resultados if item.get("status") != 200]
     garantir_diretorios()

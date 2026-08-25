@@ -1562,4 +1562,117 @@ class AnalyticsRepository
 
         return $statement->fetchAll();
     }
+
+    /**
+     * Ultima execucao do script de perda de vaga (manual).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function ultimaExecucaoPerdaVaga(): ?array
+    {
+        $statement = $this->db->query(
+            'SELECT id, periodo_atual, semestre_a, semestre_b,
+                    total_candidatos, executado_em
+             FROM perda_vaga_execucoes
+             ORDER BY id DESC
+             LIMIT 1'
+        );
+        $row = $statement->fetch();
+
+        return $row === false ? null : $row;
+    }
+
+    /**
+     * Candidatos da execucao, com filtro de curso/disciplinas do perfil.
+     *
+     * @param list<int>|null $cursoIds
+     * @param list<string>|null $codigosDisciplina
+     * @return list<array<string, mixed>>
+     */
+    public function candidatosPerdaVaga(
+        int $execucaoId,
+        ?array $cursoIds = null,
+        ?array $codigosDisciplina = null
+    ): array {
+        $sql = 'SELECT c.id, c.login, c.matricula, c.nome, c.nome_social, c.email,
+                       c.nome_curso, c.aluno_id, c.curso_id
+                FROM perda_vaga_candidatos c
+                WHERE c.execucao_id = :execucao_id';
+        $params = [];
+
+        if ($cursoIds !== null) {
+            if ($cursoIds === []) {
+                return [];
+            }
+            $placeholders = [];
+            foreach (array_values($cursoIds) as $i => $id) {
+                $key = 'curso_' . $i;
+                $placeholders[] = ':' . $key;
+                $params[$key] = (int)$id;
+            }
+            $sql .= ' AND c.curso_id IN (' . implode(', ', $placeholders) . ')';
+        }
+
+        if ($codigosDisciplina !== null) {
+            if ($codigosDisciplina === []) {
+                return [];
+            }
+            $placeholders = [];
+            foreach (array_values($codigosDisciplina) as $i => $codigo) {
+                $key = 'cod_' . $i;
+                $placeholders[] = ':' . $key;
+                $params[$key] = (string)$codigo;
+            }
+            $sql .= ' AND EXISTS (
+                        SELECT 1
+                        FROM disciplina_grade dg
+                        WHERE dg.curso_id = c.curso_id
+                          AND dg.codigo_disciplina IN (' . implode(', ', $placeholders) . ')
+                      )';
+        }
+
+        $sql .= ' ORDER BY c.nome_curso ASC,
+                          COALESCE(NULLIF(TRIM(c.nome_social), \'\'), c.nome) ASC,
+                          c.matricula ASC';
+
+        $statement = $this->db->prepare($sql);
+        $statement->bindValue('execucao_id', $execucaoId, PDO::PARAM_INT);
+        $this->bindNamedParams($statement, $params);
+        $statement->execute();
+
+        return $statement->fetchAll();
+    }
+
+    /**
+     * Reprovacoes (disciplinas) dos candidatos da execucao.
+     *
+     * @param list<int> $candidatoIds
+     * @return list<array<string, mixed>>
+     */
+    public function reprovacoesPerdaVaga(array $candidatoIds): array
+    {
+        if ($candidatoIds === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach (array_values($candidatoIds) as $i => $id) {
+            $key = 'c_' . $i;
+            $placeholders[] = ':' . $key;
+            $params[$key] = (int)$id;
+        }
+
+        $sql = 'SELECT r.candidato_id, r.semestre, r.disciplina, r.cod_disciplina,
+                       r.causa
+                FROM perda_vaga_reprovacoes r
+                WHERE r.candidato_id IN (' . implode(', ', $placeholders) . ')
+                ORDER BY r.semestre ASC, r.disciplina ASC';
+
+        $statement = $this->db->prepare($sql);
+        $this->bindNamedParams($statement, $params);
+        $statement->execute();
+
+        return $statement->fetchAll();
+    }
 }

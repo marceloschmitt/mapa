@@ -182,6 +182,8 @@ CREATE TABLE IF NOT EXISTS frequencia_curso (
     ausencias INTEGER NOT NULL DEFAULT 0,
     presencas INTEGER NOT NULL DEFAULT 0,
     percentual_frequencia REAL,
+    -- Dia a partir do qual aulas contam (matricula atrasada: dia seguinte ao fim; senao NULL).
+    data_inicio_aulas TEXT,
     FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE CASCADE,
     FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
@@ -315,3 +317,50 @@ CREATE INDEX IF NOT EXISTS idx_alunos_trancados_coleta
 
 CREATE INDEX IF NOT EXISTS idx_alunos_trancados_curso
     ON alunos_trancados(curso_id);
+
+-- Candidatos a perda de vaga (reprovacao em todas as disciplinas nos 2 semestres anteriores).
+CREATE TABLE IF NOT EXISTS perda_vaga_execucoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    periodo_atual TEXT NOT NULL,
+    semestre_a TEXT NOT NULL,
+    semestre_b TEXT NOT NULL,
+    total_candidatos INTEGER NOT NULL DEFAULT 0,
+    executado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE TABLE IF NOT EXISTS perda_vaga_candidatos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    execucao_id INTEGER NOT NULL,
+    aluno_id INTEGER,
+    curso_id INTEGER,
+    login TEXT NOT NULL,
+    matricula TEXT NOT NULL DEFAULT '',
+    nome TEXT NOT NULL DEFAULT '',
+    nome_social TEXT,
+    email TEXT,
+    nome_curso TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (execucao_id) REFERENCES perda_vaga_execucoes(id) ON DELETE CASCADE,
+    FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE SET NULL,
+    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_perda_vaga_candidatos_execucao
+    ON perda_vaga_candidatos(execucao_id);
+
+CREATE INDEX IF NOT EXISTS idx_perda_vaga_candidatos_curso
+    ON perda_vaga_candidatos(curso_id);
+
+CREATE TABLE IF NOT EXISTS perda_vaga_reprovacoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    candidato_id INTEGER NOT NULL,
+    semestre TEXT NOT NULL,
+    disciplina TEXT NOT NULL DEFAULT '',
+    cod_disciplina TEXT NOT NULL DEFAULT '',
+    id_disciplina INTEGER,
+    causa TEXT NOT NULL DEFAULT '',
+    FOREIGN KEY (candidato_id) REFERENCES perda_vaga_candidatos(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_perda_vaga_reprovacoes_candidato
+    ON perda_vaga_reprovacoes(candidato_id);
+

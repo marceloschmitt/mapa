@@ -112,8 +112,16 @@ def ssl_context(config: dict[str, str] | None = None):
     return ssl._create_unverified_context()
 
 
-def url_matriculados(config: dict[str, str] | None = None) -> str:
-    """URL de matriculados com periodo_letivo do banco aplicado na execucao."""
+def url_matriculados(
+    config: dict[str, str] | None = None,
+    periodo: str | None = None,
+) -> str:
+    """URL de matriculados com periodo_letivo aplicado na execucao.
+
+    Args:
+        config: Config da API (banco). Se None, le do SQLite.
+        periodo: Se informado, usa este periodo em vez de api_periodo_letivo.
+    """
     import re
 
     config = config if config is not None else carregar_config_api()
@@ -130,12 +138,12 @@ def url_matriculados(config: dict[str, str] | None = None) -> str:
     url = re.sub(r"&&+", "&", url)
     url = re.sub(r"[?&]$", "", url)
 
-    periodo = (config.get("api_periodo_letivo") or "").strip()
-    if not periodo:
+    periodo_final = (periodo if periodo is not None else config.get("api_periodo_letivo") or "").strip()
+    if not periodo_final:
         return url
 
     sep = "&" if "?" in url else "?"
-    return f"{url}{sep}periodo_letivo={periodo}"
+    return f"{url}{sep}periodo_letivo={periodo_final}"
 
 
 def url_alunos(config: dict[str, str] | None = None) -> str:
