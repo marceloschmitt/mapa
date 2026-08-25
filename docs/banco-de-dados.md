@@ -384,7 +384,7 @@ Não há FK direta de `faltas_dia` / `alarmes` para `frequencia_disciplina`: o v
 |------|----------|---------------|
 | `percentual_baixo` | Frequência &lt; 75% na disciplina | Por disciplina |
 | `faltas_4dias` | 3 ou mais dias úteis de falta nos últimos 4 dias úteis | Por aluno/curso (agregado) |
-| `faltas_3semanas` | Falta em 3 semanas consecutivas; última falta na janela (referência até 7 dias antes) | Por disciplina |
+| `faltas_3semanas` | Falta em 3 semanas consecutivas; última falta na janela (referência até 7 dias antes); severidade `critico` | Por disciplina |
 
 Gerados por `python/gerar_alarmes.py` com a `data_referencia` de `config/consultas.json`.
 

@@ -530,7 +530,7 @@ def gerar_faltas_3semanas(cursor: Any, coleta_id: int, referencia: date) -> int:
             codigo_disciplina=codigo,
             disciplina=nomes.get(chave, codigo),
             tipo="faltas_3semanas",
-            severidade="alto",
+            severidade="critico",
             mensagem="Faltas em 3 semanas consecutivas na disciplina",
             detalhe={"semanas": semanas_rotulo},
         )
