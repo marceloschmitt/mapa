@@ -35,6 +35,11 @@ from paths import (
     JSON_RESPOSTA_MATRICULAS,
     garantir_diretorios,
 )
+from status_aluno import (
+    status_eh_controle,
+    status_eh_trancado,
+    status_vai_segunda_consulta,
+)
 
 # Arquivos em data/json/
 ARQUIVO_ENTRADA = JSON_RESPOSTA_MATRICULAS
@@ -113,8 +118,11 @@ def montar_url_alunos(login: str) -> str:
     ).format(login=login)
 
 
-def carregar_logins(caminho: Path) -> list[dict[str, Any]]:
-    """Le o arquivo de matriculados e retorna a lista de alunos.
+def carregar_logins(caminho: Path) -> tuple[list[dict[str, Any]], dict[str, int]]:
+    """Le matriculados e seleciona quem vai à 2ª consulta.
+
+    Inclui ATIVO, FORMANDO e trancados da 1ª consulta (um login por pessoa).
+    Cancelados, concluídos etc. da 1ª não são consultados de novo.
 
     Aceita:
       - lista plana (extracao Nome/Login/Matricula/Email);
@@ -125,7 +133,7 @@ def carregar_logins(caminho: Path) -> list[dict[str, Any]]:
         caminho: Caminho do arquivo JSON gerado por consulta_inicial.py.
 
     Returns:
-        Lista de dicionarios normalizados com Login, Nome, Matricula, Email.
+        Tupla (lista normalizada Login/Nome/Matricula/Email, contagens).
 
     Raises:
         FileNotFoundError: Quando o arquivo de entrada nao existe.
@@ -141,11 +149,26 @@ def carregar_logins(caminho: Path) -> list[dict[str, Any]]:
     if not isinstance(dados, list):
         raise ValueError("Formato inesperado: esperava lista ou mapa de alunos.")
 
-    normalizados: list[dict[str, Any]] = []
+    por_login: dict[str, dict[str, Any]] = {}
+    total_entrada = 0
+    elegiveis = 0
+    ignorados = 0
+
     for aluno in dados:
         if not isinstance(aluno, dict):
             continue
+        total_entrada += 1
+        status = str(aluno.get("status") or aluno.get("Status") or "").strip()
+        if not status_vai_segunda_consulta(status):
+            ignorados += 1
+            continue
+
         login = str(aluno.get("Login") or aluno.get("login") or "").strip()
+        if login == "":
+            ignorados += 1
+            continue
+
+        elegiveis += 1
         nome = (
             aluno.get("Nome")
             or aluno.get("nome_completo")
@@ -154,16 +177,28 @@ def carregar_logins(caminho: Path) -> list[dict[str, Any]]:
         )
         matricula = aluno.get("Matricula") or aluno.get("matricula") or ""
         email = aluno.get("Email") or aluno.get("email") or ""
-        normalizados.append(
-            {
-                "Login": login,
-                "Nome": nome,
-                "Matricula": matricula,
-                "Email": email,
-            }
-        )
+        novo = {
+            "Login": login,
+            "Nome": nome,
+            "Matricula": matricula,
+            "Email": email,
+            "Status": status,
+        }
+        atual = por_login.get(login)
+        # Preferir vínculo de controle se o mesmo login também vier trancado.
+        if atual is None or (
+            status_eh_controle(status)
+            and status_eh_trancado(str(atual.get("Status") or ""))
+        ):
+            por_login[login] = novo
 
-    return normalizados
+    contagens = {
+        "entrada": total_entrada,
+        "elegiveis": elegiveis,
+        "ignorados": ignorados,
+        "consultas": len(por_login),
+    }
+    return list(por_login.values()), contagens
 
 
 def eh_erro_http_temporario(status: int) -> bool:
@@ -312,7 +347,7 @@ def main() -> int:
         return 1
 
     try:
-        alunos = carregar_logins(ARQUIVO_ENTRADA)
+        alunos, contagens = carregar_logins(ARQUIVO_ENTRADA)
     except FileNotFoundError:
         print(f"Erro: arquivo nao encontrado: {ARQUIVO_ENTRADA}", file=sys.stderr)
         print("Rode antes: python3 consulta_inicial.py", file=sys.stderr)
@@ -320,6 +355,14 @@ def main() -> int:
     except (ValueError, json.JSONDecodeError) as error:
         print(f"Erro ao ler entrada: {error}", file=sys.stderr)
         return 1
+
+    print(
+        "Filtro 1ª→2ª consulta (ATIVO, FORMANDO, trancados): "
+        f"{contagens['entrada']} na 1ª, "
+        f"{contagens['elegiveis']} elegíveis, "
+        f"{contagens['ignorados']} ignorados, "
+        f"{contagens['consultas']} login(s) únicos."
+    )
 
     if LIMITE_CONSULTAS is not None:
         alunos = alunos[:LIMITE_CONSULTAS]

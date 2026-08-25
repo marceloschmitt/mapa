@@ -154,6 +154,7 @@ if ($dataFinal === '') {
                 <div class="form-text">
                     O período letivo do campo acima substitui <code>periodo_letivo</code> ao salvar.
                     Sem <code>tipo=extracao</code> a API devolve disciplinas e docentes (necessário para professores).
+                    Não filtre só <code>status=1</code>: o MAPA usa ATIVO e FORMANDO no controle e inclui trancados na 2ª consulta.
                 </div>
             </div>
 

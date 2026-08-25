@@ -1,12 +1,9 @@
 #!/usr/bin/env python3
 """Analisa resposta_alunos.json e gera tabela de frequencia por aluno.
 
-Le o arquivo gerado por consulta_alunos.py, extrai os dados gerais de
-frequencia e o detalhamento por disciplina (horarios, ausencias, presencas
-e dias de falta), e salva em tabela_frequencia.json.
-
-Uso:
-    python3 analisar_frequencia.py
+Le o arquivo gerado por consulta_alunos.py. Frequencia/controle: apenas cursos
+ATIVO ou FORMANDO. Trancamento: TRANCADO / TRANC. AUTOMATICO em status_discente
+(2ª consulta). Demais status sao ignorados.
 """
 
 from __future__ import annotations
@@ -22,40 +19,13 @@ from paths import (
     JSON_TABELA_FREQUENCIA,
     garantir_diretorios,
 )
+from status_aluno import status_eh_controle, status_eh_trancado
 
 ARQUIVO_ENTRADA = JSON_RESPOSTA_ALUNOS
 ARQUIVO_SAIDA_JSON = JSON_TABELA_FREQUENCIA
 ARQUIVO_TRANCADOS_JSON = JSON_ALUNOS_TRANCADOS
 
 LIMITE_PREVIEW = 20
-
-# Status que nao entram em frequencia/alarmes/e-mails (provavel trancamento).
-STATUS_TRANCADOS = frozenset({
-    "TRANC. AUTOMÁTICO",
-    "TRANC. AUTOMATICO",
-    "TRANCADO",
-})
-
-
-def status_eh_trancado(status: str) -> bool:
-    """Indica se o status_discente e de trancamento."""
-    normalizado = " ".join(str(status or "").strip().upper().split())
-    if normalizado in STATUS_TRANCADOS:
-        return True
-    # Aceita variantes com acentuacao diferente.
-    sem_acento = (
-        normalizado.replace("Á", "A")
-        .replace("À", "A")
-        .replace("Ã", "A")
-        .replace("É", "E")
-        .replace("Í", "I")
-        .replace("Ó", "O")
-        .replace("Ú", "U")
-    )
-    return sem_acento in {
-        "TRANC. AUTOMATICO",
-        "TRANCADO",
-    }
 
 
 def carregar_alunos(caminho: Path) -> list[dict[str, Any]]:
@@ -210,11 +180,14 @@ def extrair_registros_aluno(
                 continue
 
             status_discente = str(curso.get("status_discente") or "").strip()
+            matricula_curso = curso.get("matricula")
+            if matricula_curso in (None, ""):
+                matricula_curso = matricula
             base = {
                 "nome": nome_civil or nome or login,
                 "nome_social": nome_social,
                 "login": login,
-                "matricula": matricula,
+                "matricula": matricula_curso,
                 "email": email,
                 "nome_curso": curso.get("nome_curso"),
                 "ano_semestre_ingresso": str(
@@ -224,8 +197,13 @@ def extrair_registros_aluno(
                 "status_discente": status_discente,
             }
 
+            # Trancamento confirmado na 2ª consulta (status_discente).
             if status_eh_trancado(status_discente):
                 trancados.append(base)
+                continue
+
+            # Controle: apenas ATIVO e FORMANDO.
+            if not status_eh_controle(status_discente):
                 continue
 
             frequencias = curso.get("frequencias", {})
@@ -378,7 +356,7 @@ def resumir(
     return (
         f"Alunos no arquivo: {len(alunos)}\n"
         f"Alunos com consulta OK: {alunos_com_sucesso}\n"
-        f"Alunos com frequencia: {alunos_com_frequencia}\n"
+        f"Alunos com frequencia (ATIVO/FORMANDO): {alunos_com_frequencia}\n"
         f"Registros (aluno/curso): {len(resultado)}\n"
         f"Linhas de disciplina: {total_disciplinas}\n"
         f"Alunos trancados (excluidos): {alunos_trancados}\n"

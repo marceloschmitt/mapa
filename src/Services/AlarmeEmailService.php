@@ -698,7 +698,15 @@ class AlarmeEmailService
              INNER JOIN cursos c ON c.id = ae.curso_id
              WHERE ae.staff_avisado_em IS NULL'
             . $filtroPiloto
-            . ' ORDER BY ae.enviado_em ASC'
+            . ' AND NOT EXISTS (
+                    SELECT 1
+                    FROM alunos_trancados at
+                    INNER JOIN coletas col ON col.id = at.coleta_id
+                    WHERE at.aluno_id = ae.aluno_id
+                      AND at.curso_id = ae.curso_id
+                      AND col.id = (SELECT MAX(id) FROM coletas)
+                )
+             ORDER BY ae.enviado_em ASC'
         );
 
         $grupos = [];
@@ -1090,7 +1098,14 @@ class AlarmeEmailService
              FROM alarmes al
              WHERE al.coleta_id = :coleta_id
                AND al.severidade = \'critico\'
-               AND al.visualizado = 0'
+               AND al.visualizado = 0
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM alunos_trancados at
+                   WHERE at.coleta_id = al.coleta_id
+                     AND at.aluno_id = al.aluno_id
+                     AND at.curso_id = al.curso_id
+               )'
         );
         $statement->execute(['coleta_id' => $coletaId]);
 
@@ -1118,6 +1133,13 @@ class AlarmeEmailService
              INNER JOIN cursos c ON c.id = al.curso_id
              WHERE al.coleta_id = :coleta_id
                AND al.visualizado = 0
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM alunos_trancados at
+                   WHERE at.coleta_id = al.coleta_id
+                     AND at.aluno_id = al.aluno_id
+                     AND at.curso_id = al.curso_id
+               )
              ORDER BY al.aluno_id, al.curso_id,
                       CASE al.severidade WHEN \'critico\' THEN 0 ELSE 1 END,
                       al.disciplina, al.tipo'

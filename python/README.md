@@ -30,6 +30,11 @@ python3 python/executar_coleta.py
 API OAuth/SIGAA: tabela `configuracoes` (tela Configurações → API).  
 Datas de frequência/referência: `config/consultas.json`.
 
+**Status (regras da coleta):** a 1ª consulta pode trazer vários status (não só
+`ATIVO`). A 2ª consulta roda para **ATIVO**, **FORMANDO** e **trancados** da 1ª.
+Frequência/alarmes usam só **ATIVO** e **FORMANDO** (`status_discente` da 2ª).
+Trancamento é confirmado na 2ª (`TRANCADO` / `TRANC. AUTOMÁTICO`).
+
 ---
 
 ## Programas do pipeline
@@ -37,8 +42,8 @@ Datas de frequência/referência: `config/consultas.json`.
 | # | Programa | O que faz | Lê | Gera |
 |---|----------|-----------|----|------|
 | 1 | `consulta_inicial.py` | Lista matriculados na API SIGAA | BD (`configuracoes` API) | `data/json/resposta_matriculas.json` |
-| 2 | `consulta_alunos.py` | Frequência por aluno na API | `resposta_matriculas.json`, BD (API), `config/consultas.json` | `data/json/resposta_alunos.json` (+ `erros_alunos.json` se houver falha) |
-| 3 | `analisar_frequencia.py` | Normaliza frequência; separa trancados | `resposta_alunos.json` | `tabela_frequencia.json`, `alunos_trancados.json` |
+| 2 | `consulta_alunos.py` | Frequência por aluno (ATIVO/FORMANDO/trancados da 1ª) | `resposta_matriculas.json`, BD (API), `config/consultas.json` | `data/json/resposta_alunos.json` (+ `erros_alunos.json` se houver falha) |
+| 3 | `analisar_frequencia.py` | Frequência (ATIVO/FORMANDO); trancados pela 2ª | `resposta_alunos.json` | `tabela_frequencia.json`, `alunos_trancados.json` |
 | 4 | `importar_frequencia.py` | Nova coleta no SQLite (alunos, frequência, faltas) | `tabela_frequencia.json`, `config/consultas.json` | BD (`coletas`, `alunos`, `frequencia_disciplina`, `faltas_dia`, …) |
 | 5 | `importar_trancados.py` | Alunos TRANCADO / TRANC. AUTOMÁTICO | `alunos_trancados.json` | BD (`alunos_trancados`) |
 | 6 | `importar_professores.py` | Cursos, docentes e vínculos | `resposta_matriculas.json` | BD (`cursos`, `professores`, `disciplina_professores`) |
