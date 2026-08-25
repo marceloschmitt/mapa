@@ -70,6 +70,16 @@ class ApiConfigController extends Controller
             $this->redirect('/configuracoes/api');
         }
 
+        if (preg_match('/[?&]periodo_letivo=/i', $urlMatriculados)
+            || strpos($urlMatriculados, '{periodo_letivo}') !== false
+        ) {
+            Session::flash(
+                'erro',
+                'Remova periodo_letivo da URL de matriculados. Informe o período só no campo Período letivo.'
+            );
+            $this->redirect('/configuracoes/api');
+        }
+
         if ($dataInicial === '' || $dataFinal === '') {
             Session::flash('erro', 'Informe o intervalo de frequência (data inicial e final).');
             $this->redirect('/configuracoes/api');

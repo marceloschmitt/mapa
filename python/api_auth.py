@@ -113,7 +113,7 @@ def ssl_context(config: dict[str, str] | None = None):
 
 
 def url_matriculados(config: dict[str, str] | None = None) -> str:
-    """URL de matriculados com periodo_letivo aplicado."""
+    """URL de matriculados com periodo_letivo do banco aplicado na execucao."""
     import re
 
     config = config if config is not None else carregar_config_api()
@@ -123,20 +123,16 @@ def url_matriculados(config: dict[str, str] | None = None) -> str:
             "URL de matriculados ausente. Configure em /index.php/configuracoes/api"
         )
 
+    # URL base nao deve trazer periodo; remove se ainda estiver gravado.
+    url = url.replace("{periodo_letivo}", "")
+    url = re.sub(r"([?&])periodo_letivo=[^&]*", r"\1", url)
+    url = re.sub(r"\?&+", "?", url)
+    url = re.sub(r"&&+", "&", url)
+    url = re.sub(r"[?&]$", "", url)
+
     periodo = (config.get("api_periodo_letivo") or "").strip()
     if not periodo:
         return url
-
-    if "{periodo_letivo}" in url:
-        return url.replace("{periodo_letivo}", periodo)
-
-    if re.search(r"[?&]periodo_letivo=", url):
-        return re.sub(
-            r"([?&])periodo_letivo=[^&]*",
-            rf"\1periodo_letivo={periodo}",
-            url,
-            count=1,
-        )
 
     sep = "&" if "?" in url else "?"
     return f"{url}{sep}periodo_letivo={periodo}"

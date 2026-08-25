@@ -12,9 +12,6 @@ $dataFinal = (string)($config['frequencia_data_final'] ?? '');
 $dataReferencia = (string)($config['data_referencia'] ?? 'hoje-2');
 $temClientSecret = !empty($temClientSecret);
 
-if ($periodoLetivo === '' && preg_match('/periodo_letivo=([^&]+)/', $urlMatriculados, $m)) {
-    $periodoLetivo = rawurldecode($m[1]);
-}
 if ($dataInicial === '') {
     $dataInicial = '01-01-2026';
 }
@@ -108,7 +105,7 @@ if ($dataFinal === '') {
                        value="<?= htmlspecialchars($periodoLetivo, ENT_QUOTES, 'UTF-8') ?>"
                        placeholder="2026/2"
                        required>
-                <div class="form-text">Aplicado na URL de matriculados (<code>periodo_letivo</code>).</div>
+                <div class="form-text">Acrescentado à URL de matriculados na hora da coleta (<code>periodo_letivo</code>).</div>
             </div>
 
             <div class="col-md-4">
@@ -152,7 +149,7 @@ if ($dataFinal === '') {
                           rows="3"
                           required><?= htmlspecialchars($urlMatriculados, ENT_QUOTES, 'UTF-8') ?></textarea>
                 <div class="form-text">
-                    O período letivo do campo acima substitui <code>periodo_letivo</code> ao salvar.
+                    Não inclua <code>periodo_letivo</code> aqui — use o campo Período letivo acima; o sistema acrescenta na execução.
                     Sem <code>tipo=extracao</code> a API devolve disciplinas e docentes (necessário para professores).
                     Não filtre só <code>status=1</code>: o MAPA usa ATIVO e FORMANDO no controle e inclui trancados na 2ª consulta.
                 </div>

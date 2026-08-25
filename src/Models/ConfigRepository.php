@@ -146,18 +146,26 @@ class ConfigRepository
      */
     public function getApiConfig(): array
     {
+        $periodo = $this->get(self::API_PERIODO_LETIVO);
+        $urlMatriculados = $this->get(self::API_URL_MATRICULADOS);
+
+        // Exibe URL sem período; se o BD ainda tiver o parâmetro embutido, limpa na tela.
+        if ($periodo !== '') {
+            $urlMatriculados = $this->removerPeriodoDaUrl($urlMatriculados);
+        }
+
         return [
             'oauth_url' => $this->get(self::API_OAUTH_URL),
             'client_id' => $this->get(self::API_CLIENT_ID),
             'client_secret' => $this->get(self::API_CLIENT_SECRET),
-            'url_matriculados' => $this->get(self::API_URL_MATRICULADOS),
+            'url_matriculados' => $urlMatriculados,
             'url_alunos' => $this->get(self::API_URL_ALUNOS),
             'verify_ssl' => in_array(
                 strtolower($this->get(self::API_VERIFY_SSL, 'false')),
                 ['1', 'true', 'yes', 'on'],
                 true
             ),
-            'periodo_letivo' => $this->get(self::API_PERIODO_LETIVO),
+            'periodo_letivo' => $periodo,
             'frequencia_data_inicial' => $this->get(self::FREQUENCIA_DATA_INICIAL),
             'frequencia_data_final' => $this->get(self::FREQUENCIA_DATA_FINAL),
             'data_referencia' => $this->get(self::DATA_REFERENCIA, 'hoje-2'),
@@ -180,14 +188,12 @@ class ConfigRepository
      */
     public function saveApiConfig(array $dados): void
     {
-        $urlMatriculados = $this->aplicarPeriodoNaUrl(
-            $dados['url_matriculados'],
-            $dados['periodo_letivo']
-        );
+        // Período fica só em api_periodo_letivo; a URL base não o inclui.
+        $urlMatriculados = $this->removerPeriodoDaUrl($dados['url_matriculados']);
 
         $this->set(self::API_OAUTH_URL, $dados['oauth_url'], 'URL OAuth token da API SIGAA');
         $this->set(self::API_CLIENT_ID, $dados['client_id'], 'Client ID OAuth da API SIGAA');
-        $this->set(self::API_URL_MATRICULADOS, $urlMatriculados, 'URL da consulta de matriculados');
+        $this->set(self::API_URL_MATRICULADOS, $urlMatriculados, 'URL da consulta de matriculados (sem periodo_letivo)');
         $this->set(self::API_URL_ALUNOS, $dados['url_alunos'], 'URL da consulta de alunos (use {login})');
         $this->set(
             self::API_VERIFY_SSL,
@@ -415,24 +421,34 @@ class ConfigRepository
         return \Mapa\Core\Env::getBool('EMAIL_SEND', false);
     }
 
-    private function aplicarPeriodoNaUrl(string $url, string $periodo): string
+    /**
+     * Remove periodo_letivo da URL base (fica só no campo api_periodo_letivo).
+     */
+    private function removerPeriodoDaUrl(string $url): string
     {
-        $periodo = trim($periodo);
-        if ($periodo === '') {
+        $url = trim($url);
+        if ($url === '') {
             return $url;
         }
 
-        if (strpos($url, '{periodo_letivo}') !== false) {
-            return str_replace('{periodo_letivo}', $periodo, $url);
-        }
+        $url = str_replace(['{periodo_letivo}', rawurlencode('{periodo_letivo}')], '', $url);
+        $url = (string)preg_replace('/([?&])periodo_letivo=[^&]*/', '$1', $url);
+        $url = (string)preg_replace('/\?&+/', '?', $url);
+        $url = (string)preg_replace('/&&+/', '&', $url);
+        $url = (string)preg_replace('/[?&]$/', '', $url);
 
-        if (preg_match('/([?&])periodo_letivo=[^&]*/', $url)) {
-            return (string)preg_replace(
-                '/([?&])periodo_letivo=[^&]*/',
-                '$1periodo_letivo=' . $periodo,
-                $url,
-                1
-            );
+        return $url;
+    }
+
+    /**
+     * Acrescenta o período configurado à URL na hora da execução.
+     */
+    public function aplicarPeriodoNaUrl(string $url, string $periodo): string
+    {
+        $url = $this->removerPeriodoDaUrl($url);
+        $periodo = trim($periodo);
+        if ($periodo === '') {
+            return $url;
         }
 
         $separador = strpos($url, '?') === false ? '?' : '&';
