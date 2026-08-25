@@ -7,11 +7,32 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
     <style>
         body { background: #f0f4f8; }
-        .navbar-mapa { background: linear-gradient(135deg, #1a365d, #2c5282); }
+        .navbar-mapa {
+            background: linear-gradient(135deg, #1a365d, #2c5282);
+            min-height: 3.25rem;
+        }
         .navbar-mapa .navbar-brand,
         .navbar-mapa .nav-link,
         .navbar-mapa .navbar-text { color: #fff !important; }
-        .navbar-mapa .nav-link.active { font-weight: 600; text-decoration: underline; }
+        .navbar-mapa .nav-link {
+            white-space: nowrap;
+            padding-top: 0.45rem;
+            padding-bottom: 0.45rem;
+        }
+        .navbar-mapa .nav-link.active {
+            font-weight: 600;
+            text-decoration: underline;
+            text-underline-offset: 0.35rem;
+        }
+        .navbar-mapa .navbar-nav { align-items: center; }
+        .navbar-mapa .dropdown-menu { min-width: 12rem; }
+        .navbar-mapa .dropdown-item { color: #1a365d; }
+        .navbar-mapa .perfil-badge {
+            font-size: 0.65rem;
+            text-transform: uppercase;
+            letter-spacing: 0.04em;
+            vertical-align: middle;
+        }
         .report-icon {
             width: 48px;
             height: 48px;
@@ -24,25 +45,31 @@
             font-weight: 700;
             font-size: 0.85rem;
         }
-        .perfil-badge { font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.05em; }
-        .navbar-mapa .dropdown-menu { min-width: 12rem; }
-        .navbar-mapa .dropdown-item { color: #1a365d; }
     </style>
 </head>
 <body>
-<nav class="navbar navbar-expand-lg navbar-dark navbar-mapa mb-4">
+<?php
+$nomeUsuario = trim((string)($usuario['nome'] ?? ''));
+$perfilUsuario = \Mapa\Core\Auth::ROTULOS_PERFIL[$usuario['perfil'] ?? '']
+    ?? (string)($usuario['perfil'] ?? '');
+$authLocal = ($usuario['auth_type'] ?? 'local') === 'local';
+?>
+<nav class="navbar navbar-expand-xl navbar-dark navbar-mapa mb-4">
     <div class="container">
-        <a class="navbar-brand fw-bold" href="<?= htmlspecialchars(url('/'), ENT_QUOTES, 'UTF-8') ?>"><?= htmlspecialchars($app['short_name'], ENT_QUOTES, 'UTF-8') ?></a>
-        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMapa">
+        <a class="navbar-brand fw-bold py-2" href="<?= htmlspecialchars(url('/'), ENT_QUOTES, 'UTF-8') ?>">
+            <?= htmlspecialchars($app['short_name'], ENT_QUOTES, 'UTF-8') ?>
+        </a>
+        <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMapa"
+                aria-controls="navMapa" aria-expanded="false" aria-label="Abrir menu">
             <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="navMapa">
-            <ul class="navbar-nav me-auto">
+            <ul class="navbar-nav me-auto mb-2 mb-xl-0 gap-xl-1">
                 <li class="nav-item">
                     <a class="nav-link" href="<?= htmlspecialchars(url('/'), ENT_QUOTES, 'UTF-8') ?>">Relatórios</a>
                 </li>
                 <li class="nav-item">
-                    <a class="nav-link" href="<?= htmlspecialchars(url('/analytics'), ENT_QUOTES, 'UTF-8') ?>">Relatório geral</a>
+                    <a class="nav-link" href="<?= htmlspecialchars(url('/analytics'), ENT_QUOTES, 'UTF-8') ?>">Geral</a>
                 </li>
                 <li class="nav-item">
                     <a class="nav-link" href="<?= htmlspecialchars(url('/alarmes'), ENT_QUOTES, 'UTF-8') ?>">Alarmes</a>
@@ -84,21 +111,36 @@
                     </li>
                 <?php endif; ?>
             </ul>
+
             <?php if (!empty($usuario)): ?>
-                <span class="navbar-text me-3">
-                    <?= htmlspecialchars($usuario['nome'], ENT_QUOTES, 'UTF-8') ?>
-                    <span class="badge bg-light text-dark perfil-badge ms-1">
-                        <?= htmlspecialchars(
-                            \Mapa\Core\Auth::ROTULOS_PERFIL[$usuario['perfil']] ?? $usuario['perfil'],
-                            ENT_QUOTES,
-                            'UTF-8'
-                        ) ?>
-                    </span>
-                </span>
-                <?php if (($usuario['auth_type'] ?? 'local') === 'local'): ?>
-                    <a class="nav-link me-2" href="<?= htmlspecialchars(url('/conta/senha'), ENT_QUOTES, 'UTF-8') ?>">Minha senha</a>
-                <?php endif; ?>
-                <a class="nav-link" href="<?= htmlspecialchars(url('/logout'), ENT_QUOTES, 'UTF-8') ?>">Sair</a>
+                <ul class="navbar-nav ms-xl-3">
+                    <li class="nav-item dropdown">
+                        <a class="nav-link dropdown-toggle" href="#" id="navConta" role="button"
+                           data-bs-toggle="dropdown" aria-expanded="false">
+                            <?= htmlspecialchars($nomeUsuario !== '' ? $nomeUsuario : 'Conta', ENT_QUOTES, 'UTF-8') ?>
+                            <?php if ($perfilUsuario !== ''): ?>
+                                <span class="badge bg-light text-dark perfil-badge ms-1">
+                                    <?= htmlspecialchars($perfilUsuario, ENT_QUOTES, 'UTF-8') ?>
+                                </span>
+                            <?php endif; ?>
+                        </a>
+                        <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navConta">
+                            <?php if ($authLocal): ?>
+                                <li>
+                                    <a class="dropdown-item" href="<?= htmlspecialchars(url('/conta/senha'), ENT_QUOTES, 'UTF-8') ?>">
+                                        Minha senha
+                                    </a>
+                                </li>
+                                <li><hr class="dropdown-divider"></li>
+                            <?php endif; ?>
+                            <li>
+                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/logout'), ENT_QUOTES, 'UTF-8') ?>">
+                                    Sair
+                                </a>
+                            </li>
+                        </ul>
+                    </li>
+                </ul>
             <?php endif; ?>
         </div>
     </div>
