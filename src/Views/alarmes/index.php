@@ -249,6 +249,15 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                                     · Turma <?= htmlspecialchars($turmaEntrada, ENT_QUOTES, 'UTF-8') ?>
                                 <?php endif; ?>
                             </div>
+                            <?php
+                            $motivoEmailCritico = trim((string)($grupo['email_critico_motivo'] ?? ''));
+                            if ($motivoEmailCritico !== ''):
+                            ?>
+                                <div class="small mt-1 text-warning-emphasis">
+                                    E-mail automático (crítico):
+                                    <?= htmlspecialchars($motivoEmailCritico, ENT_QUOTES, 'UTF-8') ?>
+                                </div>
+                            <?php endif; ?>
                         </div>
                         <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
                             <span class="badge text-bg-light text-dark border">

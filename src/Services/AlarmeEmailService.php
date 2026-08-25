@@ -1273,26 +1273,190 @@ class AlarmeEmailService
     }
 
     /**
+     * Explica por que o e-mail automático de alarme crítico ainda não saiu.
+     * Só retorna entrada para quem tem crítico aberto e ainda não foi enviado
+     * (ou está bloqueado pelas mesmas regras de processarAlunos).
+     *
+     * @param list<array{aluno_id: int, curso_id: int, email: string}> $candidatos
+     * @return array<string, string> chave "aluno_id|curso_id" => motivo
+     */
+    public function motivosNaoEnvioCritico(int $coletaId, array $candidatos): array
+    {
+        if ($candidatos === []) {
+            return [];
+        }
+
+        $dias = (int)self::INTERVALO_DIAS;
+        $motivos = [];
+
+        if (!$this->config->permiteEnvioEmail()) {
+            $texto = 'Envio bloqueado neste ambiente (EMAIL_SEND=false).';
+            foreach ($candidatos as $c) {
+                $motivos[$this->chaveAlunoCurso($c)] = $texto;
+            }
+            return $motivos;
+        }
+
+        $emailConfig = $this->config->getEmailConfig();
+        if (empty($emailConfig['alarmes_alunos_enabled'])) {
+            $texto = 'Envio automático de alarmes aos alunos desligado na configuração.';
+            foreach ($candidatos as $c) {
+                $motivos[$this->chaveAlunoCurso($c)] = $texto;
+            }
+            return $motivos;
+        }
+
+        $trancados = $this->mapaTrancadosColeta($coletaId);
+        $enviosColeta = $this->enviosNestaColeta($coletaId);
+        $recentes = $this->enviosRecentesDetalhados();
+
+        foreach ($candidatos as $c) {
+            $chave = $this->chaveAlunoCurso($c);
+            $alunoId = (int)($c['aluno_id'] ?? 0);
+            $cursoId = (int)($c['curso_id'] ?? 0);
+            $email = strtolower(trim((string)($c['email'] ?? '')));
+
+            if (isset($trancados[$chave])) {
+                $motivos[$chave] = 'Aluno trancado — e-mail automático não é enviado.';
+                continue;
+            }
+
+            if (isset($enviosColeta[$chave])) {
+                $motivos[$chave] = 'E-mail automático já registrado nesta coleta em '
+                    . $this->formatarDataEnvio($enviosColeta[$chave])
+                    . '.';
+                continue;
+            }
+
+            if (isset($recentes['alunos'][$alunoId])) {
+                $motivos[$chave] = 'E-mail automático já enviado há menos de '
+                    . $dias
+                    . ' dias (em '
+                    . $this->formatarDataEnvio($recentes['alunos'][$alunoId])
+                    . ').';
+                continue;
+            }
+
+            if ($email !== '' && isset($recentes['emails'][$email])) {
+                $motivos[$chave] = 'O mesmo endereço já recebeu e-mail automático há menos de '
+                    . $dias
+                    . ' dias (em '
+                    . $this->formatarDataEnvio($recentes['emails'][$email])
+                    . ').';
+                continue;
+            }
+
+            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $motivos[$chave] = 'Sem e-mail válido no cadastro do aluno.';
+                continue;
+            }
+
+            $motivos[$chave] = 'Elegível — aguardando a próxima execução do envio automático.';
+        }
+
+        return $motivos;
+    }
+
+    /**
+     * @param array{aluno_id?: int, curso_id?: int} $c
+     */
+    private function chaveAlunoCurso(array $c): string
+    {
+        return (int)($c['aluno_id'] ?? 0) . '|' . (int)($c['curso_id'] ?? 0);
+    }
+
+    private function formatarDataEnvio(string $enviadoEm): string
+    {
+        $ts = strtotime($enviadoEm);
+        if ($ts === false) {
+            return $enviadoEm;
+        }
+
+        return date('d/m/Y H:i', $ts);
+    }
+
+    /**
+     * @return array<string, true> chave aluno|curso
+     */
+    private function mapaTrancadosColeta(int $coletaId): array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT aluno_id, curso_id
+             FROM alunos_trancados
+             WHERE coleta_id = :coleta_id'
+        );
+        $statement->execute(['coleta_id' => $coletaId]);
+
+        $mapa = [];
+        foreach ($statement->fetchAll() as $row) {
+            $mapa[(int)$row['aluno_id'] . '|' . (int)$row['curso_id']] = true;
+        }
+
+        return $mapa;
+    }
+
+    /**
+     * @return array<string, string> chave aluno|curso => enviado_em
+     */
+    private function enviosNestaColeta(int $coletaId): array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT aluno_id, curso_id, enviado_em
+             FROM alarme_emails
+             WHERE coleta_id = :coleta_id'
+        );
+        $statement->execute(['coleta_id' => $coletaId]);
+
+        $mapa = [];
+        foreach ($statement->fetchAll() as $row) {
+            $mapa[(int)$row['aluno_id'] . '|' . (int)$row['curso_id']] = (string)$row['enviado_em'];
+        }
+
+        return $mapa;
+    }
+
+    /**
      * Alunos e endereços que já receberam e-mail automático na janela de 7 dias.
      *
      * @return array{alunos: array<int, true>, emails: array<string, true>}
      */
     private function enviosRecentes(): array
     {
+        $detalhe = $this->enviosRecentesDetalhados();
+
+        return [
+            'alunos' => array_fill_keys(array_keys($detalhe['alunos']), true),
+            'emails' => array_fill_keys(array_keys($detalhe['emails']), true),
+        ];
+    }
+
+    /**
+     * @return array{
+     *   alunos: array<int, string>,
+     *   emails: array<string, string>
+     * }
+     */
+    private function enviosRecentesDetalhados(): array
+    {
         $dias = (int)self::INTERVALO_DIAS;
         $statement = $this->pdo->query(
-            "SELECT aluno_id, destinatario
+            "SELECT aluno_id, destinatario, enviado_em
              FROM alarme_emails
-             WHERE datetime(enviado_em) >= datetime('now', '-{$dias} days')"
+             WHERE datetime(enviado_em) >= datetime('now', '-{$dias} days')
+             ORDER BY datetime(enviado_em) DESC"
         );
 
         $alunos = [];
         $emails = [];
         foreach ($statement->fetchAll() as $row) {
-            $alunos[(int)$row['aluno_id']] = true;
+            $alunoId = (int)$row['aluno_id'];
+            $enviadoEm = (string)($row['enviado_em'] ?? '');
+            if ($alunoId > 0 && !isset($alunos[$alunoId])) {
+                $alunos[$alunoId] = $enviadoEm;
+            }
             $email = strtolower(trim((string)($row['destinatario'] ?? '')));
-            if ($email !== '') {
-                $emails[$email] = true;
+            if ($email !== '' && !isset($emails[$email])) {
+                $emails[$email] = $enviadoEm;
             }
         }
 

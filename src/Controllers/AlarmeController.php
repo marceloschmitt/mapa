@@ -8,6 +8,7 @@ use Mapa\Core\Controller;
 use Mapa\Core\Session;
 use Mapa\Models\AnalyticsRepository;
 use Mapa\Models\UserRepository;
+use Mapa\Services\AlarmeEmailService;
 
 class AlarmeController extends Controller
 {
@@ -176,6 +177,7 @@ class AlarmeController extends Controller
         }
         $professoresPorCodigo = $repo->nomesProfessoresPorCodigo($codigosDisc);
 
+        $candidatosEmailCritico = [];
         foreach ($alarmesPorAluno as &$grupo) {
             foreach ($grupo['disciplinas'] as &$disciplina) {
                 $codigo = trim((string)($disciplina['codigo'] ?? ''));
@@ -197,8 +199,43 @@ class AlarmeController extends Controller
                     }
                 );
             }
+
+            $temCriticoAberto = false;
+            foreach ($grupo['disciplinas'] as $disciplina) {
+                foreach ($disciplina['alarmes'] as $alarme) {
+                    if (
+                        (string)($alarme['severidade'] ?? '') === 'critico'
+                        && (int)($alarme['visualizado'] ?? 0) === 0
+                    ) {
+                        $temCriticoAberto = true;
+                        break 2;
+                    }
+                }
+            }
+            $grupo['email_critico_motivo'] = null;
+            if ($temCriticoAberto) {
+                $candidatosEmailCritico[] = [
+                    'aluno_id' => (int)$grupo['aluno']['id'],
+                    'curso_id' => (int)$grupo['aluno']['curso_id'],
+                    'email' => (string)($grupo['aluno']['email'] ?? ''),
+                ];
+            }
         }
         unset($grupo);
+
+        if ($candidatosEmailCritico !== []) {
+            $motivos = (new AlarmeEmailService())->motivosNaoEnvioCritico(
+                $coletaId,
+                $candidatosEmailCritico
+            );
+            foreach ($alarmesPorAluno as &$grupo) {
+                $chave = (int)$grupo['aluno']['id'] . '|' . (int)$grupo['aluno']['curso_id'];
+                if (isset($motivos[$chave])) {
+                    $grupo['email_critico_motivo'] = $motivos[$chave];
+                }
+            }
+            unset($grupo);
+        }
 
         $this->render('alarmes/index', array_merge($dadosBase, [
             'coleta' => $coleta,
