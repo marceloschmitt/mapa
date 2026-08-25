@@ -23,7 +23,7 @@ executar_coleta.py
 python3 python/executar_coleta.py
 
 # Cron (exemplo, a cada hora)
-0 * * * * /usr/bin/python3 /var/www/mapa/python/executar_coleta.py >> /var/www/mapa/data/coleta.log 2>&1
+0 * * * * /usr/bin/python3 /var/www/mapa/python/executar_coleta.py > /var/www/mapa/data/coleta.log 2>&1
 ```
 
 API OAuth/SIGAA: tabela `configuracoes` (tela Configurações → API).  

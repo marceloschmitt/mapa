@@ -124,7 +124,7 @@ python3 python/executar_coleta.py
 Cron (a cada hora), com caminhos absolutos:
 
 ```cron
-0 * * * * /usr/bin/python3 /var/www/mapa/python/executar_coleta.py >> /var/www/mapa/data/coleta.log 2>&1
+0 * * * * /usr/bin/python3 /var/www/mapa/python/executar_coleta.py > /var/www/mapa/data/coleta.log 2>&1
 ```
 
 Ajuste `/var/www/mapa` e o caminho do `python3` conforme o servidor.  
