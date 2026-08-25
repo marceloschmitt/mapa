@@ -144,6 +144,8 @@ def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
     _ensure_column(conn, "disciplina_grade", "datas_aula", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "cursos", "curso_nivel", "TEXT")
     _ensure_column(conn, "frequencia_curso", "data_inicio_aulas", "TEXT")
+    _ensure_column(conn, "perda_vaga_candidatos", "matriculado_periodo_atual", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "perda_vaga_candidatos", "status_periodo_atual", "TEXT")
     _migrar_datas_aula_csv(conn)
     conn.commit()
 

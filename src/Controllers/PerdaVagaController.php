@@ -27,6 +27,7 @@ class PerdaVagaController extends Controller
         $porCurso = [];
         $totalAlunos = 0;
         $totalReprovacoes = 0;
+        $totalMatriculadosAtual = 0;
 
         if ($execucao !== null && $escopo['aviso'] === null) {
             $candidatos = $repo->candidatosPerdaVaga(
@@ -60,6 +61,9 @@ class PerdaVagaController extends Controller
                 $candidato['reprovacoes'] = $porCandidato[(int)$candidato['id']] ?? [];
                 $porCurso[$nomeCurso]['candidatos'][] = $candidato;
                 $totalAlunos++;
+                if (!empty($candidato['matriculado_periodo_atual'])) {
+                    $totalMatriculadosAtual++;
+                }
             }
         }
 
@@ -69,6 +73,7 @@ class PerdaVagaController extends Controller
             'totalAlunos' => $totalAlunos,
             'totalCursos' => count($porCurso),
             'totalReprovacoes' => $totalReprovacoes,
+            'totalMatriculadosAtual' => $totalMatriculadosAtual,
             'cursosDisponiveis' => $cursosDisponiveis,
             'cursoSelecionado' => $cursoSelecionado,
             'cursoExibido' => $escopo['cursoExibido'],

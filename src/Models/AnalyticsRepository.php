@@ -1595,7 +1595,8 @@ class AnalyticsRepository
         ?array $codigosDisciplina = null
     ): array {
         $sql = 'SELECT c.id, c.login, c.matricula, c.nome, c.nome_social, c.email,
-                       c.nome_curso, c.aluno_id, c.curso_id
+                       c.nome_curso, c.aluno_id, c.curso_id,
+                       c.matriculado_periodo_atual, c.status_periodo_atual
                 FROM perda_vaga_candidatos c
                 WHERE c.execucao_id = :execucao_id';
         $params = [];

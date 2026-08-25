@@ -89,6 +89,8 @@ class Database
         self::ensureColumn('cursos', 'curso_nivel', 'TEXT');
         self::ensureColumn('professores', 'email', 'TEXT');
         self::ensureColumn('frequencia_curso', 'data_inicio_aulas', 'TEXT');
+        self::ensureColumn('perda_vaga_candidatos', 'matriculado_periodo_atual', 'INTEGER NOT NULL DEFAULT 0');
+        self::ensureColumn('perda_vaga_candidatos', 'status_periodo_atual', 'TEXT');
         self::migrarDatasAulaCsvParaTabela();
         self::seedAdminIfEmpty();
         self::migrateLdapConfigFromEnv();

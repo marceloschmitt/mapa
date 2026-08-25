@@ -339,6 +339,8 @@ CREATE TABLE IF NOT EXISTS perda_vaga_candidatos (
     nome_social TEXT,
     email TEXT,
     nome_curso TEXT NOT NULL DEFAULT '',
+    matriculado_periodo_atual INTEGER NOT NULL DEFAULT 0,
+    status_periodo_atual TEXT,
     FOREIGN KEY (execucao_id) REFERENCES perda_vaga_execucoes(id) ON DELETE CASCADE,
     FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE SET NULL,
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE SET NULL

@@ -33,6 +33,10 @@ $mostrarBadgeCurso = $semSeletorCurso;
             <?php endif; ?>
         </p>
         <?php if (is_array($execucao)): ?>
+            <?php
+            $matriculadosAtual = (int)($totalMatriculadosAtual ?? 0);
+            $periodoRef = (string)($execucao['periodo_atual'] ?? '');
+            ?>
             <div class="d-flex flex-wrap align-items-center gap-2">
                 <span class="badge text-bg-secondary">
                     <?= $totalAlunos ?> aluno<?= $totalAlunos === 1 ? '' : 's' ?>
@@ -43,6 +47,12 @@ $mostrarBadgeCurso = $semSeletorCurso;
                 <span class="badge text-bg-secondary">
                     <?= $totalReprovacoes ?> reprovaç<?= $totalReprovacoes === 1 ? 'ão' : 'ões' ?>
                 </span>
+                <?php if ($matriculadosAtual > 0): ?>
+                    <span class="badge text-bg-warning text-dark">
+                        <?= $matriculadosAtual ?> matriculado<?= $matriculadosAtual === 1 ? '' : 's' ?>
+                        em <?= htmlspecialchars($periodoRef, ENT_QUOTES, 'UTF-8') ?>
+                    </span>
+                <?php endif; ?>
                 <span class="badge text-bg-light text-dark border">
                     Gerado em <?= htmlspecialchars((string)($execucao['executado_em'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
                 </span>
@@ -114,6 +124,16 @@ $mostrarBadgeCurso = $semSeletorCurso;
                                     · <?= htmlspecialchars((string)$candidato['email'], ENT_QUOTES, 'UTF-8') ?>
                                 <?php endif; ?>
                             </div>
+                            <?php if (!empty($candidato['matriculado_periodo_atual'])): ?>
+                                <div class="mt-1">
+                                    <span class="badge text-bg-warning text-dark">
+                                        Matriculado em <?= htmlspecialchars((string)($execucao['periodo_atual'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
+                                        <?php if (!empty($candidato['status_periodo_atual'])): ?>
+                                            · <?= htmlspecialchars((string)$candidato['status_periodo_atual'], ENT_QUOTES, 'UTF-8') ?>
+                                        <?php endif; ?>
+                                    </span>
+                                </div>
+                            <?php endif; ?>
                         </div>
                     </div>
                     <?php if ($reprovacoes !== []): ?>

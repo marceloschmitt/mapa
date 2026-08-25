@@ -28,7 +28,7 @@ from api_auth import (
     verificar_ssl,
 )
 from db import conectar, fechar, row_to_dict
-from paths import DIR_JSON, garantir_diretorios
+from paths import DIR_JSON, JSON_RESPOSTA_MATRICULAS, garantir_diretorios
 
 
 def periodo_para_arquivo(periodo: str) -> str:
@@ -150,6 +150,27 @@ def mapa_todas_reprovadas(
     return saida
 
 
+def mapa_matriculados_periodo(
+    registros: list[dict[str, Any]],
+) -> dict[tuple[str, str], dict[str, Any]]:
+    """Mapa (login, curso) -> registro no periodo (qualquer status)."""
+    saida: dict[tuple[str, str], dict[str, Any]] = {}
+    for registro in registros:
+        chave = chave_aluno_curso(registro)
+        if chave[0] == "":
+            continue
+        saida[chave] = {
+            "matricula": str(registro.get("matricula") or "").strip(),
+            "status": str(registro.get("status") or "").strip(),
+            "nome": str(
+                registro.get("nome_completo")
+                or registro.get("nome_civil")
+                or ""
+            ).strip(),
+        }
+    return saida
+
+
 def obter_matriculas_periodo(
     periodo: str,
     config: dict[str, str],
@@ -160,6 +181,17 @@ def obter_matriculas_periodo(
     """Consulta API (ou reusa JSON em cache) para o periodo."""
     garantir_diretorios()
     caminho = DIR_JSON / f"resposta_matriculas_{periodo_para_arquivo(periodo)}.json"
+    periodo_config = (config.get("api_periodo_letivo") or "").strip()
+
+    # Coleta corrente grava resposta_matriculas.json sem sufixo.
+    if (
+        not forcar
+        and periodo == periodo_config
+        and JSON_RESPOSTA_MATRICULAS.is_file()
+    ):
+        print(f"Usando cache da coleta: {JSON_RESPOSTA_MATRICULAS}")
+        dados = json.loads(JSON_RESPOSTA_MATRICULAS.read_text(encoding="utf-8"))
+        return carregar_registros(dados)
 
     if caminho.is_file() and not forcar:
         print(f"Usando cache: {caminho}")
@@ -249,8 +281,9 @@ def gravar_candidatos(
             """
             INSERT INTO perda_vaga_candidatos (
                 execucao_id, aluno_id, curso_id, login, matricula,
-                nome, nome_social, email, nome_curso
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                nome, nome_social, email, nome_curso,
+                matriculado_periodo_atual, status_periodo_atual
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execucao_id,
@@ -262,6 +295,8 @@ def gravar_candidatos(
                 cand.get("nome_social"),
                 cand.get("email"),
                 cand["nome_curso"],
+                1 if cand.get("matriculado_periodo_atual") else 0,
+                cand.get("status_periodo_atual"),
             ),
         )
         candidato_id = int(cursor.lastrowid)
@@ -328,6 +363,9 @@ def main(argv: list[str] | None = None) -> int:
         regs_b = obter_matriculas_periodo(
             semestre_b, config, token, forcar=forcar
         )
+        regs_atual = obter_matriculas_periodo(
+            periodo_atual, config, token, forcar=forcar
+        )
     except (ValueError, RuntimeError, HTTPError, URLError, TimeoutError, json.JSONDecodeError) as error:
         print(f"Erro na consulta: {error}", file=sys.stderr)
         fechar()
@@ -335,6 +373,7 @@ def main(argv: list[str] | None = None) -> int:
 
     mapa_a = mapa_todas_reprovadas(regs_a, semestre_a)
     mapa_b = mapa_todas_reprovadas(regs_b, semestre_b)
+    mapa_atual = mapa_matriculados_periodo(regs_atual)
     chaves = sorted(
         set(mapa_a) & set(mapa_b),
         key=lambda k: (
@@ -344,24 +383,35 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     candidatos: list[dict[str, Any]] = []
+    matriculados_agora = 0
     for chave in chaves:
         a = mapa_a[chave]
         b = mapa_b[chave]
+        atual = mapa_atual.get(chave)
+        matriculado = atual is not None
+        if matriculado:
+            matriculados_agora += 1
         candidatos.append({
             "login": b["login"],
-            "matricula": b["matricula"] or a["matricula"],
-            "nome": b["nome"] or a["nome"],
+            "matricula": (atual or {}).get("matricula") or b["matricula"] or a["matricula"],
+            "nome": b["nome"] or a["nome"] or (atual or {}).get("nome") or "",
             "nome_social": b.get("nome_social") or a.get("nome_social"),
             "email": b.get("email") or a.get("email"),
             "nome_curso": b["nome_curso"],
             "disciplinas_a": a["disciplinas"],
             "disciplinas_b": b["disciplinas"],
+            "matriculado_periodo_atual": matriculado,
+            "status_periodo_atual": (atual or {}).get("status") or None,
         })
 
     print(
         f"\nTodas reprovadas em {semestre_a}: {len(mapa_a)}; "
         f"em {semestre_b}: {len(mapa_b)}; "
         f"nos dois: {len(candidatos)}"
+    )
+    print(
+        f"Destes, matriculados em {periodo_atual} (mesmo curso): "
+        f"{matriculados_agora}"
     )
 
     execucao_id: int | None = None
