@@ -26,7 +26,7 @@ $alarmesNaoTratados = (int)($alarmesNaoTratados ?? 0);
 $alunosComAlarmes = (int)($alunosComAlarmes ?? 0);
 $coletaId = $coleta !== null ? (int)$coleta['id'] : 0;
 $filtroAbertos = !empty($somenteAbertos) ? '1' : '0';
-$mostrarMensagem = !empty($somenteAbertos);
+$mostrarMensagem = true;
 $semSeletorCurso = !empty($semSeletorCurso);
 $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
 $cursosDisponiveis = $cursosDisponiveis ?? [];
@@ -64,6 +64,30 @@ if (!function_exists('mapaDiasFaltaAlarme')) {
             $saida[] = $ts !== false ? date('d/m', $ts) : $texto;
         }
         return $saida;
+    }
+}
+
+/**
+ * @param array<string, mixed> $alarme
+ */
+if (!function_exists('mapaPercentualFrequenciaAlarme')) {
+    function mapaPercentualFrequenciaAlarme(array $alarme): ?string
+    {
+        $raw = trim((string)($alarme['detalhe_json'] ?? ''));
+        if ($raw !== '') {
+            $detalhe = json_decode($raw, true);
+            if (is_array($detalhe) && isset($detalhe['percentual_frequencia'])
+                && is_numeric($detalhe['percentual_frequencia'])) {
+                return number_format((float)$detalhe['percentual_frequencia'], 1, '.', '') . '%';
+            }
+        }
+
+        $mensagem = trim((string)($alarme['mensagem'] ?? ''));
+        if (preg_match('/(\d+(?:[.,]\d+)?)\s*%/', $mensagem, $m) === 1) {
+            return str_replace(',', '.', $m[1]) . '%';
+        }
+
+        return null;
     }
 }
 
@@ -342,6 +366,9 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                                                     $diasTipo = $tipo === 'faltas_4dias'
                                                         ? mapaDiasFaltaAlarme($alarme)
                                                         : [];
+                                                    $percentualTipo = $tipo === 'percentual_baixo'
+                                                        ? mapaPercentualFrequenciaAlarme($alarme)
+                                                        : null;
                                                     ?>
                                                     <div class="alarme-slot">
                                                         <span class="badge text-bg-secondary">
@@ -350,6 +377,11 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                                                         <?php if ($diasTipo !== [] && !$mostrarMensagem): ?>
                                                             <div class="mt-1">
                                                                 <code><?= htmlspecialchars(implode(', ', $diasTipo), ENT_QUOTES, 'UTF-8') ?></code>
+                                                            </div>
+                                                        <?php endif; ?>
+                                                        <?php if ($percentualTipo !== null && !$mostrarMensagem): ?>
+                                                            <div class="mt-1">
+                                                                <code><?= htmlspecialchars($percentualTipo, ENT_QUOTES, 'UTF-8') ?></code>
                                                             </div>
                                                         <?php endif; ?>
                                                     </div>
