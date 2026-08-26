@@ -1045,6 +1045,55 @@ class AnalyticsRepository
         $this->bindNamedParams($statement, $params);
     }
 
+    /**
+     * Ordena como dicionario pt-BR (acentos nao vao para o fim).
+     *
+     * @template T of array<string, mixed>
+     * @param list<T> $linhas
+     * @param callable(T): list<string> $chaves
+     * @return list<T>
+     */
+    private function ordenarAlfabeticoPt(array $linhas, callable $chaves): array
+    {
+        $collator = class_exists(\Collator::class) ? new \Collator('pt_BR') : null;
+
+        usort($linhas, function (array $a, array $b) use ($chaves, $collator): int {
+            $ka = $chaves($a);
+            $kb = $chaves($b);
+            $n = max(count($ka), count($kb));
+            for ($i = 0; $i < $n; $i++) {
+                $sa = (string)($ka[$i] ?? '');
+                $sb = (string)($kb[$i] ?? '');
+                if ($collator !== null) {
+                    $cmp = $collator->compare($sa, $sb);
+                } else {
+                    $cmp = strcasecmp(
+                        $this->chaveSemAcentos($sa),
+                        $this->chaveSemAcentos($sb)
+                    );
+                }
+                if ($cmp !== 0) {
+                    return $cmp;
+                }
+            }
+
+            return 0;
+        });
+
+        return $linhas;
+    }
+
+    private function chaveSemAcentos(string $texto): string
+    {
+        $texto = mb_strtolower(trim($texto), 'UTF-8');
+        $ascii = @iconv('UTF-8', 'ASCII//TRANSLIT//IGNORE', $texto);
+        if ($ascii === false) {
+            return $texto;
+        }
+
+        return $ascii;
+    }
+
     /** @return list<array<string, mixed>> */
     public function evolucaoAluno(string $login, int $limiteColetas = 10): array
     {
@@ -1717,5 +1766,148 @@ class AnalyticsRepository
         $statement->execute();
 
         return $statement->fetchAll();
+    }
+
+    /**
+     * Metadados da ultima carga de passe livre (periodo/datas).
+     *
+     * @return array<string, mixed>|null
+     */
+    public function metaPasseLivre(): ?array
+    {
+        $statement = $this->db->query(
+            'SELECT periodo, data_inicial, data_final, gerado_em,
+                    COUNT(*) AS total_registros
+             FROM passe_livre_aluno_curso
+             GROUP BY periodo, data_inicial, data_final, gerado_em
+             ORDER BY gerado_em DESC
+             LIMIT 1'
+        );
+        $row = $statement->fetch();
+
+        return $row === false ? null : $row;
+    }
+
+    /**
+     * Linhas aluno/curso do passe livre (ordem alfabetica).
+     *
+     * @param list<int>|null $cursoIds
+     * @param list<string>|null $codigosDisciplina
+     * @return list<array<string, mixed>>
+     */
+    public function linhasPasseLivre(
+        ?array $cursoIds = null,
+        ?array $codigosDisciplina = null,
+        string $nome = ''
+    ): array {
+        if (($cursoIds !== null && $cursoIds === [])
+            || ($codigosDisciplina !== null && $codigosDisciplina === [])
+        ) {
+            return [];
+        }
+
+        $sql = 'SELECT pc.id, pc.aluno_id, pc.curso_id, pc.login, pc.matricula,
+                       pc.nome, pc.nome_social, pc.email, pc.nome_curso,
+                       pc.frequencia, pc.periodo
+                FROM passe_livre_aluno_curso pc
+                WHERE 1 = 1';
+        $params = [];
+
+        [$sql, $cursoParams] = $this->appendCursoFilter($sql, $cursoIds, 'pc.curso_id');
+
+        $nome = trim($nome);
+        if ($nome !== '') {
+            $sql .= ' AND (
+                        pc.nome LIKE :nome_filtro COLLATE NOCASE
+                        OR IFNULL(pc.nome_social, \'\') LIKE :nome_filtro_social COLLATE NOCASE
+                      )';
+            $padrao = '%' . str_replace(['%', '_'], '', $nome) . '%';
+            $params['nome_filtro'] = $padrao;
+            $params['nome_filtro_social'] = $padrao;
+        }
+
+        if ($codigosDisciplina !== null) {
+            $placeholders = [];
+            foreach (array_values($codigosDisciplina) as $i => $codigo) {
+                $key = 'disc_' . $i;
+                $placeholders[] = ':' . $key;
+                $params[$key] = $codigo;
+            }
+            $sql .= ' AND EXISTS (
+                        SELECT 1
+                        FROM passe_livre_disciplina pd
+                        WHERE pd.aluno_curso_id = pc.id
+                          AND pd.codigo_disciplina IN (' . implode(', ', $placeholders) . ')
+                      )';
+        }
+
+        $sql .= ' ORDER BY pc.id ASC';
+
+        $statement = $this->db->prepare($sql);
+        $this->bindNamedParams($statement, $cursoParams);
+        $this->bindNamedParams($statement, $params);
+        $statement->execute();
+
+        return $this->ordenarAlfabeticoPt($statement->fetchAll(), static function (array $row): array {
+            $nomeSocial = trim((string)($row['nome_social'] ?? ''));
+            $nome = $nomeSocial !== ''
+                ? $nomeSocial
+                : trim((string)($row['nome'] ?? ''));
+
+            return [
+                $nome,
+                trim((string)($row['nome_curso'] ?? '')),
+                trim((string)($row['matricula'] ?? '')),
+            ];
+        });
+    }
+
+    /**
+     * Disciplinas das linhas de passe livre (so percentual).
+     *
+     * @param list<int> $alunoCursoIds
+     * @return array<int, list<array<string, mixed>>>
+     */
+    public function disciplinasPasseLivre(array $alunoCursoIds): array
+    {
+        if ($alunoCursoIds === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach (array_values($alunoCursoIds) as $i => $id) {
+            $key = 'id_' . $i;
+            $placeholders[] = ':' . $key;
+            $params[$key] = (int)$id;
+        }
+
+        $sql = 'SELECT pd.aluno_curso_id, pd.codigo_disciplina, pd.disciplina, pd.frequencia
+                FROM passe_livre_disciplina pd
+                WHERE pd.aluno_curso_id IN (' . implode(', ', $placeholders) . ')';
+
+        $statement = $this->db->prepare($sql);
+        $this->bindNamedParams($statement, $params);
+        $statement->execute();
+
+        $mapa = [];
+        foreach ($statement->fetchAll() as $row) {
+            $cid = (int)$row['aluno_curso_id'];
+            if (!isset($mapa[$cid])) {
+                $mapa[$cid] = [];
+            }
+            $mapa[$cid][] = $row;
+        }
+
+        foreach ($mapa as $cid => $linhas) {
+            $mapa[$cid] = $this->ordenarAlfabeticoPt($linhas, static function (array $row): array {
+                return [
+                    trim((string)($row['disciplina'] ?? '')),
+                    trim((string)($row['codigo_disciplina'] ?? '')),
+                ];
+            });
+        }
+
+        return $mapa;
     }
 }

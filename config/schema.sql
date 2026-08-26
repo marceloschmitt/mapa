@@ -366,3 +366,42 @@ CREATE TABLE IF NOT EXISTS perda_vaga_reprovacoes (
 CREATE INDEX IF NOT EXISTS idx_perda_vaga_reprovacoes_candidato
     ON perda_vaga_reprovacoes(candidato_id);
 
+-- Passe livre: percentual de frequencia do semestre anterior (carga manual).
+-- Um aluno em dois cursos aparece em duas linhas.
+CREATE TABLE IF NOT EXISTS passe_livre_aluno_curso (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    periodo TEXT NOT NULL,
+    data_inicial TEXT NOT NULL DEFAULT '',
+    data_final TEXT NOT NULL DEFAULT '',
+    gerado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    aluno_id INTEGER,
+    curso_id INTEGER,
+    login TEXT NOT NULL,
+    matricula TEXT NOT NULL DEFAULT '',
+    nome TEXT NOT NULL DEFAULT '',
+    nome_social TEXT,
+    email TEXT,
+    nome_curso TEXT NOT NULL DEFAULT '',
+    frequencia REAL,
+    FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE SET NULL,
+    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_passe_livre_aluno_curso_nome
+    ON passe_livre_aluno_curso(nome);
+
+CREATE INDEX IF NOT EXISTS idx_passe_livre_aluno_curso_periodo
+    ON passe_livre_aluno_curso(periodo);
+
+CREATE TABLE IF NOT EXISTS passe_livre_disciplina (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    aluno_curso_id INTEGER NOT NULL,
+    codigo_disciplina TEXT NOT NULL DEFAULT '',
+    disciplina TEXT NOT NULL DEFAULT '',
+    frequencia REAL,
+    FOREIGN KEY (aluno_curso_id) REFERENCES passe_livre_aluno_curso(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_passe_livre_disciplina_aluno_curso
+    ON passe_livre_disciplina(aluno_curso_id);
+

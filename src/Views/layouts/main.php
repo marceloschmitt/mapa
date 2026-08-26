@@ -80,8 +80,23 @@ $authLocal = ($usuario['auth_type'] ?? 'local') === 'local';
                 <li class="nav-item">
                     <a class="nav-link" href="<?= htmlspecialchars(url('/trancados'), ENT_QUOTES, 'UTF-8') ?>">Trancados</a>
                 </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="<?= htmlspecialchars(url('/perda-vaga'), ENT_QUOTES, 'UTF-8') ?>">Perda de vaga</a>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle" href="#" id="navOutrosRelatorios" role="button"
+                       data-bs-toggle="dropdown" aria-expanded="false">
+                        Outros relatórios
+                    </a>
+                    <ul class="dropdown-menu" aria-labelledby="navOutrosRelatorios">
+                        <li>
+                            <a class="dropdown-item" href="<?= htmlspecialchars(url('/perda-vaga'), ENT_QUOTES, 'UTF-8') ?>">
+                                Perda de vaga
+                            </a>
+                        </li>
+                        <li>
+                            <a class="dropdown-item" href="<?= htmlspecialchars(url('/passe-livre'), ENT_QUOTES, 'UTF-8') ?>">
+                                Passe livre
+                            </a>
+                        </li>
+                    </ul>
                 </li>
                 <?php if (!empty($podeVerChamadas)): ?>
                     <li class="nav-item">

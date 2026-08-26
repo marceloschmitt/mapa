@@ -13,6 +13,7 @@ use Mapa\Controllers\IngressantesController;
 use Mapa\Controllers\LdapConfigController;
 use Mapa\Controllers\TrancadosController;
 use Mapa\Controllers\PerdaVagaController;
+use Mapa\Controllers\PasseLivreController;
 use Mapa\Controllers\UserController;
 use Mapa\Core\Router;
 
@@ -34,6 +35,7 @@ return static function (Router $router): void {
     $router->get('/ingressantes', [IngressantesController::class, 'index']);
     $router->get('/trancados', [TrancadosController::class, 'index']);
     $router->get('/perda-vaga', [PerdaVagaController::class, 'index']);
+    $router->get('/passe-livre', [PasseLivreController::class, 'index']);
     $router->get('/chamadas', [ChamadasController::class, 'index']);
     $router->get('/chamadas/exportar-atrasadas-1-semestre', [ChamadasController::class, 'exportarAtrasadasPrimeiroSemestre']);
 
