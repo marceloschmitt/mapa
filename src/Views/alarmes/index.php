@@ -273,6 +273,21 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                                         Ação geral
                                     </button>
                                     <ul class="dropdown-menu dropdown-menu-end">
+                                        <li>
+                                            <form method="post"
+                                                  action="<?= htmlspecialchars(url('/alarmes/enviar-email'), ENT_QUOTES, 'UTF-8') ?>"
+                                                  onsubmit="return confirm('Enviar o e-mail ao aluno agora?');">
+                                                <input type="hidden" name="coleta_id" value="<?= $coletaId ?>">
+                                                <input type="hidden" name="aluno_id" value="<?= (int)$aluno['id'] ?>">
+                                                <input type="hidden" name="curso_id" value="<?= (int)$aluno['curso_id'] ?>">
+                                                <input type="hidden" name="abertos" value="<?= $filtroAbertos ?>">
+                                                <input type="hidden" name="curso" value="<?= htmlspecialchars($cursoSelecionado, ENT_QUOTES, 'UTF-8') ?>">
+                                                <button type="submit" class="dropdown-item">
+                                                    Enviar e-mail
+                                                </button>
+                                            </form>
+                                        </li>
+                                        <li><hr class="dropdown-divider"></li>
                                         <?php foreach ($rotulosContato as $valor => $rotulo): ?>
                                             <li>
                                                 <form method="post" action="<?= htmlspecialchars(url('/alarmes/visualizar'), ENT_QUOTES, 'UTF-8') ?>">
@@ -451,6 +466,24 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                                                                     Ação
                                                                 </button>
                                                                 <ul class="dropdown-menu dropdown-menu-end">
+                                                                    <?php if (!$todosVisualizados): ?>
+                                                                        <li>
+                                                                            <form method="post"
+                                                                                  action="<?= htmlspecialchars(url('/alarmes/enviar-email'), ENT_QUOTES, 'UTF-8') ?>"
+                                                                                  onsubmit="return confirm('Enviar o e-mail desta disciplina ao aluno agora?');">
+                                                                                <input type="hidden" name="coleta_id" value="<?= $coletaId ?>">
+                                                                                <input type="hidden" name="aluno_id" value="<?= (int)$aluno['id'] ?>">
+                                                                                <input type="hidden" name="curso_id" value="<?= (int)$aluno['curso_id'] ?>">
+                                                                                <input type="hidden" name="codigo_disciplina" value="<?= htmlspecialchars($codigoDisc, ENT_QUOTES, 'UTF-8') ?>">
+                                                                                <input type="hidden" name="abertos" value="<?= $filtroAbertos ?>">
+                                                                                <input type="hidden" name="curso" value="<?= htmlspecialchars($cursoSelecionado, ENT_QUOTES, 'UTF-8') ?>">
+                                                                                <button type="submit" class="dropdown-item">
+                                                                                    Enviar e-mail
+                                                                                </button>
+                                                                            </form>
+                                                                        </li>
+                                                                        <li><hr class="dropdown-divider"></li>
+                                                                    <?php endif; ?>
                                                                     <?php foreach ($rotulosContato as $valor => $rotulo): ?>
                                                                         <li>
                                                                             <form method="post" action="<?= htmlspecialchars(url('/alarmes/visualizar'), ENT_QUOTES, 'UTF-8') ?>">

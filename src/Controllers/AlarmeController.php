@@ -318,6 +318,91 @@ class AlarmeController extends Controller
     }
 
     /**
+     * Força o e-mail (mesmo texto do automático) e marca os alarmes abertos
+     * do aluno/curso (ou só de uma disciplina) como email_automatico.
+     */
+    public function enviarEmail(): void
+    {
+        $user = $this->requireAuth();
+        $coletaId = (int)($_POST['coleta_id'] ?? 0);
+        $alunoId = (int)($_POST['aluno_id'] ?? 0);
+        $cursoId = (int)($_POST['curso_id'] ?? 0);
+        $codigoDisciplina = array_key_exists('codigo_disciplina', $_POST)
+            ? trim((string)$_POST['codigo_disciplina'])
+            : null;
+        $abertos = ($_POST['abertos'] ?? '1') === '1' ? '1' : '0';
+        $cursoParam = trim((string)($_POST['curso'] ?? 'todos'));
+        if ($cursoParam === '') {
+            $cursoParam = 'todos';
+        }
+        $redirect = '/alarmes?abertos=' . $abertos;
+        if ($cursoParam !== 'todos') {
+            $redirect .= '&curso=' . rawurlencode($cursoParam);
+        }
+
+        if ($coletaId <= 0 || $alunoId <= 0 || $cursoId <= 0) {
+            Session::flash('erro', 'Aluno inválido.');
+            $this->redirect($redirect);
+        }
+
+        $escopo = $this->escopoAlarmes($cursoParam);
+        $cursoIds = $escopo['cursoIds'];
+        $codigosDisciplina = $escopo['codigosDisciplina'];
+
+        if ($cursoIds !== null && !in_array($cursoId, $cursoIds, true)) {
+            Session::flash('erro', 'Sem permissão para este curso.');
+            $this->redirect($redirect);
+        }
+
+        $repo = new AnalyticsRepository();
+        if ($codigosDisciplina !== null) {
+            if ($codigosDisciplina === []) {
+                Session::flash('erro', 'Nenhuma disciplina vinculada ao seu CPF.');
+                $this->redirect($redirect);
+            }
+            if ($codigoDisciplina !== null) {
+                if ($codigoDisciplina === '' || !in_array($codigoDisciplina, $codigosDisciplina, true)) {
+                    Session::flash('erro', 'Sem permissão para enviar e-mail nesta disciplina.');
+                    $this->redirect($redirect);
+                }
+                if (!$repo->alunoTemAlarmeAbertoNasDisciplinas(
+                    $coletaId,
+                    $alunoId,
+                    $cursoId,
+                    [$codigoDisciplina]
+                )) {
+                    Session::flash('erro', 'Nenhum alarme aberto nesta disciplina.');
+                    $this->redirect($redirect);
+                }
+            } elseif (!$repo->alunoTemAlarmeAbertoNasDisciplinas(
+                $coletaId,
+                $alunoId,
+                $cursoId,
+                $codigosDisciplina
+            )) {
+                Session::flash('erro', 'Sem permissão para enviar e-mail neste aluno.');
+                $this->redirect($redirect);
+            }
+        }
+
+        $resultado = (new AlarmeEmailService())->enviarForcadoAoAluno(
+            $coletaId,
+            $alunoId,
+            $cursoId,
+            (int)$user['id'],
+            $codigoDisciplina
+        );
+
+        if ($resultado['ok']) {
+            Session::flash('sucesso', $resultado['mensagem']);
+        } else {
+            Session::flash('erro', $resultado['mensagem']);
+        }
+
+        $this->redirect($redirect);
+    }
+
+    /**
      * @param list<array{id: int, nome_curso: string}> $cursosDisponiveis
      */
     private function cursoSelecionado(array $cursosDisponiveis): string

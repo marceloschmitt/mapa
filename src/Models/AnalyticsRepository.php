@@ -1419,6 +1419,48 @@ class AnalyticsRepository
     }
 
     /**
+     * True se o aluno tem ao menos um alarme aberto em alguma das disciplinas.
+     *
+     * @param list<string> $codigosDisciplina
+     */
+    public function alunoTemAlarmeAbertoNasDisciplinas(
+        int $coletaId,
+        int $alunoId,
+        int $cursoId,
+        array $codigosDisciplina
+    ): bool {
+        if ($codigosDisciplina === []) {
+            return false;
+        }
+
+        $placeholders = [];
+        $params = [
+            'coleta_id' => $coletaId,
+            'aluno_id' => $alunoId,
+            'curso_id' => $cursoId,
+        ];
+        foreach (array_values($codigosDisciplina) as $i => $codigo) {
+            $key = 'disc_' . $i;
+            $placeholders[] = ':' . $key;
+            $params[$key] = $codigo;
+        }
+
+        $statement = $this->db->prepare(
+            'SELECT 1
+             FROM alarmes
+             WHERE coleta_id = :coleta_id
+               AND aluno_id = :aluno_id
+               AND curso_id = :curso_id
+               AND visualizado = 0
+               AND codigo_disciplina IN (' . implode(', ', $placeholders) . ')
+             LIMIT 1'
+        );
+        $statement->execute($params);
+
+        return $statement->fetchColumn() !== false;
+    }
+
+    /**
      * Ingressantes do periodo com frequencia do curso < 75%.
      *
      * @param list<int>|null $cursoIds

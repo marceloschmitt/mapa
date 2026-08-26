@@ -217,9 +217,194 @@ class AlarmeEmailService
     }
 
     /**
-     * @param array{enviados: int, ignorados: int, falhas: int, mensagens: list<string>} $resumo
+     * Envio manual (professor/coordenador): mesma mensagem do automático,
+     * ignora janela de 7 dias e o interruptor de alarmes aos alunos.
+     * Marca os alarmes abertos como email_automatico.
+     *
+     * @param string|null $codigoDisciplina Se informado, limita aos alarmes dessa disciplina.
+     * @return array{ok: bool, mensagem: string}
      */
-    private function prepararMailer(string $tipo, array &$resumo): ?SmtpMailer
+    public function enviarForcadoAoAluno(
+        int $coletaId,
+        int $alunoId,
+        int $cursoId,
+        ?int $usuarioId = null,
+        ?string $codigoDisciplina = null
+    ): array {
+        $resumo = $this->resumoParcial();
+        $mailer = $this->prepararMailer('alunos', $resumo, true);
+        if ($mailer === null) {
+            return [
+                'ok' => false,
+                'mensagem' => $resumo['mensagens'][0] ?? 'Não foi possível preparar o envio.',
+            ];
+        }
+
+        $trancados = $this->mapaTrancadosColeta($coletaId);
+        if (isset($trancados[$alunoId . '|' . $cursoId])) {
+            return [
+                'ok' => false,
+                'mensagem' => 'Aluno trancado — e-mail não é enviado.',
+            ];
+        }
+
+        $grupo = $this->montarGrupoAlunoParaEnvio(
+            $coletaId,
+            $alunoId,
+            $cursoId,
+            false,
+            $codigoDisciplina
+        );
+        if ($grupo === null) {
+            return [
+                'ok' => false,
+                'mensagem' => $codigoDisciplina !== null
+                    ? 'Nenhum alarme aberto nesta disciplina.'
+                    : 'Nenhum alarme aberto para este aluno nesta coleta.',
+            ];
+        }
+
+        $destinatario = trim((string)($grupo['email'] ?? ''));
+        if ($destinatario === '' || !filter_var($destinatario, FILTER_VALIDATE_EMAIL)) {
+            return [
+                'ok' => false,
+                'mensagem' => 'Sem e-mail válido no cadastro do aluno.',
+            ];
+        }
+
+        try {
+            $mailer->send([$destinatario], $this->montarAssunto(), $this->montarMensagem($grupo));
+            $this->registrarEnvio($coletaId, $grupo, $destinatario);
+            $this->marcarAlarmesEnviados($grupo['alarme_ids'], $usuarioId);
+        } catch (Throwable $e) {
+            return [
+                'ok' => false,
+                'mensagem' => 'Falha ao enviar: ' . $e->getMessage(),
+            ];
+        }
+
+        $sufixo = '';
+        if ($codigoDisciplina !== null) {
+            $nomeDisc = trim((string)($grupo['alarmes'][0]['disciplina'] ?? ''));
+            $rotuloDisc = $codigoDisciplina !== ''
+                ? $codigoDisciplina . ($nomeDisc !== '' ? ' — ' . $nomeDisc : '')
+                : ($nomeDisc !== '' ? $nomeDisc : 'disciplina');
+            $sufixo = ' (' . $rotuloDisc . ')';
+        }
+
+        return [
+            'ok' => true,
+            'mensagem' => 'E-mail enviado para ' . $destinatario . $sufixo . '.',
+        ];
+    }
+
+    /**
+     * @return array{
+     *   aluno_id: int,
+     *   curso_id: int,
+     *   nome: string,
+     *   matricula: string,
+     *   email: string,
+     *   nome_curso: string,
+     *   alarme_ids: list<int>,
+     *   alarmes: list<array<string, mixed>>
+     * }|null
+     */
+    public function montarGrupoAlunoParaEnvio(
+        int $coletaId,
+        int $alunoId,
+        int $cursoId,
+        bool $exigirCritico = true,
+        ?string $codigoDisciplina = null
+    ): ?array {
+        $params = [
+            'coleta_id' => $coletaId,
+            'aluno_id' => $alunoId,
+            'curso_id' => $cursoId,
+        ];
+        $filtroDisc = '';
+        if ($codigoDisciplina !== null) {
+            $filtroDisc = ' AND al.codigo_disciplina = :codigo_disciplina';
+            $params['codigo_disciplina'] = $codigoDisciplina;
+        }
+
+        if ($exigirCritico) {
+            $check = $this->pdo->prepare(
+                'SELECT 1
+                 FROM alarmes al
+                 WHERE al.coleta_id = :coleta_id
+                   AND al.aluno_id = :aluno_id
+                   AND al.curso_id = :curso_id
+                   AND al.severidade = \'critico\'
+                   AND al.visualizado = 0'
+                . $filtroDisc
+                . ' LIMIT 1'
+            );
+            $check->execute($params);
+            if ($check->fetchColumn() === false) {
+                return null;
+            }
+        }
+
+        $statement = $this->pdo->prepare(
+            'SELECT al.id, al.tipo, al.severidade, al.mensagem, al.codigo_disciplina, al.disciplina,
+                    al.aluno_id, al.curso_id,
+                    a.nome AS aluno_nome, a.nome_social AS aluno_nome_social,
+                    a.email AS aluno_email, a.matricula,
+                    c.nome_curso
+             FROM alarmes al
+             INNER JOIN alunos a ON a.id = al.aluno_id
+             INNER JOIN cursos c ON c.id = al.curso_id
+             WHERE al.coleta_id = :coleta_id
+               AND al.aluno_id = :aluno_id
+               AND al.curso_id = :curso_id
+               AND al.visualizado = 0'
+            . $filtroDisc
+            . ' ORDER BY CASE al.severidade WHEN \'critico\' THEN 0 ELSE 1 END,
+                      al.disciplina, al.tipo'
+        );
+        $statement->execute($params);
+        $rows = $statement->fetchAll();
+        if ($rows === []) {
+            return null;
+        }
+
+        $primeiro = $rows[0];
+        $nomeSocial = trim((string)($primeiro['aluno_nome_social'] ?? ''));
+        $nome = $nomeSocial !== ''
+            ? $nomeSocial
+            : trim((string)($primeiro['aluno_nome'] ?? ''));
+
+        $grupo = [
+            'aluno_id' => $alunoId,
+            'curso_id' => $cursoId,
+            'nome' => $nome,
+            'matricula' => trim((string)($primeiro['matricula'] ?? '')),
+            'email' => trim((string)($primeiro['aluno_email'] ?? '')),
+            'nome_curso' => trim((string)($primeiro['nome_curso'] ?? '')),
+            'alarme_ids' => [],
+            'alarmes' => [],
+        ];
+
+        foreach ($rows as $row) {
+            $grupo['alarme_ids'][] = (int)$row['id'];
+            $grupo['alarmes'][] = [
+                'tipo' => (string)$row['tipo'],
+                'severidade' => (string)$row['severidade'],
+                'mensagem' => (string)$row['mensagem'],
+                'disciplina' => (string)($row['disciplina'] ?? ''),
+                'codigo_disciplina' => (string)($row['codigo_disciplina'] ?? ''),
+            ];
+        }
+
+        return $grupo;
+    }
+
+    /**
+     * @param array{enviados: int, ignorados: int, falhas: int, mensagens: list<string>} $resumo
+     * @param bool $ignorarInterruptor Se true, não exige o interruptor de alarmes_alunos/staff.
+     */
+    private function prepararMailer(string $tipo, array &$resumo, bool $ignorarInterruptor = false): ?SmtpMailer
     {
         if (!$this->config->permiteEnvioEmail()) {
             $resumo['mensagens'][] = 'Envio bloqueado neste ambiente (EMAIL_SEND=false no .env).';
@@ -227,11 +412,11 @@ class AlarmeEmailService
         }
 
         $emailConfig = $this->config->getEmailConfig();
-        if ($tipo === 'alunos' && !$emailConfig['alarmes_alunos_enabled']) {
+        if (!$ignorarInterruptor && $tipo === 'alunos' && !$emailConfig['alarmes_alunos_enabled']) {
             $resumo['mensagens'][] = 'Envio automatico de alarmes aos alunos desligado na configuracao.';
             return null;
         }
-        if ($tipo === 'staff' && !$emailConfig['alarmes_staff_enabled']) {
+        if (!$ignorarInterruptor && $tipo === 'staff' && !$emailConfig['alarmes_staff_enabled']) {
             $resumo['mensagens'][] = 'Envio automatico de avisos ao staff desligado na configuracao.';
             return null;
         }
@@ -1498,14 +1683,17 @@ class AlarmeEmailService
     /**
      * @param list<int> $alarmeIds
      */
-    private function marcarAlarmesEnviados(array $alarmeIds): void
+    private function marcarAlarmesEnviados(array $alarmeIds, ?int $usuarioId = null): void
     {
         if ($alarmeIds === []) {
             return;
         }
 
         $placeholders = [];
-        $params = ['contato_tipo' => self::CONTATO_AUTOMATICO];
+        $params = [
+            'contato_tipo' => self::CONTATO_AUTOMATICO,
+            'usuario_id' => $usuarioId,
+        ];
         foreach ($alarmeIds as $index => $id) {
             $key = 'id_' . $index;
             $placeholders[] = ':' . $key;
@@ -1516,7 +1704,7 @@ class AlarmeEmailService
             'UPDATE alarmes
              SET visualizado = 1,
                  visualizado_em = datetime(\'now\'),
-                 visualizado_por = NULL,
+                 visualizado_por = :usuario_id,
                  contato_tipo = :contato_tipo
              WHERE id IN (' . implode(', ', $placeholders) . ')
                AND visualizado = 0'

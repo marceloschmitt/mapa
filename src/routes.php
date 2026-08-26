@@ -30,6 +30,7 @@ return static function (Router $router): void {
     $router->get('/analytics', [AnalyticsController::class, 'index']);
     $router->get('/alarmes', [AlarmeController::class, 'index']);
     $router->post('/alarmes/visualizar', [AlarmeController::class, 'visualizar']);
+    $router->post('/alarmes/enviar-email', [AlarmeController::class, 'enviarEmail']);
     $router->get('/ingressantes', [IngressantesController::class, 'index']);
     $router->get('/trancados', [TrancadosController::class, 'index']);
     $router->get('/perda-vaga', [PerdaVagaController::class, 'index']);
