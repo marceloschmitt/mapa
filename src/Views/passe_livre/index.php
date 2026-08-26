@@ -9,6 +9,7 @@ $cursosDisponiveis = $cursosDisponiveis ?? [];
 $filtroNome = (string)($filtroNome ?? '');
 $meta = $meta ?? null;
 $mostrarBadgeCurso = $semSeletorCurso;
+$podeGerarPasseLivre = !empty($podeGerarPasseLivre);
 
 /**
  * @param mixed $valor
@@ -54,40 +55,56 @@ $fmtPct = static function ($valor): string {
             </div>
         <?php endif; ?>
     </div>
-    <?php if (is_array($meta)): ?>
-        <form method="get" action="<?= htmlspecialchars(url('/passe-livre'), ENT_QUOTES, 'UTF-8') ?>"
-              class="d-flex flex-wrap align-items-end gap-2">
-            <div>
-                <label for="filtro-nome" class="form-label mb-0 small text-secondary">Nome</label>
-                <input type="search" class="form-control" id="filtro-nome" name="nome"
-                       value="<?= htmlspecialchars($filtroNome, ENT_QUOTES, 'UTF-8') ?>"
-                       placeholder="Filtrar por nome" style="min-width: 200px;"
-                       autocomplete="off">
+    <div class="d-flex flex-column align-items-stretch align-items-md-end gap-2">
+        <?php if ($podeGerarPasseLivre): ?>
+            <div class="text-md-end">
+                <form method="post" action="<?= htmlspecialchars(url('/passe-livre/gerar'), ENT_QUOTES, 'UTF-8') ?>">
+                    <button type="submit" class="btn btn-primary">Gerar passe livre</button>
+                </form>
+                <p class="small text-secondary mb-0 mt-1" style="max-width: 280px;">
+                    Essa função só precisa ser executada no início do semestre, uma vez.
+                </p>
             </div>
-            <?php if (!$semSeletorCurso && $cursosDisponiveis !== []): ?>
+        <?php endif; ?>
+        <?php if (is_array($meta)): ?>
+            <form method="get" action="<?= htmlspecialchars(url('/passe-livre'), ENT_QUOTES, 'UTF-8') ?>"
+                  class="d-flex flex-wrap align-items-end gap-2">
                 <div>
-                    <label for="curso" class="form-label mb-0 small text-secondary">Curso</label>
-                    <select class="form-select" id="curso" name="curso" style="min-width: 260px;">
-                        <option value="todos" <?= $cursoSelecionado === 'todos' ? 'selected' : '' ?>>
-                            <?= htmlspecialchars($rotuloGeral ?? 'Todos os cursos', ENT_QUOTES, 'UTF-8') ?>
-                        </option>
-                        <?php foreach ($cursosDisponiveis as $curso): ?>
-                            <option value="<?= (int)$curso['id'] ?>"
-                                <?= $cursoSelecionado === (string)$curso['id'] ? 'selected' : '' ?>>
-                                <?= htmlspecialchars((string)$curso['nome_curso'], ENT_QUOTES, 'UTF-8') ?>
-                            </option>
-                        <?php endforeach; ?>
-                    </select>
+                    <label for="filtro-nome" class="form-label mb-0 small text-secondary">Nome</label>
+                    <input type="search" class="form-control" id="filtro-nome" name="nome"
+                           value="<?= htmlspecialchars($filtroNome, ENT_QUOTES, 'UTF-8') ?>"
+                           placeholder="Filtrar por nome" style="min-width: 200px;"
+                           autocomplete="off">
                 </div>
-            <?php endif; ?>
-            <button type="submit" class="btn btn-primary">Filtrar</button>
-            <?php if ($filtroNome !== '' || (!$semSeletorCurso && $cursoSelecionado !== 'todos')): ?>
-                <a href="<?= htmlspecialchars(url('/passe-livre'), ENT_QUOTES, 'UTF-8') ?>"
-                   class="btn btn-outline-secondary">Limpar</a>
-            <?php endif; ?>
-        </form>
-    <?php endif; ?>
+                <?php if (!$semSeletorCurso && $cursosDisponiveis !== []): ?>
+                    <div>
+                        <label for="curso" class="form-label mb-0 small text-secondary">Curso</label>
+                        <select class="form-select" id="curso" name="curso" style="min-width: 260px;">
+                            <option value="todos" <?= $cursoSelecionado === 'todos' ? 'selected' : '' ?>>
+                                <?= htmlspecialchars($rotuloGeral ?? 'Todos os cursos', ENT_QUOTES, 'UTF-8') ?>
+                            </option>
+                            <?php foreach ($cursosDisponiveis as $curso): ?>
+                                <option value="<?= (int)$curso['id'] ?>"
+                                    <?= $cursoSelecionado === (string)$curso['id'] ? 'selected' : '' ?>>
+                                    <?= htmlspecialchars((string)$curso['nome_curso'], ENT_QUOTES, 'UTF-8') ?>
+                                </option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                <?php endif; ?>
+                <button type="submit" class="btn btn-outline-primary">Filtrar</button>
+                <?php if ($filtroNome !== '' || (!$semSeletorCurso && $cursoSelecionado !== 'todos')): ?>
+                    <a href="<?= htmlspecialchars(url('/passe-livre'), ENT_QUOTES, 'UTF-8') ?>"
+                       class="btn btn-outline-secondary">Limpar</a>
+                <?php endif; ?>
+            </form>
+        <?php endif; ?>
+    </div>
 </div>
+
+<?php if (!empty($sucesso)): ?>
+    <div class="alert alert-success"><?= htmlspecialchars($sucesso, ENT_QUOTES, 'UTF-8') ?></div>
+<?php endif; ?>
 
 <?php if (!empty($erro)): ?>
     <div class="alert alert-danger"><?= htmlspecialchars($erro, ENT_QUOTES, 'UTF-8') ?></div>
@@ -135,6 +152,7 @@ $fmtPct = static function ($valor): string {
                                 'nome' => $nome,
                                 'matricula' => (string)($linha['matricula'] ?? ''),
                                 'curso' => (string)($linha['nome_curso'] ?? ''),
+                                'periodo' => (string)($linha['periodo'] ?? ($meta['periodo'] ?? '')),
                                 'frequencia' => $linha['frequencia'],
                                 'disciplinas' => array_map(
                                     static function (array $d): array {
@@ -174,7 +192,7 @@ $fmtPct = static function ($valor): string {
 
     <div class="modal fade" id="modalPasseLivre" tabindex="-1"
          aria-labelledby="modalPasseLivreTitulo" aria-hidden="true">
-        <div class="modal-dialog modal-dialog-scrollable">
+        <div class="modal-dialog modal-lg modal-dialog-scrollable">
             <div class="modal-content">
                 <div class="modal-header">
                     <div>
@@ -193,6 +211,7 @@ $fmtPct = static function ($valor): string {
                         <table class="table table-sm align-middle mb-0 small">
                             <thead class="table-light">
                                 <tr>
+                                    <th>Semestre</th>
                                     <th>Código</th>
                                     <th>Disciplina</th>
                                     <th class="text-end">Frequência</th>
@@ -255,16 +274,21 @@ $fmtPct = static function ($valor): string {
             titulo.textContent = dados.nome || 'Frequência';
             meta.textContent = [
                 dados.matricula ? ('Matrícula ' + dados.matricula) : '',
-                dados.curso || ''
+                dados.curso || '',
+                dados.periodo ? ('Semestre ' + dados.periodo) : ''
             ].filter(Boolean).join(' · ');
             geral.textContent = fmtPct(dados.frequencia);
 
             tbody.innerHTML = '';
             const discs = Array.isArray(dados.disciplinas) ? dados.disciplinas : [];
             vazio.classList.toggle('d-none', discs.length > 0);
+            const periodo = dados.periodo || '';
             discs.forEach(function (d) {
                 const tr = document.createElement('tr');
                 tr.innerHTML =
+                    '<td>' + (periodo
+                        ? escapeHtml(periodo)
+                        : '<span class="text-secondary">—</span>') + '</td>' +
                     '<td>' + (d.codigo
                         ? '<code>' + escapeHtml(d.codigo) + '</code>'
                         : '<span class="text-secondary">—</span>') + '</td>' +

@@ -5,6 +5,7 @@ namespace Mapa\Controllers;
 
 use Mapa\Core\Auth;
 use Mapa\Core\Controller;
+use Mapa\Core\Session;
 use Mapa\Models\AnalyticsRepository;
 
 class PasseLivreController extends Controller
@@ -19,6 +20,7 @@ class PasseLivreController extends Controller
         $isCoordenador = Auth::isCoordenador();
         $isProfessor = Auth::isProfessor();
         $semSeletorCurso = $isCoordenador || $isProfessor;
+        $podeGerar = Auth::canGerarPasseLivre();
 
         $cursosDisponiveis = $semSeletorCurso ? [] : $repo->listarCursos(null);
         $cursoSelecionado = $this->cursoSelecionado($cursosDisponiveis);
@@ -41,6 +43,13 @@ class PasseLivreController extends Controller
             $disciplinasPorLinha = $repo->disciplinasPasseLivre($ids);
         }
 
+        $erro = Session::flash('erro');
+        if ($erro === null && $meta === null) {
+            $erro = $podeGerar
+                ? 'Nenhuma análise de passe livre gerada. Use o botão “Gerar passe livre”.'
+                : 'Nenhuma análise de passe livre gerada.';
+        }
+
         $this->render('passe_livre/index', [
             'meta' => $meta,
             'linhas' => $linhas,
@@ -53,11 +62,60 @@ class PasseLivreController extends Controller
             'rotuloGeral' => 'Todos os cursos',
             'semSeletorCurso' => $semSeletorCurso,
             'avisoCoordenador' => $escopo['aviso'],
-            'erro' => $meta === null
-                ? 'Nenhuma análise de passe livre gerada. Execute: python3 python/gerar_passe_livre.py'
-                : null,
+            'erro' => $erro,
+            'sucesso' => Session::flash('sucesso'),
+            'podeGerarPasseLivre' => $podeGerar,
             'isAdmin' => Auth::isAdmin(),
         ]);
+    }
+
+    public function gerar(): void
+    {
+        $this->requireAuth();
+        if (!Auth::canGerarPasseLivre()) {
+            http_response_code(403);
+            Session::flash('erro', 'Acesso restrito a administradores e perfil geral.');
+            $this->redirect('/passe-livre');
+        }
+
+        $root = dirname(__DIR__, 2);
+        $script = $root . '/python/gerar_passe_livre.py';
+        if (!is_file($script)) {
+            Session::flash('erro', 'Script python/gerar_passe_livre.py não encontrado.');
+            $this->redirect('/passe-livre');
+        }
+
+        $dataDir = $root . '/data';
+        if (!is_dir($dataDir)) {
+            @mkdir($dataDir, 0775, true);
+        }
+        $log = $dataDir . '/passe_livre.log';
+        Session::flash(
+            'sucesso',
+            'Geração de passe livre iniciada. Atualize a página em alguns minutos.'
+        );
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        $this->dispararEmSegundoPlano(sprintf(
+            'cd %s && nohup python3 %s >> %s 2>&1 < /dev/null',
+            escapeshellarg($root),
+            escapeshellarg($script),
+            escapeshellarg($log)
+        ));
+        $this->redirect('/passe-livre');
+    }
+
+    private function dispararEmSegundoPlano(string $comando): void
+    {
+        if (PHP_OS_FAMILY === 'Windows') {
+            pclose(popen('start /B ' . $comando, 'r'));
+
+            return;
+        }
+
+        // Subshell em background: PHP não espera o Python terminar (exec() com & bloqueia).
+        pclose(popen('(' . $comando . ') > /dev/null 2>&1 &', 'r'));
     }
 
     /**

@@ -2,15 +2,15 @@
 """Gera dados de passe livre (frequencia do semestre anterior) — manual.
 
 Usa alunos ATIVO/FORMANDO do semestre atual (resposta_matriculas.json ou BD)
-e consulta a frequencia de cada um no intervalo de datas do semestre anterior.
-Grava em passe_livre_* (sem entrar em executar_coleta.py).
+e consulta a frequencia mensal de cada um com frequencia_periodo do semestre
+anterior. Grava em passe_livre_* (sem entrar em executar_coleta.py).
 
 Sempre consulta a API de alunos (nao usa cache JSON de frequencia).
 
 Uso:
     python3 gerar_passe_livre.py
     python3 gerar_passe_livre.py 2026/1
-    python3 gerar_passe_livre.py --concorrencia 8 --timeout 120
+    python3 gerar_passe_livre.py --concorrencia 50 --timeout 120
     python3 gerar_passe_livre.py --limite 20
 """
 
@@ -26,7 +26,6 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from analisar_frequencia import extrair_disciplinas, extrair_frequencia_geral
 from api_auth import (
     USER_AGENT,
     carregar_config_api,
@@ -35,17 +34,16 @@ from api_auth import (
     url_alunos,
     verificar_ssl,
 )
+from consulta_alunos import eh_erro_http_temporario, eh_erro_temporario
 from db import conectar, fechar, row_to_dict
 from paths import JSON_RESPOSTA_MATRICULAS
 from status_aluno import status_eh_controle
 
-# Semestre passado sobrecarrega a API com concorrencia alta (trava em timeouts).
-CONCORRENCIA = 8
+# Mesmos defaults de consulta_alunos.py (modo mensal e mais leve que intervalo).
+CONCORRENCIA = 50
 TIMEOUT_SEGUNDOS = 120
-TENTATIVAS = 2
-PAUSA_RETRY_SEG = 2.0
-TAMANHO_LOTE = 64
-PAUSA_LOTE_ERROS_SEG = 5.0
+TENTATIVAS = 3
+FREQUENCIA_GLOBAL = "FREQUÊNCIA GLOBAL"
 
 
 def semestre_anterior(periodo: str) -> str:
@@ -86,6 +84,14 @@ def datas_padrao_semestre(periodo: str) -> tuple[str, str]:
     return f"01-08-{ano}", f"31-12-{ano}"
 
 
+def limpar_url_params(url: str) -> str:
+    """Remove '&' / '?' sobrando apos editar query string."""
+    url = re.sub(r"\?&+", "?", url)
+    url = re.sub(r"&&+", "&", url)
+    url = re.sub(r"[?&]$", "", url)
+    return url
+
+
 def consultar_webservice(
     url: str,
     token: str,
@@ -106,24 +112,79 @@ def consultar_webservice(
         return response.getcode(), response.read().decode("utf-8")
 
 
-def montar_url_alunos_periodo(
-    base: str,
-    login: str,
-    data_inicial: str,
-    data_final: str,
-) -> str:
-    """URL de alunos com datas do semestre-alvo (ignora datas do config atual)."""
+def montar_url_alunos_mensal(base: str, login: str, periodo: str) -> str:
+    """URL de alunos em modo mensal com frequencia_periodo (sem datas)."""
     url = base
-    url = re.sub(r"([?&])frequencia_data_inicial=[^&]*", r"\1", url)
-    url = re.sub(r"([?&])frequencia_data_final=[^&]*", r"\1", url)
-    url = re.sub(r"\?&+", "?", url)
-    url = re.sub(r"&&+", "&", url)
-    url = re.sub(r"[?&]$", "", url)
+    if re.search(r"[?&]tipo_frequencia=", url):
+        url = re.sub(r"([?&])tipo_frequencia=[^&]*", r"\1tipo_frequencia=mensal", url)
+    else:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}tipo_frequencia=mensal"
+
+    for param in (
+        "frequencia_data_inicial",
+        "frequencia_data_final",
+        "frequencia_periodo",
+    ):
+        url = re.sub(rf"([?&]){param}=[^&]*", r"\1", url)
+    url = limpar_url_params(url)
     sep = "&" if "?" in url else "?"
-    return (
-        f"{url}{sep}frequencia_data_inicial={data_inicial}"
-        f"&frequencia_data_final={data_final}"
-    ).format(login=login)
+    return f"{url}{sep}frequencia_periodo={periodo}".format(login=login)
+
+
+def parse_nome_disciplina_mensal(chave: str) -> tuple[str, str]:
+    """Separa 'NOME (CODIGO)' em (codigo, nome)."""
+    texto = str(chave or "").strip()
+    match = re.match(r"^(.*?)\s*\(([^)]+)\)\s*$", texto)
+    if match:
+        nome = match.group(1).strip()
+        codigo = match.group(2).strip()
+        return codigo, nome or texto
+    return "", texto
+
+
+def extrair_frequencia_geral_mensal(frequencias: dict[str, Any]) -> dict[str, Any] | None:
+    """Percentual do curso a partir de FREQUÊNCIA GLOBAL (modo mensal)."""
+    disciplinas = frequencias.get("disciplinas")
+    if not isinstance(disciplinas, dict):
+        return None
+    global_ = disciplinas.get(FREQUENCIA_GLOBAL)
+    if not isinstance(global_, dict):
+        return None
+    total = global_.get("total")
+    if not isinstance(total, dict):
+        return None
+    pct = total.get("percentual_frequencia")
+    if pct is None:
+        return None
+    return {"percentual_frequencia_total": pct}
+
+
+def extrair_disciplinas_mensal(frequencias: dict[str, Any]) -> list[dict[str, Any]]:
+    """Disciplinas do modo mensal (ignora FREQUÊNCIA GLOBAL)."""
+    disciplinas = frequencias.get("disciplinas")
+    if not isinstance(disciplinas, dict):
+        return []
+
+    saida: list[dict[str, Any]] = []
+    for chave, dados in disciplinas.items():
+        if str(chave).strip().upper() == FREQUENCIA_GLOBAL.upper():
+            continue
+        if not isinstance(dados, dict):
+            continue
+        total = dados.get("total")
+        if not isinstance(total, dict):
+            continue
+        pct = total.get("percentual_frequencia")
+        if pct is None and not dados.get("possui_controle_frequencia"):
+            continue
+        codigo, nome = parse_nome_disciplina_mensal(str(chave))
+        saida.append({
+            "codigo_disciplina": codigo,
+            "disciplina": nome,
+            "percentual_frequencia": pct,
+        })
+    return saida
 
 
 def carregar_registros_matriculas(dados: Any) -> list[dict[str, Any]]:
@@ -240,8 +301,8 @@ def extrair_registros_passe_livre(aluno: dict[str, Any]) -> list[dict[str, Any]]
             frequencias = curso.get("frequencias", {})
             if not isinstance(frequencias, dict):
                 continue
-            frequencia_geral = extrair_frequencia_geral(frequencias)
-            disciplinas = extrair_disciplinas(frequencias)
+            frequencia_geral = extrair_frequencia_geral_mensal(frequencias)
+            disciplinas = extrair_disciplinas_mensal(frequencias)
             if frequencia_geral is None and disciplinas == []:
                 continue
 
@@ -265,41 +326,62 @@ def consultar_um_aluno(
     base_url: str,
     token: str,
     config: dict[str, str],
-    data_inicial: str,
-    data_final: str,
+    periodo: str,
     timeout: int,
     tentativas: int,
 ) -> dict[str, Any]:
-    """Consulta um aluno com retries e pausa entre tentativas."""
+    """Consulta um aluno (modo mensal) com retries como consulta_alunos.py."""
     login = aluno["login"]
-    url = montar_url_alunos_periodo(base_url, login, data_inicial, data_final)
+    url = montar_url_alunos_mensal(base_url, login, periodo)
     ultimo_erro = ""
     for tentativa in range(1, tentativas + 1):
         try:
             status, body = consultar_webservice(url, token, config, timeout=timeout)
             if status == 200:
+                try:
+                    dados = json.loads(body)
+                except json.JSONDecodeError as error:
+                    ultimo_erro = str(error)
+                    break
                 return {
                     "login": login,
                     "nome": aluno.get("nome", ""),
                     "matricula": aluno.get("matricula", ""),
                     "status": status,
-                    "dados": json.loads(body),
+                    "dados": dados,
+                    "tentativas": tentativa,
                 }
             ultimo_erro = f"HTTP {status}"
-            if status < 500:
-                break
-        except (HTTPError, URLError, TimeoutError, json.JSONDecodeError, OSError) as error:
+            if tentativa < tentativas and eh_erro_http_temporario(status):
+                continue
+            break
+        except HTTPError as error:
+            ultimo_erro = error.read().decode("utf-8", errors="replace")
+            if tentativa < tentativas and eh_erro_http_temporario(error.code):
+                continue
+            break
+        except URLError as error:
+            ultimo_erro = f"Falha de conexao: {error.reason}"
+            if tentativa < tentativas and eh_erro_temporario(ultimo_erro):
+                continue
+            break
+        except TimeoutError:
+            ultimo_erro = f"Tempo limite excedido ({timeout}s)."
+            if tentativa < tentativas:
+                continue
+            break
+        except OSError as error:
             ultimo_erro = str(error)
-            if isinstance(error, HTTPError) and error.code < 500:
-                break
-        if tentativa < tentativas:
-            time.sleep(PAUSA_RETRY_SEG)
+            if tentativa < tentativas and eh_erro_temporario(ultimo_erro):
+                continue
+            break
     return {
         "login": login,
         "nome": aluno.get("nome", ""),
         "matricula": aluno.get("matricula", ""),
         "status": 0,
         "erro": ultimo_erro,
+        "tentativas": tentativas,
     }
 
 
@@ -308,89 +390,75 @@ def consultar_alunos_periodo(
     *,
     config: dict[str, str],
     token: str,
-    data_inicial: str,
-    data_final: str,
+    periodo: str,
     concorrencia: int = CONCORRENCIA,
     timeout: int = TIMEOUT_SEGUNDOS,
     tentativas: int = TENTATIVAS,
-    ao_lote: Any | None = None,
-) -> tuple[list[dict[str, Any]], int]:
-    """Consulta frequencia em lotes; opcionalmente grava a cada lote (ao_lote).
+    ao_aluno: Any | None = None,
+) -> int:
+    """Consulta frequencia mensal em paralelo; grava no BD a cada aluno (ao_aluno).
 
     Returns:
-        Tupla (respostas brutas da API, total de registros gravados via ao_lote).
+        Total de registros aluno/curso gravados via ao_aluno.
     """
     base = url_alunos(config)
-    resultados: list[dict[str, Any]] = []
     gravados = 0
     erros = 0
+    feitos = 0
     total = len(logins)
     inicio = time.perf_counter()
     print(
-        f"Consultando frequencia de {total} aluno(s) ({data_inicial} a {data_final})..."
+        f"Consultando frequencia mensal de {total} aluno(s) "
+        f"(frequencia_periodo={periodo})..."
     )
     print(
         f"  concorrencia={concorrencia}, timeout={timeout}s, "
-        f"tentativas={tentativas}, lote={TAMANHO_LOTE}",
+        f"tentativas={tentativas}",
         flush=True,
     )
 
-    for offset in range(0, total, TAMANHO_LOTE):
-        lote = logins[offset : offset + TAMANHO_LOTE]
-        erros_lote = 0
-        respostas_lote: list[dict[str, Any]] = []
-        with ThreadPoolExecutor(max_workers=concorrencia) as pool:
-            futures = [
-                pool.submit(
-                    consultar_um_aluno,
-                    aluno,
-                    base_url=base,
-                    token=token,
-                    config=config,
-                    data_inicial=data_inicial,
-                    data_final=data_final,
-                    timeout=timeout,
-                    tentativas=tentativas,
+    with ThreadPoolExecutor(max_workers=concorrencia) as pool:
+        futures = {
+            pool.submit(
+                consultar_um_aluno,
+                aluno,
+                base_url=base,
+                token=token,
+                config=config,
+                periodo=periodo,
+                timeout=timeout,
+                tentativas=tentativas,
+            ): aluno
+            for aluno in logins
+        }
+        for future in as_completed(futures):
+            item = future.result()
+            feitos += 1
+            if item.get("status") != 200:
+                erros += 1
+                print(
+                    f"  ERRO login {item.get('login')} -> "
+                    f"{item.get('erro') or item.get('status')}",
+                    flush=True,
                 )
-                for aluno in lote
-            ]
-            for future in as_completed(futures):
-                item = future.result()
-                if item.get("status") != 200:
-                    erros += 1
-                    erros_lote += 1
-                respostas_lote.append(item)
-                resultados.append(item)
-                feitos = len(resultados)
-                if feitos % 25 == 0 or feitos == total:
-                    decorrido = time.perf_counter() - inicio
-                    ritmo = (feitos / decorrido) * 60.0 if decorrido > 0 else 0.0
-                    restante = total - feitos
-                    eta_min = (restante / ritmo) if ritmo > 0 else 0.0
-                    print(
-                        f"  {feitos}/{total} (erros: {erros}, "
-                        f"{ritmo:.0f}/min, {decorrido / 60:.1f} min"
-                        f"{f', ~{eta_min:.0f} min restantes' if feitos < total else ''})",
-                        flush=True,
-                    )
+            elif ao_aluno is not None:
+                registros = extrair_registros_passe_livre(item)
+                if registros:
+                    gravados += int(ao_aluno(registros))
 
-        if ao_lote is not None:
-            registros_lote: list[dict[str, Any]] = []
-            for aluno in respostas_lote:
-                registros_lote.extend(extrair_registros_passe_livre(aluno))
-            n = int(ao_lote(registros_lote))
-            gravados += n
-            print(f"  Gravados neste lote: {n} (acumulado BD: {gravados})", flush=True)
+            if feitos % 50 == 0 or feitos == total:
+                decorrido = time.perf_counter() - inicio
+                ritmo = (feitos / decorrido) * 60.0 if decorrido > 0 else 0.0
+                restante = total - feitos
+                eta_min = (restante / ritmo) if ritmo > 0 else 0.0
+                print(
+                    f"  {feitos}/{total} (erros: {erros}, gravados: {gravados}, "
+                    f"{ritmo:.0f}/min, {decorrido / 60:.1f} min"
+                    f"{f', ~{eta_min:.0f} min restantes' if feitos < total else ''})",
+                    flush=True,
+                )
 
-        if erros_lote > max(3, len(lote) // 4):
-            print(
-                f"  Lote com muitos erros ({erros_lote}/{len(lote)}); "
-                f"pausa {PAUSA_LOTE_ERROS_SEG:.0f}s...",
-                flush=True,
-            )
-            time.sleep(PAUSA_LOTE_ERROS_SEG)
-
-    return resultados, gravados
+    return gravados
 
 
 def upsert_aluno(cursor: Any, registro: dict[str, Any]) -> int:
@@ -547,8 +615,8 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Padrao: imediatamente anterior ao periodo da API."
         ),
     )
-    parser.add_argument("--data-inicial", default=None, help="DD-MM-AAAA")
-    parser.add_argument("--data-final", default=None, help="DD-MM-AAAA")
+    parser.add_argument("--data-inicial", default=None, help="DD-MM-AAAA (meta na tela)")
+    parser.add_argument("--data-final", default=None, help="DD-MM-AAAA (meta na tela)")
     parser.add_argument(
         "--concorrencia",
         type=int,
@@ -602,9 +670,10 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Erro: {error}", file=sys.stderr)
         return 1
 
-    print("Passe livre — frequencia do semestre anterior")
+    print("Passe livre — frequencia mensal do semestre anterior")
     print(f"Alunos: ATIVO/FORMANDO do semestre atual ({periodo_ref or 'coleta local'})")
-    print(f"Frequencia: semestre {periodo} ({data_inicial} a {data_final})")
+    print(f"Frequencia: tipo_frequencia=mensal, frequencia_periodo={periodo}")
+    print(f"Meta (tela): {data_inicial} a {data_final}")
     if not verificar_ssl(config):
         print("Aviso: verificacao SSL desativada (api_verify_ssl=false).")
     print()
@@ -624,9 +693,9 @@ def main(argv: list[str] | None = None) -> int:
 
         gerado_em = time.strftime("%Y-%m-%d %H:%M:%S")
         limpar_passe_livre()
-        print("BD limpo; gravando a cada lote (tela atualiza durante a execucao).")
+        print("BD limpo; gravando a cada aluno (tela atualiza durante a execucao).")
 
-        def ao_lote(registros: list[dict[str, Any]]) -> int:
+        def ao_aluno(registros: list[dict[str, Any]]) -> int:
             return inserir_registros(
                 registros,
                 periodo=periodo,
@@ -635,16 +704,15 @@ def main(argv: list[str] | None = None) -> int:
                 gerado_em=gerado_em,
             )
 
-        _respostas, total = consultar_alunos_periodo(
+        total = consultar_alunos_periodo(
             logins,
             config=config,
             token=token,
-            data_inicial=data_inicial,
-            data_final=data_final,
+            periodo=periodo,
             concorrencia=concorrencia,
             timeout=timeout,
             tentativas=tentativas,
-            ao_lote=ao_lote,
+            ao_aluno=ao_aluno,
         )
     except (
         FileNotFoundError,

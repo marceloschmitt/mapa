@@ -93,6 +93,12 @@ class Auth
         return self::isAdmin() || self::isGeral() || self::isCoordenador();
     }
 
+    /** Administrador ou perfil geral — gerar passe livre pela tela. */
+    public static function canGerarPasseLivre(): bool
+    {
+        return self::isAdmin() || self::isGeral();
+    }
+
     /** @return list<int> */
     public static function cursoIds(): array
     {

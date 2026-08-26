@@ -36,6 +36,7 @@ return static function (Router $router): void {
     $router->get('/trancados', [TrancadosController::class, 'index']);
     $router->get('/perda-vaga', [PerdaVagaController::class, 'index']);
     $router->get('/passe-livre', [PasseLivreController::class, 'index']);
+    $router->post('/passe-livre/gerar', [PasseLivreController::class, 'gerar']);
     $router->get('/chamadas', [ChamadasController::class, 'index']);
     $router->get('/chamadas/exportar-atrasadas-1-semestre', [ChamadasController::class, 'exportarAtrasadasPrimeiroSemestre']);
 
