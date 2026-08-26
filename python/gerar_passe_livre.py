@@ -313,10 +313,16 @@ def consultar_alunos_periodo(
     concorrencia: int = CONCORRENCIA,
     timeout: int = TIMEOUT_SEGUNDOS,
     tentativas: int = TENTATIVAS,
-) -> list[dict[str, Any]]:
-    """Consulta frequencia em lotes (concorrencia baixa para nao trancar a API)."""
+    ao_lote: Any | None = None,
+) -> tuple[list[dict[str, Any]], int]:
+    """Consulta frequencia em lotes; opcionalmente grava a cada lote (ao_lote).
+
+    Returns:
+        Tupla (respostas brutas da API, total de registros gravados via ao_lote).
+    """
     base = url_alunos(config)
     resultados: list[dict[str, Any]] = []
+    gravados = 0
     erros = 0
     total = len(logins)
     inicio = time.perf_counter()
@@ -332,6 +338,7 @@ def consultar_alunos_periodo(
     for offset in range(0, total, TAMANHO_LOTE):
         lote = logins[offset : offset + TAMANHO_LOTE]
         erros_lote = 0
+        respostas_lote: list[dict[str, Any]] = []
         with ThreadPoolExecutor(max_workers=concorrencia) as pool:
             futures = [
                 pool.submit(
@@ -352,16 +359,28 @@ def consultar_alunos_periodo(
                 if item.get("status") != 200:
                     erros += 1
                     erros_lote += 1
+                respostas_lote.append(item)
                 resultados.append(item)
                 feitos = len(resultados)
                 if feitos % 25 == 0 or feitos == total:
                     decorrido = time.perf_counter() - inicio
-                    ritmo = feitos / decorrido if decorrido > 0 else 0
+                    ritmo = (feitos / decorrido) * 60.0 if decorrido > 0 else 0.0
+                    restante = total - feitos
+                    eta_min = (restante / ritmo) if ritmo > 0 else 0.0
                     print(
                         f"  {feitos}/{total} (erros: {erros}, "
-                        f"{ritmo:.1f}/min, {decorrido / 60:.1f} min)",
+                        f"{ritmo:.0f}/min, {decorrido / 60:.1f} min"
+                        f"{f', ~{eta_min:.0f} min restantes' if feitos < total else ''})",
                         flush=True,
                     )
+
+        if ao_lote is not None:
+            registros_lote: list[dict[str, Any]] = []
+            for aluno in respostas_lote:
+                registros_lote.extend(extrair_registros_passe_livre(aluno))
+            n = int(ao_lote(registros_lote))
+            gravados += n
+            print(f"  Gravados neste lote: {n} (acumulado BD: {gravados})", flush=True)
 
         if erros_lote > max(3, len(lote) // 4):
             print(
@@ -371,7 +390,7 @@ def consultar_alunos_periodo(
             )
             time.sleep(PAUSA_LOTE_ERROS_SEG)
 
-    return resultados
+    return resultados, gravados
 
 
 def upsert_aluno(cursor: Any, registro: dict[str, Any]) -> int:
@@ -415,19 +434,29 @@ def upsert_curso(cursor: Any, nome_curso: str) -> int:
     return int(row_to_dict(cursor.fetchone())["id"])
 
 
-def gravar_banco(
+def limpar_passe_livre() -> None:
+    """Remove dados anteriores de passe livre."""
+    conn = conectar()
+    cursor = conn.cursor()
+    cursor.execute("DELETE FROM passe_livre_disciplina")
+    cursor.execute("DELETE FROM passe_livre_aluno_curso")
+    conn.commit()
+
+
+def inserir_registros(
     registros: list[dict[str, Any]],
     *,
     periodo: str,
     data_inicial: str,
     data_final: str,
+    gerado_em: str,
 ) -> int:
-    """Substitui dados de passe livre (so percentual de frequencia)."""
+    """Insere registros no BD (sem limpar)."""
+    if not registros:
+        return 0
+
     conn = conectar()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM passe_livre_disciplina")
-    cursor.execute("DELETE FROM passe_livre_aluno_curso")
-
     total = 0
     for registro in registros:
         aluno_id = upsert_aluno(cursor, registro)
@@ -437,15 +466,16 @@ def gravar_banco(
         cursor.execute(
             """
             INSERT INTO passe_livre_aluno_curso (
-                periodo, data_inicial, data_final,
+                periodo, data_inicial, data_final, gerado_em,
                 aluno_id, curso_id, login, matricula,
                 nome, nome_social, email, nome_curso, frequencia
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 periodo,
                 data_inicial,
                 data_final,
+                gerado_em,
                 aluno_id,
                 curso_id,
                 registro["login"],
@@ -477,6 +507,27 @@ def gravar_banco(
 
     conn.commit()
     return total
+
+
+def gravar_banco(
+    registros: list[dict[str, Any]],
+    *,
+    periodo: str,
+    data_inicial: str,
+    data_final: str,
+    gerado_em: str | None = None,
+) -> int:
+    """Substitui dados de passe livre (so percentual de frequencia)."""
+    limpar_passe_livre()
+    if gerado_em is None:
+        gerado_em = time.strftime("%Y-%m-%d %H:%M:%S")
+    return inserir_registros(
+        registros,
+        periodo=periodo,
+        data_inicial=data_inicial,
+        data_final=data_final,
+        gerado_em=gerado_em,
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -570,7 +621,21 @@ def main(argv: list[str] | None = None) -> int:
         concorrencia = max(1, int(args.concorrencia))
         timeout = max(10, int(args.timeout))
         tentativas = max(1, int(args.tentativas))
-        respostas = consultar_alunos_periodo(
+
+        gerado_em = time.strftime("%Y-%m-%d %H:%M:%S")
+        limpar_passe_livre()
+        print("BD limpo; gravando a cada lote (tela atualiza durante a execucao).")
+
+        def ao_lote(registros: list[dict[str, Any]]) -> int:
+            return inserir_registros(
+                registros,
+                periodo=periodo,
+                data_inicial=data_inicial,
+                data_final=data_final,
+                gerado_em=gerado_em,
+            )
+
+        _respostas, total = consultar_alunos_periodo(
             logins,
             config=config,
             token=token,
@@ -579,6 +644,7 @@ def main(argv: list[str] | None = None) -> int:
             concorrencia=concorrencia,
             timeout=timeout,
             tentativas=tentativas,
+            ao_lote=ao_lote,
         )
     except (
         FileNotFoundError,
@@ -593,25 +659,8 @@ def main(argv: list[str] | None = None) -> int:
         fechar()
         return 1
 
-    registros: list[dict[str, Any]] = []
-    for aluno in respostas:
-        registros.extend(extrair_registros_passe_livre(aluno))
-    registros.sort(
-        key=lambda r: (
-            (r.get("nome_social") or r.get("nome") or "").upper(),
-            (r.get("nome_curso") or "").upper(),
-        )
-    )
-
-    print(f"\nRegistros aluno/curso com frequencia: {len(registros)}")
-    total = gravar_banco(
-        registros,
-        periodo=periodo,
-        data_inicial=data_inicial,
-        data_final=data_final,
-    )
     fechar()
-    print(f"{total} registro(s) gravado(s).")
+    print(f"\n{total} registro(s) gravado(s).")
     print("Tela: /index.php/passe-livre")
     return 0
 
