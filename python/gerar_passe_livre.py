@@ -61,6 +61,19 @@ def semestre_anterior(periodo: str) -> str:
     return f"{ano}/1"
 
 
+def ultimos_semestres_anteriores(periodo_atual: str, quantidade: int = 3) -> list[str]:
+    """Lista os N semestres imediatamente anteriores ao periodo atual."""
+    if quantidade < 1:
+        raise ValueError("quantidade deve ser >= 1.")
+    atual = validar_periodo(periodo_atual)
+    saida: list[str] = []
+    cursor = atual
+    for _ in range(quantidade):
+        cursor = semestre_anterior(cursor)
+        saida.append(cursor)
+    return saida
+
+
 def validar_periodo(periodo: str) -> str:
     """Valida e normaliza AAAA/S."""
     texto = periodo.strip()
@@ -615,6 +628,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
             "Padrao: imediatamente anterior ao periodo da API."
         ),
     )
+    parser.add_argument(
+        "--semestres",
+        type=int,
+        default=3,
+        help="Quantidade de semestres anteriores a gerar (padrao: 3).",
+    )
     parser.add_argument("--data-inicial", default=None, help="DD-MM-AAAA (meta na tela)")
     parser.add_argument("--data-final", default=None, help="DD-MM-AAAA (meta na tela)")
     parser.add_argument(
@@ -659,21 +678,26 @@ def main(argv: list[str] | None = None) -> int:
             return 1
 
         if args.periodo:
-            periodo = validar_periodo(args.periodo)
+            periodos = [validar_periodo(args.periodo)]
+        elif periodo_ref:
+            periodos = ultimos_semestres_anteriores(
+                validar_periodo(periodo_ref),
+                max(1, int(args.semestres)),
+            )
         else:
-            periodo = semestre_anterior(validar_periodo(periodo_ref))
-
-        data_ini_padrao, data_fim_padrao = datas_padrao_semestre(periodo)
-        data_inicial = (args.data_inicial or data_ini_padrao).strip()
-        data_final = (args.data_final or data_fim_padrao).strip()
+            print(
+                "Periodo atual ausente. Configure em /configuracoes/api "
+                "ou passe o semestre da frequencia (ex.: 2026/1).",
+                file=sys.stderr,
+            )
+            return 1
     except ValueError as error:
         print(f"Erro: {error}", file=sys.stderr)
         return 1
 
-    print("Passe livre — frequencia mensal do semestre anterior")
+    print("Passe livre — frequencia mensal (semestres anteriores)")
     print(f"Alunos: ATIVO/FORMANDO do semestre atual ({periodo_ref or 'coleta local'})")
-    print(f"Frequencia: tipo_frequencia=mensal, frequencia_periodo={periodo}")
-    print(f"Meta (tela): {data_inicial} a {data_final}")
+    print(f"Semestres: {', '.join(periodos)}")
     if not verificar_ssl(config):
         print("Aviso: verificacao SSL desativada (api_verify_ssl=false).")
     print()
@@ -695,25 +719,41 @@ def main(argv: list[str] | None = None) -> int:
         limpar_passe_livre()
         print("BD limpo; gravando a cada aluno (tela atualiza durante a execucao).")
 
-        def ao_aluno(registros: list[dict[str, Any]]) -> int:
-            return inserir_registros(
-                registros,
-                periodo=periodo,
-                data_inicial=data_inicial,
-                data_final=data_final,
-                gerado_em=gerado_em,
-            )
+        total_geral = 0
+        for periodo in periodos:
+            data_ini_padrao, data_fim_padrao = datas_padrao_semestre(periodo)
+            data_inicial = (args.data_inicial or data_ini_padrao).strip()
+            data_final = (args.data_final or data_fim_padrao).strip()
+            print()
+            print(f"--- {periodo} (tipo_frequencia=mensal) ---")
+            print(f"Meta (tela): {data_inicial} a {data_final}")
 
-        total = consultar_alunos_periodo(
-            logins,
-            config=config,
-            token=token,
-            periodo=periodo,
-            concorrencia=concorrencia,
-            timeout=timeout,
-            tentativas=tentativas,
-            ao_aluno=ao_aluno,
-        )
+            def ao_aluno(
+                registros: list[dict[str, Any]],
+                *,
+                _periodo: str = periodo,
+                _data_inicial: str = data_inicial,
+                _data_final: str = data_final,
+            ) -> int:
+                return inserir_registros(
+                    registros,
+                    periodo=_periodo,
+                    data_inicial=_data_inicial,
+                    data_final=_data_final,
+                    gerado_em=gerado_em,
+                )
+
+            total_geral += consultar_alunos_periodo(
+                logins,
+                config=config,
+                token=token,
+                periodo=periodo,
+                concorrencia=concorrencia,
+                timeout=timeout,
+                tentativas=tentativas,
+                ao_aluno=ao_aluno,
+            )
+        total = total_geral
     except (
         FileNotFoundError,
         ValueError,

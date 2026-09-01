@@ -1769,20 +1769,54 @@ class AnalyticsRepository
     }
 
     /**
-     * Metadados da ultima carga de passe livre (periodo/datas).
+     * Semestres com dados de passe livre (mais recente primeiro).
+     *
+     * @return list<string>
+     */
+    public function listarPeriodosPasseLivre(): array
+    {
+        $statement = $this->db->query(
+            'SELECT DISTINCT periodo
+             FROM passe_livre_aluno_curso
+             ORDER BY periodo DESC'
+        );
+        $periodos = [];
+        foreach ($statement->fetchAll() as $row) {
+            $periodo = trim((string)($row['periodo'] ?? ''));
+            if ($periodo !== '') {
+                $periodos[] = $periodo;
+            }
+        }
+
+        return $periodos;
+    }
+
+    /**
+     * Metadados da carga de passe livre de um semestre.
      *
      * @return array<string, mixed>|null
      */
-    public function metaPasseLivre(): ?array
+    public function metaPasseLivre(?string $periodo = null): ?array
     {
-        $statement = $this->db->query(
+        if ($periodo === null || trim($periodo) === '') {
+            $periodos = $this->listarPeriodosPasseLivre();
+            $periodo = $periodos[0] ?? '';
+            if ($periodo === '') {
+                return null;
+            }
+        }
+
+        $statement = $this->db->prepare(
             'SELECT periodo, data_inicial, data_final, gerado_em,
                     COUNT(*) AS total_registros
              FROM passe_livre_aluno_curso
+             WHERE periodo = :periodo
              GROUP BY periodo, data_inicial, data_final, gerado_em
              ORDER BY gerado_em DESC
              LIMIT 1'
         );
+        $statement->bindValue('periodo', trim($periodo), \PDO::PARAM_STR);
+        $statement->execute();
         $row = $statement->fetch();
 
         return $row === false ? null : $row;
@@ -1798,7 +1832,8 @@ class AnalyticsRepository
     public function linhasPasseLivre(
         ?array $cursoIds = null,
         ?array $codigosDisciplina = null,
-        string $nome = ''
+        string $nome = '',
+        ?string $periodo = null
     ): array {
         if (($cursoIds !== null && $cursoIds === [])
             || ($codigosDisciplina !== null && $codigosDisciplina === [])
@@ -1808,12 +1843,21 @@ class AnalyticsRepository
 
         $sql = 'SELECT pc.id, pc.aluno_id, pc.curso_id, pc.login, pc.matricula,
                        pc.nome, pc.nome_social, pc.email, pc.nome_curso,
-                       pc.frequencia, pc.periodo
+                       pc.frequencia, pc.periodo, pc.data_inicial, pc.data_final,
+                       ac.ano_semestre_ingresso
                 FROM passe_livre_aluno_curso pc
+                LEFT JOIN aluno_cursos ac
+                  ON ac.aluno_id = pc.aluno_id AND ac.curso_id = pc.curso_id
                 WHERE 1 = 1';
         $params = [];
 
         [$sql, $cursoParams] = $this->appendCursoFilter($sql, $cursoIds, 'pc.curso_id');
+
+        $periodo = trim((string)($periodo ?? ''));
+        if ($periodo !== '') {
+            $sql .= ' AND pc.periodo = :periodo_filtro';
+            $params['periodo_filtro'] = $periodo;
+        }
 
         $nome = trim($nome);
         if ($nome !== '') {
@@ -1909,5 +1953,66 @@ class AnalyticsRepository
         }
 
         return $mapa;
+    }
+
+    /**
+     * Detalhe de uma linha aluno/curso do passe livre (com escopo).
+     *
+     * @param list<int>|null $cursoIds
+     * @param list<string>|null $codigosDisciplina
+     * @return array<string, mixed>|null
+     */
+    public function linhaPasseLivrePorId(
+        int $id,
+        ?array $cursoIds = null,
+        ?array $codigosDisciplina = null
+    ): ?array {
+        if ($id <= 0) {
+            return null;
+        }
+
+        if (($cursoIds !== null && $cursoIds === [])
+            || ($codigosDisciplina !== null && $codigosDisciplina === [])
+        ) {
+            return null;
+        }
+
+        $sql = 'SELECT pc.id, pc.aluno_id, pc.curso_id, pc.login, pc.matricula,
+                       pc.nome, pc.nome_social, pc.email, pc.nome_curso,
+                       pc.frequencia, pc.periodo, pc.data_inicial, pc.data_final,
+                       ac.ano_semestre_ingresso
+                FROM passe_livre_aluno_curso pc
+                LEFT JOIN aluno_cursos ac
+                  ON ac.aluno_id = pc.aluno_id AND ac.curso_id = pc.curso_id
+                WHERE pc.id = :id';
+        $params = ['id' => $id];
+
+        [$sql, $cursoParams] = $this->appendCursoFilter($sql, $cursoIds, 'pc.curso_id');
+
+        if ($codigosDisciplina !== null) {
+            $placeholders = [];
+            foreach (array_values($codigosDisciplina) as $i => $codigo) {
+                $key = 'disc_' . $i;
+                $placeholders[] = ':' . $key;
+                $params[$key] = $codigo;
+            }
+            $sql .= ' AND EXISTS (
+                        SELECT 1
+                        FROM passe_livre_disciplina pd
+                        WHERE pd.aluno_curso_id = pc.id
+                          AND pd.codigo_disciplina IN (' . implode(', ', $placeholders) . ')
+                      )';
+        }
+
+        $sql .= ' LIMIT 1';
+
+        $statement = $this->db->prepare($sql);
+        $statement->bindValue('id', $id, \PDO::PARAM_INT);
+        $this->bindNamedParams($statement, $cursoParams);
+        $this->bindNamedParams($statement, $params);
+        $statement->execute();
+        $row = $statement->fetch();
+
+        return $row === false ? null : $row;
     }
 }

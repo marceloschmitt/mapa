@@ -22,6 +22,11 @@ class SimplePdf
     private float $lineHeightFactor = 1.25;
     private float $cellPadX = 3.0;
     private float $cellPadY = 3.0;
+    /** @var array<string, array{width:int, height:int, data:string}> */
+    private array $images = [];
+    /** @var array<int, array<string, bool>> */
+    private array $pageImageNames = [];
+    private int $imageCounter = 0;
 
     public function __construct(bool $landscape = false)
     {
@@ -39,6 +44,7 @@ class SimplePdf
         }
         $this->pageCount++;
         $this->current = [];
+        $this->pageImageNames[$this->pageCount - 1] = [];
         $this->y = $this->pageHeight - $this->margin;
         $this->fontSize = 10.0;
     }
@@ -109,6 +115,81 @@ class SimplePdf
     {
         $this->ensureSpace($h);
         $this->y -= $h;
+    }
+
+    public function centeredText(string $text, float $fontSize, bool $bold = false): void
+    {
+        $this->textAligned($text, $fontSize, 'center', $bold);
+    }
+
+    public function paragraph(string $text, float $fontSize = 10.0, bool $bold = false): void
+    {
+        $this->textAligned($text, $fontSize, 'left', $bold);
+    }
+
+    public function textAligned(string $text, float $fontSize, string $align, bool $bold = false): void
+    {
+        $previous = $this->fontSize;
+        $this->fontSize = $fontSize;
+        $width = $this->contentWidth();
+        $lines = $this->wrapText($text, $width, $fontSize);
+        $lineH = $fontSize * $this->lineHeightFactor;
+        $blockH = count($lines) * $lineH;
+        $this->ensureSpace($blockH + 4);
+
+        foreach ($lines as $i => $line) {
+            $lineWidth = $this->textWidth($line, $fontSize);
+            $x = $this->margin;
+            if ($align === 'center') {
+                $x = $this->margin + max(0.0, ($width - $lineWidth) / 2);
+            } elseif ($align === 'right') {
+                $x = $this->margin + max(0.0, $width - $lineWidth);
+            }
+            $y = $this->y - $fontSize - ($i * $lineH);
+            $this->drawText($x, $y, $line, $bold);
+        }
+        $this->y -= $blockH + 2;
+        $this->fontSize = $previous;
+    }
+
+    public function textRow(string $left, string $right, float $fontSize, bool $bold = false): void
+    {
+        $previous = $this->fontSize;
+        $this->fontSize = $fontSize;
+        $lineH = $fontSize * $this->lineHeightFactor;
+        $this->ensureSpace($lineH + 4);
+        $y = $this->y - $fontSize;
+        $this->drawText($this->margin, $y, $left, $bold);
+        $rightWidth = $this->textWidth($right, $fontSize);
+        $xRight = $this->margin + max(0.0, $this->contentWidth() - $rightWidth);
+        $this->drawText($xRight, $y, $right, $bold);
+        $this->y -= $lineH + 2;
+        $this->fontSize = $previous;
+    }
+
+    public function drawImageCentered(string $path, float $displayWidth, float $spacingAfter = 8.0): void
+    {
+        $name = $this->registerImage($path);
+        if ($name === null) {
+            return;
+        }
+
+        $meta = $this->images[$name];
+        $displayHeight = $displayWidth * ($meta['height'] / max(1, $meta['width']));
+        $this->ensureSpace($displayHeight + $spacingAfter);
+
+        $x = $this->margin + max(0.0, ($this->contentWidth() - $displayWidth) / 2);
+        $yBottom = $this->y - $displayHeight;
+        $this->current[] = sprintf(
+            'q %.2F 0 0 %.2F %.2F %.2F cm /%s Do Q',
+            $displayWidth,
+            $displayHeight,
+            $x,
+            $yBottom,
+            $name
+        );
+        $this->pageImageNames[$this->pageCount - 1][$name] = true;
+        $this->y -= $displayHeight + $spacingAfter;
     }
 
     /** @param list<float> $colWidths */
@@ -326,35 +407,105 @@ class SimplePdf
         return str_replace(['\\', '(', ')'], ['\\\\', '\\(', '\\)'], $text);
     }
 
+    private function registerImage(string $path): ?string
+    {
+        if (!is_file($path) || !function_exists('imagecreatefrompng')) {
+            return null;
+        }
+
+        $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
+        $img = match ($ext) {
+            'png' => @imagecreatefrompng($path),
+            'jpg', 'jpeg' => @imagecreatefromjpeg($path),
+            default => null,
+        };
+        if (!is_resource($img) && !($img instanceof \GdImage)) {
+            return null;
+        }
+
+        $width = imagesx($img);
+        $height = imagesy($img);
+        ob_start();
+        imagejpeg($img, null, 92);
+        $data = ob_get_clean();
+        imagedestroy($img);
+
+        if (!is_string($data) || $data === '') {
+            return null;
+        }
+
+        $this->imageCounter++;
+        $name = 'Im' . $this->imageCounter;
+        $this->images[$name] = [
+            'width' => $width,
+            'height' => $height,
+            'data' => $data,
+        ];
+
+        return $name;
+    }
+
     public function output(string $filename): void
     {
         $this->pages[] = implode("\n", $this->current);
         $n = count($this->pages);
 
-        $font1Id = 3 + ($n * 2);
-        $font2Id = $font1Id + 1;
-
         $objs = [];
-        $objs[1] = '<< /Type /Catalog /Pages 2 0 R >>';
-        $pageRefs = [];
-        for ($i = 0; $i < $n; $i++) {
-            $pageRefs[] = (3 + $i * 2) . ' 0 R';
+        $nextId = 1;
+        $catalogId = $nextId++;
+        $pagesId = $nextId++;
+
+        $imageObjIds = [];
+        foreach (array_keys($this->images) as $name) {
+            $imageObjIds[$name] = $nextId++;
         }
-        $objs[2] = '<< /Type /Pages /Kids [' . implode(' ', $pageRefs) . '] /Count ' . $n . ' >>';
+
+        $pageObjIds = [];
+        $contentObjIds = [];
+        for ($i = 0; $i < $n; $i++) {
+            $pageObjIds[$i] = $nextId++;
+            $contentObjIds[$i] = $nextId++;
+        }
+
+        $font1Id = $nextId++;
+        $font2Id = $nextId++;
+
+        $objs[$catalogId] = '<< /Type /Catalog /Pages ' . $pagesId . ' 0 R >>';
+
+        $pageRefs = [];
+        foreach ($pageObjIds as $id) {
+            $pageRefs[] = $id . ' 0 R';
+        }
+        $objs[$pagesId] = '<< /Type /Pages /Kids [' . implode(' ', $pageRefs) . '] /Count ' . $n . ' >>';
+
+        foreach ($this->images as $name => $img) {
+            $id = $imageObjIds[$name];
+            $objs[$id] = '<< /Type /XObject /Subtype /Image /Width ' . $img['width']
+                . ' /Height ' . $img['height']
+                . ' /ColorSpace /DeviceRGB /BitsPerComponent 8 /Filter /DCTDecode /Length '
+                . strlen($img['data']) . " >>\nstream\n" . $img['data'] . "\nendstream";
+        }
 
         for ($i = 0; $i < $n; $i++) {
-            $pageObj = 3 + $i * 2;
-            $contentObj = 4 + $i * 2;
-            $stream = $this->pages[$i];
-            $objs[$pageObj] = sprintf(
-                '<< /Type /Page /Parent 2 0 R /MediaBox [0 0 %.2F %.2F] /Resources << /Font << /F1 %d 0 R /F2 %d 0 R >> >> /Contents %d 0 R >>',
+            $resources = '/Font << /F1 ' . $font1Id . ' 0 R /F2 ' . $font2Id . ' 0 R >>';
+            $xobjParts = [];
+            foreach (array_keys($this->pageImageNames[$i] ?? []) as $name) {
+                $xobjParts[] = '/' . $name . ' ' . $imageObjIds[$name] . ' 0 R';
+            }
+            if ($xobjParts !== []) {
+                $resources .= ' /XObject << ' . implode(' ', $xobjParts) . ' >>';
+            }
+
+            $objs[$pageObjIds[$i]] = sprintf(
+                '<< /Type /Page /Parent %d 0 R /MediaBox [0 0 %.2F %.2F] /Resources << %s >> /Contents %d 0 R >>',
+                $pagesId,
                 $this->pageWidth,
                 $this->pageHeight,
-                $font1Id,
-                $font2Id,
-                $contentObj
+                $resources,
+                $contentObjIds[$i]
             );
-            $objs[$contentObj] = '<< /Length ' . strlen($stream) . " >>\nstream\n" . $stream . "\nendstream";
+            $objs[$contentObjIds[$i]] = '<< /Length ' . strlen($this->pages[$i])
+                . " >>\nstream\n" . $this->pages[$i] . "\nendstream";
         }
 
         $objs[$font1Id] = '<< /Type /Font /Subtype /Type1 /BaseFont /Helvetica /Encoding /WinAnsiEncoding >>';

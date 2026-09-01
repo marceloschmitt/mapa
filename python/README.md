@@ -70,4 +70,4 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 | `turno_turma.py` | Expande intervalos de aula (usado por `importar_grade.py`) |
 | `explorar_aprovacoes.py` | Fora do pipeline: consulta um período e resume aprovações/reprovações |
 | `gerar_perda_vaga.py` | Manual: candidatos a perda de vaga (2 semestres anteriores) → BD |
-| `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência mensal (`frequencia_periodo`) do semestre anterior → BD (`passe_livre_*`) |
+| `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência mensal (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`). Opção `--semestres N` (padrão 3). |
