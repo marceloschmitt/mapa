@@ -522,13 +522,16 @@ class AlarmeEmailService
             $nomeAluno = trim((string)($entrada['nome'] ?? 'estudante'));
 
             if ($somenteProfessor) {
-                $disciplinas = $this->disciplinasEntrada($entrada);
-                if ($disciplinas === []) {
+                $alarmes = $entrada['alarmes'] ?? [];
+                if ($alarmes === []) {
                     $itens[] = ['nome' => $nomeAluno, 'sufixo' => ''];
                     continue;
                 }
-                foreach ($disciplinas as $disciplina) {
-                    $itens[] = ['nome' => $nomeAluno, 'sufixo' => $disciplina];
+                foreach ($alarmes as $alarme) {
+                    $itens[] = [
+                        'nome' => $nomeAluno,
+                        'sufixo' => $this->descreverAlarme($alarme, true),
+                    ];
                 }
                 continue;
             }
@@ -558,30 +561,6 @@ class AlarmeEmailService
         }
 
         return $linhas;
-    }
-
-    /**
-     * @param array{alarmes?: list<array<string, mixed>>} $entrada
-     * @return list<string>
-     */
-    private function disciplinasEntrada(array $entrada): array
-    {
-        $disciplinas = [];
-        foreach ($entrada['alarmes'] ?? [] as $alarme) {
-            $nome = trim((string)($alarme['disciplina'] ?? ''));
-            $codigo = trim((string)($alarme['codigo_disciplina'] ?? ''));
-            if ($nome === '' && $codigo !== '') {
-                $nome = $codigo;
-            }
-            if ($nome !== '') {
-                $disciplinas[$nome] = $nome;
-            }
-        }
-
-        $lista = array_values($disciplinas);
-        sort($lista, SORT_FLAG_CASE | SORT_STRING);
-
-        return $lista;
     }
 
     private function urlPublicaServidor(): string
@@ -1226,13 +1205,17 @@ class AlarmeEmailService
         $codigo = trim((string)($alarme['codigo_disciplina'] ?? ''));
         $severidade = (string)($alarme['severidade'] ?? '');
 
-        if ($disciplina === '' && $codigo !== '') {
-            $disciplina = $codigo;
+        if ($codigo !== '' && $disciplina !== '' && strcasecmp($codigo, $disciplina) !== 0) {
+            $contexto = $codigo . ' — ' . $disciplina;
+        } elseif ($disciplina !== '') {
+            $contexto = $disciplina;
+        } elseif ($codigo !== '') {
+            $contexto = $codigo;
+        } else {
+            $contexto = $comSeveridade
+                ? 'Curso (sem disciplina específica)'
+                : 'No curso, de forma geral';
         }
-
-        $contexto = $disciplina !== ''
-            ? $disciplina
-            : ($comSeveridade ? 'Curso (sem disciplina específica)' : 'No curso, de forma geral');
 
         $prefixo = '';
         if ($comSeveridade) {
