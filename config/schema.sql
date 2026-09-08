@@ -405,3 +405,32 @@ CREATE TABLE IF NOT EXISTS passe_livre_disciplina (
 CREATE INDEX IF NOT EXISTS idx_passe_livre_disciplina_aluno_curso
     ON passe_livre_disciplina(aluno_curso_id);
 
+-- Log de acessos ao sistema (estatisticas de uso).
+CREATE TABLE IF NOT EXISTS acessos_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    usuario_id INTEGER,
+    username TEXT NOT NULL DEFAULT '',
+    nome TEXT NOT NULL DEFAULT '',
+    perfil TEXT NOT NULL DEFAULT '',
+    tipo TEXT NOT NULL DEFAULT 'acesso' CHECK (tipo IN ('login', 'acesso', 'logout')),
+    metodo TEXT NOT NULL DEFAULT 'GET',
+    rota TEXT NOT NULL DEFAULT '',
+    rota_rotulo TEXT NOT NULL DEFAULT '',
+    ip TEXT NOT NULL DEFAULT '',
+    user_agent TEXT NOT NULL DEFAULT '',
+    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_acessos_log_criado_em
+    ON acessos_log(criado_em);
+
+CREATE INDEX IF NOT EXISTS idx_acessos_log_usuario_criado
+    ON acessos_log(usuario_id, criado_em);
+
+CREATE INDEX IF NOT EXISTS idx_acessos_log_perfil_criado
+    ON acessos_log(perfil, criado_em);
+
+CREATE INDEX IF NOT EXISTS idx_acessos_log_rota_criado
+    ON acessos_log(rota, criado_em);
+

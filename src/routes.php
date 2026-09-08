@@ -9,6 +9,7 @@ use Mapa\Controllers\ChamadasController;
 use Mapa\Controllers\DashboardController;
 use Mapa\Controllers\CoordenacaoConfigController;
 use Mapa\Controllers\EmailConfigController;
+use Mapa\Controllers\EstatisticasUsoController;
 use Mapa\Controllers\IngressantesController;
 use Mapa\Controllers\LdapConfigController;
 use Mapa\Controllers\TrancadosController;
@@ -42,6 +43,7 @@ return static function (Router $router): void {
     $router->get('/chamadas/exportar-atrasadas-1-semestre', [ChamadasController::class, 'exportarAtrasadasPrimeiroSemestre']);
 
     $router->get('/usuarios', [UserController::class, 'index']);
+    $router->get('/estatisticas-uso', [EstatisticasUsoController::class, 'index']);
     $router->get('/usuarios/novo', [UserController::class, 'createForm']);
     $router->post('/usuarios', [UserController::class, 'create']);
     $router->post('/usuarios/criar-professores', [UserController::class, 'criarProfessores']);

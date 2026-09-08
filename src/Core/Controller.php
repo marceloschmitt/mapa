@@ -29,6 +29,8 @@ abstract class Controller
             $this->redirect('/login');
         }
 
+        (new \Mapa\Models\AccessLogRepository())->registrarAcessoAtual();
+
         return $user;
     }
 

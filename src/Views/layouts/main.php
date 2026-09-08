@@ -114,6 +114,9 @@ $authLocal = ($usuario['auth_type'] ?? 'local') === 'local';
                                 <a class="dropdown-item" href="<?= htmlspecialchars(url('/usuarios'), ENT_QUOTES, 'UTF-8') ?>">Usuários</a>
                             </li>
                             <li>
+                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/estatisticas-uso'), ENT_QUOTES, 'UTF-8') ?>">Estatísticas de uso</a>
+                            </li>
+                            <li>
                                 <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/api'), ENT_QUOTES, 'UTF-8') ?>">API</a>
                             </li>
                             <li>

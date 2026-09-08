@@ -6,6 +6,7 @@ namespace Mapa\Controllers;
 use Mapa\Core\Auth;
 use Mapa\Core\Controller;
 use Mapa\Core\Session;
+use Mapa\Models\AccessLogRepository;
 use Mapa\Models\UserRepository;
 use Mapa\Services\LdapAuthService;
 
@@ -66,6 +67,7 @@ class AuthController extends Controller
         $cursoIds = $repository->cursoIdsDoUsuario((int)$usuario['id']);
         $disciplinaCodigos = $repository->disciplinaCodigosDoUsuario((int)$usuario['id']);
         Auth::login($usuario, $cursoIds, $disciplinaCodigos);
+        (new AccessLogRepository())->registrarLogin();
         Session::flash('sucesso', 'Senha do administrador definida. Bem-vindo ao MAPA.');
         $this->redirect('/');
     }
@@ -136,11 +138,13 @@ class AuthController extends Controller
         $cursoIds = $repository->cursoIdsDoUsuario((int)$usuario['id']);
         $disciplinaCodigos = $repository->disciplinaCodigosDoUsuario((int)$usuario['id']);
         Auth::login($usuario, $cursoIds, $disciplinaCodigos);
+        (new AccessLogRepository())->registrarLogin();
         $this->redirect('/');
     }
 
     public function logout(): void
     {
+        (new AccessLogRepository())->registrarLogout();
         Auth::logout();
         Session::destroy();
         Session::start();
