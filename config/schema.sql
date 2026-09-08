@@ -434,3 +434,13 @@ CREATE INDEX IF NOT EXISTS idx_acessos_log_perfil_criado
 CREATE INDEX IF NOT EXISTS idx_acessos_log_rota_criado
     ON acessos_log(rota, criado_em);
 
+-- Feriados cadastrados pelo administrador (excluidos da grade/chamadas).
+CREATE TABLE IF NOT EXISTS feriados (
+    data TEXT PRIMARY KEY,
+    descricao TEXT NOT NULL DEFAULT '',
+    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_feriados_data
+    ON feriados(data);
+

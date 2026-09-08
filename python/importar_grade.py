@@ -135,6 +135,26 @@ def extrair_grades(
     return grades
 
 
+def carregar_feriados(cursor: Any) -> set[date]:
+    """Datas de feriado cadastradas pelo administrador."""
+    try:
+        rows = cursor.execute("SELECT data FROM feriados").fetchall()
+    except Exception:
+        return set()
+
+    feriados: set[date] = set()
+    for row in rows:
+        bruto = row["data"] if hasattr(row, "keys") else row[0]
+        texto = str(bruto or "").strip()
+        if not texto:
+            continue
+        try:
+            feriados.add(date.fromisoformat(texto[:10]))
+        except ValueError:
+            continue
+    return feriados
+
+
 def substituir_datas_aula(
     cursor: Any,
     codigo: str,
@@ -162,9 +182,17 @@ def substituir_datas_aula(
     return len(datas)
 
 
-def upsert_grade(cursor: Any, curso_id: int, item: dict[str, Any]) -> int:
+def upsert_grade(
+    cursor: Any,
+    curso_id: int,
+    item: dict[str, Any],
+    feriados: set[date] | None = None,
+) -> int:
     """Persiste metadados da grade e datas efetivas; retorna qtd de datas."""
-    datas_lista: list[date] = sorted(item.get("datas") or [])
+    feriados = feriados or set()
+    datas_lista: list[date] = sorted(
+        d for d in (item.get("datas") or []) if d not in feriados
+    )
     dias_lista = sorted(item.get("dias") or [])
     if datas_lista and not dias_lista:
         dias_lista = sorted(
@@ -221,12 +249,15 @@ def importar(matriculas: dict[str, Any]) -> dict[str, int]:
     grades = extrair_grades(matriculas)
     conn = conectar()
     cursor = conn.cursor()
+    feriados = carregar_feriados(cursor)
+    if feriados:
+        print(f"Feriados cadastrados ignorados na grade: {len(feriados)}")
 
     com_datas = 0
     total_datas = 0
     for item in grades.values():
         curso_id = upsert_curso(cursor, str(item["nome_curso"]))
-        n = upsert_grade(cursor, curso_id, item)
+        n = upsert_grade(cursor, curso_id, item, feriados)
         total_datas += n
         if n > 0:
             com_datas += 1

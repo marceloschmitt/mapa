@@ -540,12 +540,19 @@ class AnalyticsRepository
         ];
 
         $mapaDatas = $this->mapaDatasAula($rows);
+        $feriados = (new FeriadoRepository($this->db))->mapaDatas();
 
         foreach ($rows as &$row) {
             $chave = trim((string)($row['codigo_disciplina'] ?? ''))
                 . '|'
                 . (int)($row['curso_id'] ?? 0);
             $datas = $mapaDatas[$chave] ?? [];
+            if ($feriados !== [] && $datas !== []) {
+                $datas = array_values(array_filter(
+                    $datas,
+                    static fn (string $iso): bool => !isset($feriados[$iso])
+                ));
+            }
             $dias = $this->parseDiasSemanaSigaa($row['dias_semana'] ?? '');
             if ($dias === [] && $datas !== []) {
                 $dias = $this->diasSemanaDasDatas($datas);

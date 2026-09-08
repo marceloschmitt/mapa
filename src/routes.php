@@ -10,6 +10,7 @@ use Mapa\Controllers\DashboardController;
 use Mapa\Controllers\CoordenacaoConfigController;
 use Mapa\Controllers\EmailConfigController;
 use Mapa\Controllers\EstatisticasUsoController;
+use Mapa\Controllers\FeriadoController;
 use Mapa\Controllers\IngressantesController;
 use Mapa\Controllers\LdapConfigController;
 use Mapa\Controllers\TrancadosController;
@@ -59,4 +60,7 @@ return static function (Router $router): void {
     $router->post('/configuracoes/email', [EmailConfigController::class, 'save']);
     $router->get('/configuracoes/coordenacao', [CoordenacaoConfigController::class, 'form']);
     $router->post('/configuracoes/coordenacao', [CoordenacaoConfigController::class, 'save']);
+    $router->get('/configuracoes/feriados', [FeriadoController::class, 'index']);
+    $router->post('/configuracoes/feriados', [FeriadoController::class, 'criar']);
+    $router->post('/configuracoes/feriados/excluir', [FeriadoController::class, 'excluir']);
 };

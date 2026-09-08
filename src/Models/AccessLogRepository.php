@@ -37,6 +37,8 @@ class AccessLogRepository
         '/configuracoes/api' => 'Configurações — API',
         '/configuracoes/email' => 'Configurações — e-mail',
         '/configuracoes/coordenacao' => 'Configurações — coordenação',
+        '/configuracoes/feriados' => 'Configurações — feriados',
+        '/configuracoes/feriados/excluir' => 'Configurações — excluir feriado',
         '/estatisticas-uso' => 'Estatísticas de uso',
     ];
 
