@@ -6,8 +6,11 @@ namespace Mapa\Controllers;
 use Mapa\Core\Auth;
 use Mapa\Core\Controller;
 use Mapa\Core\Session;
+use Mapa\Core\Url;
 use Mapa\Lib\PasseLivreAtestadoPdf;
 use Mapa\Models\AnalyticsRepository;
+use Mapa\Models\ConfigRepository;
+use Mapa\Models\PasseLivreAtestadoRepository;
 
 class PasseLivreController extends Controller
 {
@@ -34,6 +37,7 @@ class PasseLivreController extends Controller
 
         $linhas = [];
         $disciplinasPorLinha = [];
+        $atestadosPorLinha = [];
 
         if ($semestreSelecionado !== '' && $escopo['aviso'] === null) {
             $linhas = $repo->linhasPasseLivre(
@@ -47,6 +51,7 @@ class PasseLivreController extends Controller
                 $linhas
             );
             $disciplinasPorLinha = $repo->disciplinasPasseLivre($ids);
+            $atestadosPorLinha = (new PasseLivreAtestadoRepository())->mapearPorAlunoCursoIds($ids);
         }
 
         $erro = Session::flash('erro');
@@ -64,6 +69,8 @@ class PasseLivreController extends Controller
             'semestreSelecionado' => $semestreSelecionado,
             'linhas' => $linhas,
             'disciplinasPorLinha' => $disciplinasPorLinha,
+            'atestadosPorLinha' => $atestadosPorLinha,
+            'linkConferenciaBase' => $this->urlConferenciaBase(),
             'totalAlunos' => count($linhas),
             'cursosDisponiveis' => $cursosDisponiveis,
             'cursoSelecionado' => $cursoSelecionado,
@@ -75,6 +82,7 @@ class PasseLivreController extends Controller
             'erro' => $erro,
             'sucesso' => Session::flash('sucesso'),
             'podeGerarPasseLivre' => $podeGerar,
+            'podeAssinarPasseLivre' => Auth::canAssinarPasseLivre(),
             'isAdmin' => Auth::isAdmin(),
         ]);
     }
@@ -140,6 +148,72 @@ class PasseLivreController extends Controller
         $this->redirect('/passe-livre');
     }
 
+    public function assinar(): void
+    {
+        $this->requireAuth();
+        header('Content-Type: application/json; charset=utf-8');
+
+        if (!Auth::canAssinarPasseLivre()) {
+            http_response_code(403);
+            echo json_encode(
+                ['ok' => false, 'erro' => 'Seu usuário não tem permissão para assinar atestados.'],
+                JSON_UNESCAPED_UNICODE
+            );
+            exit;
+        }
+
+        $id = (int)($_POST['id'] ?? 0);
+        if ($id <= 0) {
+            http_response_code(400);
+            echo json_encode(['ok' => false, 'erro' => 'Documento inválido.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $repo = new AnalyticsRepository();
+        $escopo = $this->resolverEscopo($repo, 'todos');
+        if ($escopo['aviso'] !== null) {
+            http_response_code(403);
+            echo json_encode(['ok' => false, 'erro' => 'Acesso negado.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        $linha = $repo->linhaPasseLivrePorId(
+            $id,
+            $escopo['cursoIds'],
+            $escopo['codigosDisciplina']
+        );
+        if ($linha === null) {
+            http_response_code(404);
+            echo json_encode(['ok' => false, 'erro' => 'Registro não encontrado.'], JSON_UNESCAPED_UNICODE);
+            exit;
+        }
+
+        try {
+            $usuario = Auth::user();
+            $disciplinas = $repo->disciplinasPasseLivre([$id])[$id] ?? [];
+            $substituir = !empty($_POST['renovar']);
+            $atestado = (new PasseLivreAtestadoRepository())->assinar(
+                $linha,
+                $disciplinas,
+                isset($usuario['id']) ? (int)$usuario['id'] : null,
+                $substituir
+            );
+        } catch (\Throwable $e) {
+            http_response_code(500);
+            echo json_encode(
+                ['ok' => false, 'erro' => 'Não foi possível assinar o documento.'],
+                JSON_UNESCAPED_UNICODE
+            );
+            exit;
+        }
+
+        echo json_encode([
+            'ok' => true,
+            'atestado' => $this->payloadAtestado($atestado),
+        ], JSON_UNESCAPED_UNICODE);
+        exit;
+    }
+
     public function pdf(): void
     {
         $this->requireAuth();
@@ -167,35 +241,46 @@ class PasseLivreController extends Controller
             exit;
         }
 
+        $atestado = (new PasseLivreAtestadoRepository())->buscarPorAlunoCursoId($id);
+        if ($atestado === null) {
+            http_response_code(403);
+            echo 'Documento ainda não assinado.';
+            exit;
+        }
+
         $disciplinas = $repo->disciplinasPasseLivre([$id])[$id] ?? [];
-        $dados = $this->montarDadosAtestado($linha, $disciplinas);
+        $dados = $this->montarDadosAtestado($linha, $disciplinas, $atestado);
         $pdf = PasseLivreAtestadoPdf::gerar($dados);
         $pdf->output(PasseLivreAtestadoPdf::nomeArquivo($dados));
+    }
+
+    public function conferencia(): void
+    {
+        $codigo = trim((string)($_GET['c'] ?? ''));
+        $atestado = $codigo !== ''
+            ? (new PasseLivreAtestadoRepository())->buscarPorCodigo($codigo)
+            : null;
+
+        $this->render('passe_livre/conferencia', [
+            'atestado' => $atestado,
+            'valido' => $atestado !== null,
+        ], 'layouts/auth');
     }
 
     /**
      * @param array<string, mixed> $linha
      * @param list<array<string, mixed>> $disciplinas
-     * @return array{
-     *   nome: string,
-     *   matricula: string,
-     *   curso: string,
-     *   periodo: string,
-     *   ingresso: string,
-     *   frequencia: mixed,
-     *   data_inicial: string,
-     *   data_final: string,
-     *   disciplinas: list<array{codigo: string, nome: string, frequencia: mixed}>
-     * }
+     * @param array<string, mixed>|null $atestado
+     * @return array<string, mixed>
      */
-    private function montarDadosAtestado(array $linha, array $disciplinas): array
+    private function montarDadosAtestado(array $linha, array $disciplinas, ?array $atestado = null): array
     {
         $nomeSocial = trim((string)($linha['nome_social'] ?? ''));
         $nome = $nomeSocial !== ''
             ? $nomeSocial
             : trim((string)($linha['nome'] ?? ''));
 
-        return [
+        $dados = [
             'nome' => $nome,
             'matricula' => (string)($linha['matricula'] ?? ''),
             'curso' => (string)($linha['nome_curso'] ?? ''),
@@ -215,6 +300,58 @@ class PasseLivreController extends Controller
                 $disciplinas
             ),
         ];
+
+        if ($atestado !== null) {
+            $dados['numero'] = (int)$atestado['numero'];
+            $dados['ano'] = (int)$atestado['ano'];
+            $dados['data_documento'] = (string)$atestado['data_documento'];
+            $dados['assinado_em'] = (string)$atestado['assinado_em'];
+            $dados['link_conferencia'] = $this->urlConferencia(
+                (string)$atestado['codigo_verificacao']
+            );
+        }
+
+        return $dados;
+    }
+
+    /**
+     * @param array<string, mixed> $atestado
+     * @return array<string, mixed>
+     */
+    private function payloadAtestado(array $atestado): array
+    {
+        return [
+            'numero' => (int)$atestado['numero'],
+            'ano' => (int)$atestado['ano'],
+            'numero_formatado' => (string)$atestado['numero_formatado'],
+            'data_documento' => (string)$atestado['data_documento'],
+            'assinado_em' => (string)$atestado['assinado_em'],
+            'assinado_em_fmt' => PasseLivreAtestadoPdf::formatarAssinadoEm(
+                (string)$atestado['assinado_em']
+            ),
+            'codigo_verificacao' => (string)$atestado['codigo_verificacao'],
+            'link_conferencia' => $this->urlConferencia(
+                (string)$atestado['codigo_verificacao']
+            ),
+        ];
+    }
+
+    private function urlConferenciaBase(): string
+    {
+        $base = (new ConfigRepository())->getAppUrl();
+        if ($base !== '') {
+            return rtrim($base, '/') . Url::to('/passe-livre/conferencia');
+        }
+
+        return Url::to('/passe-livre/conferencia');
+    }
+
+    private function urlConferencia(string $codigo): string
+    {
+        $base = $this->urlConferenciaBase();
+        $sep = str_contains($base, '?') ? '&' : '?';
+
+        return $base . $sep . 'c=' . rawurlencode($codigo);
     }
 
     private function resolverPython3(): string

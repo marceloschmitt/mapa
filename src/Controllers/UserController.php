@@ -211,6 +211,7 @@ class UserController extends Controller
             'perfil' => trim((string)($_POST['perfil'] ?? '')),
             'auth_type' => trim((string)($_POST['auth_type'] ?? 'local')),
             'ativo' => isset($_POST['ativo']) ? 1 : 0,
+            'pode_assinar_passe_livre' => isset($_POST['pode_assinar_passe_livre']) ? 1 : 0,
             'senha' => (string)($_POST['senha'] ?? ''),
             'curso_ids' => array_map('intval', $cursoIds),
         ];

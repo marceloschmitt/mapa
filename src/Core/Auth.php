@@ -52,6 +52,7 @@ class Auth
             'cpf' => (string)($user['cpf'] ?? ''),
             'perfil' => (string)$user['perfil'],
             'auth_type' => (string)($user['auth_type'] ?? 'local'),
+            'pode_assinar_passe_livre' => !empty($user['pode_assinar_passe_livre']),
             'curso_ids' => array_values(array_map('intval', $cursoIds)),
             'disciplina_codigos' => array_values(array_map('strval', $disciplinaCodigos)),
         ]);
@@ -97,6 +98,17 @@ class Auth
     public static function canGerarPasseLivre(): bool
     {
         return self::isAdmin();
+    }
+
+    /** Usuários com permissão explícita para assinar atestados de passe livre. */
+    public static function canAssinarPasseLivre(): bool
+    {
+        $user = self::user();
+        if ($user === null) {
+            return false;
+        }
+
+        return !empty($user['pode_assinar_passe_livre']);
     }
 
     /** @return list<int> */

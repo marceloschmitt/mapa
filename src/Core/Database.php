@@ -80,6 +80,7 @@ class Database
         self::migrateUsuariosTable();
         self::ensureColumn('usuarios', 'auth_type', "TEXT NOT NULL DEFAULT 'local'");
         self::ensureColumn('usuarios', 'cpf', 'TEXT');
+        self::ensureColumn('usuarios', 'pode_assinar_passe_livre', 'INTEGER NOT NULL DEFAULT 0');
         self::ensureColumn('alarmes', 'contato_tipo', 'TEXT');
         self::ensureColumn('alarme_emails', 'staff_avisado_em', 'TEXT');
         self::ensureColumn('alarme_emails', 'staff_piloto_avisado_em', 'TEXT');
@@ -91,6 +92,9 @@ class Database
         self::ensureColumn('frequencia_curso', 'data_inicio_aulas', 'TEXT');
         self::ensureColumn('perda_vaga_candidatos', 'matriculado_periodo_atual', 'INTEGER NOT NULL DEFAULT 0');
         self::ensureColumn('perda_vaga_candidatos', 'status_periodo_atual', 'TEXT');
+        self::ensureColumn('passe_livre_atestados', 'frequencia_geral', 'REAL');
+        self::ensureColumn('passe_livre_atestados', 'disciplinas_json', "TEXT NOT NULL DEFAULT '[]'");
+        self::migrarPasseLivreAtestadosNullable();
         self::migrarDatasAulaCsvParaTabela();
         self::seedAdminIfEmpty();
         self::migrateLdapConfigFromEnv();
@@ -413,6 +417,81 @@ class Database
                 ]);
             }
         }
+    }
+
+    /**
+     * Permite desvincular atestado antigo ao assinar novamente
+     * (passe_livre_aluno_curso_id nullable + ON DELETE SET NULL).
+     */
+    private static function migrarPasseLivreAtestadosNullable(): void
+    {
+        $row = self::$connection->query(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'passe_livre_atestados'"
+        )->fetch();
+        if ($row === false || empty($row['sql'])) {
+            return;
+        }
+
+        $ddl = (string)$row['sql'];
+        if (stripos($ddl, 'passe_livre_aluno_curso_id INTEGER NOT NULL') === false) {
+            return;
+        }
+
+        self::$connection->exec('PRAGMA foreign_keys = OFF');
+        self::$connection->exec('BEGIN');
+        try {
+            self::$connection->exec(
+                'CREATE TABLE passe_livre_atestados_new (
+                    id INTEGER PRIMARY KEY AUTOINCREMENT,
+                    passe_livre_aluno_curso_id INTEGER UNIQUE,
+                    numero INTEGER NOT NULL UNIQUE,
+                    ano INTEGER NOT NULL,
+                    data_documento TEXT NOT NULL,
+                    assinado_em TEXT NOT NULL,
+                    codigo_verificacao TEXT NOT NULL UNIQUE,
+                    usuario_id INTEGER,
+                    nome_aluno TEXT NOT NULL DEFAULT \'\',
+                    matricula TEXT NOT NULL DEFAULT \'\',
+                    nome_curso TEXT NOT NULL DEFAULT \'\',
+                    periodo TEXT NOT NULL DEFAULT \'\',
+                    frequencia_geral REAL,
+                    disciplinas_json TEXT NOT NULL DEFAULT \'[]\',
+                    FOREIGN KEY (passe_livre_aluno_curso_id)
+                        REFERENCES passe_livre_aluno_curso(id) ON DELETE SET NULL,
+                    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
+                )'
+            );
+
+            self::$connection->exec(
+                'INSERT INTO passe_livre_atestados_new (
+                    id, passe_livre_aluno_curso_id, numero, ano, data_documento, assinado_em,
+                    codigo_verificacao, usuario_id, nome_aluno, matricula, nome_curso, periodo,
+                    frequencia_geral, disciplinas_json
+                 )
+                 SELECT id, passe_livre_aluno_curso_id, numero, ano, data_documento, assinado_em,
+                        codigo_verificacao, usuario_id, nome_aluno, matricula, nome_curso, periodo,
+                        frequencia_geral, COALESCE(disciplinas_json, \'[]\')
+                 FROM passe_livre_atestados'
+            );
+
+            self::$connection->exec('DROP TABLE passe_livre_atestados');
+            self::$connection->exec('ALTER TABLE passe_livre_atestados_new RENAME TO passe_livre_atestados');
+            self::$connection->exec(
+                'CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_codigo
+                 ON passe_livre_atestados(codigo_verificacao)'
+            );
+            self::$connection->exec(
+                'CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_ano_numero
+                 ON passe_livre_atestados(ano, numero)'
+            );
+            self::$connection->exec('COMMIT');
+        } catch (\Throwable $e) {
+            self::$connection->exec('ROLLBACK');
+            self::$connection->exec('PRAGMA foreign_keys = ON');
+            throw $e;
+        }
+
+        self::$connection->exec('PRAGMA foreign_keys = ON');
     }
 
     private static function migrateUsuariosTable(): void

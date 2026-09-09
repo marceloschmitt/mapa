@@ -33,6 +33,7 @@
                     <th>Login</th>
                     <th>E-mail</th>
                     <th>Perfil</th>
+                    <th>Passe livre</th>
                     <th>Status</th>
                     <th class="text-end">Ações</th>
                 </tr>
@@ -40,12 +41,13 @@
             <tbody>
                 <?php if ($usuarios === []): ?>
                     <tr>
-                        <td colspan="6" class="text-secondary">Nenhum usuário cadastrado.</td>
+                        <td colspan="7" class="text-secondary">Nenhum usuário cadastrado.</td>
                     </tr>
                 <?php else: ?>
                     <?php foreach ($usuarios as $usuarioLista): ?>
                         <?php
                         $rotulo = \Mapa\Core\Auth::ROTULOS_PERFIL[$usuarioLista['perfil']] ?? $usuarioLista['perfil'];
+                        $assina = !empty($usuarioLista['pode_assinar_passe_livre']);
                         ?>
                         <tr>
                             <td><?= htmlspecialchars($usuarioLista['nome'], ENT_QUOTES, 'UTF-8') ?></td>
@@ -55,6 +57,13 @@
                                 <span class="badge text-bg-secondary">
                                     <?= htmlspecialchars($rotulo, ENT_QUOTES, 'UTF-8') ?>
                                 </span>
+                            </td>
+                            <td>
+                                <?php if ($assina): ?>
+                                    <span class="badge text-bg-primary">Assina</span>
+                                <?php else: ?>
+                                    <span class="text-secondary">—</span>
+                                <?php endif; ?>
                             </td>
                             <td>
                                 <?php if ((int)$usuarioLista['ativo'] === 1): ?>

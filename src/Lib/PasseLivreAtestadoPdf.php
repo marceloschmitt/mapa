@@ -8,9 +8,6 @@ namespace Mapa\Lib;
  */
 class PasseLivreAtestadoPdf
 {
-    private const TITULO_ATESTADO = 'ATESTADO DE MATRÍCULA Nº          /          ';
-    private const PROTOCOLO = 'PROTOCOLO INDEFINIDO';
-
     /**
      * @param array{
      *   nome: string,
@@ -19,9 +16,14 @@ class PasseLivreAtestadoPdf
      *   periodo: string,
      *   ingresso: string,
      *   frequencia: mixed,
-     *   data_inicial: string,
-     *   data_final: string,
-     *   disciplinas: list<array{codigo: string, nome: string, frequencia: mixed}>
+     *   data_inicial?: string,
+     *   data_final?: string,
+     *   disciplinas: list<array{codigo: string, nome: string, frequencia: mixed}>,
+     *   numero?: int|null,
+     *   ano?: int|null,
+     *   data_documento?: string,
+     *   assinado_em?: string,
+     *   link_conferencia?: string
      * } $dados
      */
     public static function gerar(array $dados): SimplePdf
@@ -44,10 +46,23 @@ class PasseLivreAtestadoPdf
             true
         );
         $pdf->spacer(12);
-        $pdf->textAligned(self::TITULO_ATESTADO, 9.0, 'left', true);
+
+        $numero = isset($dados['numero']) ? (int)$dados['numero'] : 0;
+        $ano = isset($dados['ano']) ? (int)$dados['ano'] : 0;
+        $titulo = $numero > 0 && $ano > 0
+            ? sprintf('ATESTADO DE MATRÍCULA Nº %d / %d', $numero, $ano)
+            : 'ATESTADO DE MATRÍCULA Nº          /          ';
+        $pdf->textAligned($titulo, 9.0, 'left', true);
         $pdf->spacer(6);
 
-        $pdf->textRow('Nº do Protocolo: ' . self::PROTOCOLO, self::dataExtenso(), 9.0);
+        $protocolo = $numero > 0 && $ano > 0
+            ? sprintf('%d/%d', $numero, $ano)
+            : 'PROTOCOLO INDEFINIDO';
+        $dataDoc = trim((string)($dados['data_documento'] ?? ''));
+        if ($dataDoc === '') {
+            $dataDoc = self::dataExtenso();
+        }
+        $pdf->textRow('Nº do Protocolo: ' . $protocolo, $dataDoc, 9.0);
         $pdf->spacer(10);
 
         $ingresso = trim($dados['ingresso']) !== '' ? trim($dados['ingresso']) : '---';
@@ -94,15 +109,26 @@ class PasseLivreAtestadoPdf
             true
         );
 
+        $link = trim((string)($dados['link_conferencia'] ?? ''));
+        if ($link !== '') {
+            $pdf->spacer(10);
+            $pdf->paragraph(
+                'Documento assinado digitalmente. Para conferir a autenticidade da assinatura, '
+                . 'acesse: ' . $link,
+                8.0
+            );
+        }
+
         $pdf->spacer(44);
-        self::blocoAssinatura($pdf);
+        self::blocoAssinatura($pdf, (string)($dados['assinado_em'] ?? ''));
 
         return $pdf;
     }
 
-    private static function blocoAssinatura(SimplePdf $pdf): void
+    private static function blocoAssinatura(SimplePdf $pdf, string $assinadoEm): void
     {
-        $pdf->centeredText('(Assinado digitalmente em ' . date('d/m/Y H:i') . ')', 9.0);
+        $rotulo = self::formatarAssinadoEm($assinadoEm);
+        $pdf->centeredText('(Assinado digitalmente em ' . $rotulo . ')', 9.0);
         $pdf->centeredText('GRACIELA DA SILVA LEITES', 9.0, true);
         $pdf->centeredText('COORDENADOR (TITULAR) - TITULAR', 9.0);
         $pdf->centeredText('COORD. DE REGISTROS ESTUDANTIS (PORTO ALEGRE)', 9.0);
@@ -124,6 +150,12 @@ class PasseLivreAtestadoPdf
             $matricula = 'aluno';
         }
 
+        $numero = isset($dados['numero']) ? (int)$dados['numero'] : 0;
+        $ano = isset($dados['ano']) ? (int)$dados['ano'] : 0;
+        if ($numero > 0 && $ano > 0) {
+            return sprintf('passe-livre-%d-%d-%s.pdf', $numero, $ano, $matricula);
+        }
+
         return 'passe-livre-' . $matricula . '-' . date('Y-m-d') . '.pdf';
     }
 
@@ -139,6 +171,11 @@ class PasseLivreAtestadoPdf
 
     public static function dataExtenso(): string
     {
+        return self::dataExtensoEm(new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo')));
+    }
+
+    public static function dataExtensoEm(\DateTimeInterface $quando): string
+    {
         $meses = [
             1 => 'janeiro',
             2 => 'fevereiro',
@@ -153,8 +190,29 @@ class PasseLivreAtestadoPdf
             11 => 'novembro',
             12 => 'dezembro',
         ];
-        $mes = $meses[(int)date('n')] ?? '';
+        $mes = $meses[(int)$quando->format('n')] ?? '';
 
-        return sprintf('Porto Alegre-RS, %d de %s de %d', (int)date('j'), $mes, (int)date('Y'));
+        return sprintf(
+            'Porto Alegre-RS, %d de %s de %d',
+            (int)$quando->format('j'),
+            $mes,
+            (int)$quando->format('Y')
+        );
+    }
+
+    public static function formatarAssinadoEm(string $assinadoEm): string
+    {
+        $assinadoEm = trim($assinadoEm);
+        if ($assinadoEm === '') {
+            return date('d/m/Y H:i');
+        }
+
+        try {
+            $dt = new \DateTimeImmutable($assinadoEm, new \DateTimeZone('America/Sao_Paulo'));
+
+            return $dt->format('d/m/Y H:i');
+        } catch (\Exception) {
+            return $assinadoEm;
+        }
     }
 }

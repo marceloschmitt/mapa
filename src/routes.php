@@ -39,7 +39,9 @@ return static function (Router $router): void {
     $router->get('/perda-vaga', [PerdaVagaController::class, 'index']);
     $router->get('/passe-livre', [PasseLivreController::class, 'index']);
     $router->post('/passe-livre/gerar', [PasseLivreController::class, 'gerar']);
+    $router->post('/passe-livre/assinar', [PasseLivreController::class, 'assinar']);
     $router->get('/passe-livre/pdf', [PasseLivreController::class, 'pdf']);
+    $router->get('/passe-livre/conferencia', [PasseLivreController::class, 'conferencia']);
     $router->get('/chamadas', [ChamadasController::class, 'index']);
     $router->get('/chamadas/exportar-atrasadas-1-semestre', [ChamadasController::class, 'exportarAtrasadasPrimeiroSemestre']);
 

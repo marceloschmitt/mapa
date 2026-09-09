@@ -10,8 +10,11 @@ $filtroNome = (string)($filtroNome ?? '');
 $meta = $meta ?? null;
 $periodosDisponiveis = $periodosDisponiveis ?? [];
 $semestreSelecionado = (string)($semestreSelecionado ?? '');
+$atestadosPorLinha = $atestadosPorLinha ?? [];
+$linkConferenciaBase = (string)($linkConferenciaBase ?? url('/passe-livre/conferencia'));
 $mostrarBadgeCurso = $semSeletorCurso;
 $podeGerarPasseLivre = !empty($podeGerarPasseLivre);
+$podeAssinarPasseLivre = !empty($podeAssinarPasseLivre);
 
 $scriptDir = dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/index.php'));
 $assetBase = ($scriptDir === '/' || $scriptDir === '\\' || $scriptDir === '.') ? '' : $scriptDir;
@@ -203,6 +206,7 @@ $dataExtenso = static function (): string {
                                 ? $nomeSocial
                                 : trim((string)($linha['nome'] ?? ''));
                             $disciplinas = $disciplinasPorLinha[(int)$linha['id']] ?? [];
+                            $atestado = $atestadosPorLinha[(int)$linha['id']] ?? null;
                             $payload = [
                                 'id' => (int)$linha['id'],
                                 'nome' => $nome,
@@ -221,7 +225,24 @@ $dataExtenso = static function (): string {
                                     },
                                     $disciplinas
                                 ),
+                                'atestado' => null,
                             ];
+                            if (is_array($atestado)) {
+                                $codigo = (string)$atestado['codigo_verificacao'];
+                                $sep = str_contains($linkConferenciaBase, '?') ? '&' : '?';
+                                $payload['atestado'] = [
+                                    'numero' => (int)$atestado['numero'],
+                                    'ano' => (int)$atestado['ano'],
+                                    'numero_formatado' => (string)$atestado['numero_formatado'],
+                                    'data_documento' => (string)$atestado['data_documento'],
+                                    'assinado_em' => (string)$atestado['assinado_em'],
+                                    'assinado_em_fmt' => \Mapa\Lib\PasseLivreAtestadoPdf::formatarAssinadoEm(
+                                        (string)$atestado['assinado_em']
+                                    ),
+                                    'codigo_verificacao' => $codigo,
+                                    'link_conferencia' => $linkConferenciaBase . $sep . 'c=' . rawurlencode($codigo),
+                                ];
+                            }
                             $json = htmlspecialchars(
                                 (string)json_encode($payload, JSON_UNESCAPED_UNICODE),
                                 ENT_QUOTES,
@@ -231,6 +252,7 @@ $dataExtenso = static function (): string {
                             <tr class="linha-passe-livre"
                                 tabindex="0"
                                 role="button"
+                                data-id="<?= (int)$linha['id'] ?>"
                                 data-passe-livre="<?= $json ?>">
                                 <td class="text-end text-secondary pe-1"><?= $i + 1 ?></td>
                                 <td class="fw-semibold"><?= htmlspecialchars($nome, ENT_QUOTES, 'UTF-8') ?></td>
@@ -274,13 +296,13 @@ $dataExtenso = static function (): string {
 
                         <p class="atestado-titulo fw-bold text-uppercase mb-2">
                             Atestado de Matrícula Nº
-                            <span class="atestado-numero-vazio"></span>
+                            <span id="modalPasseLivreNumero" class="atestado-numero-vazio"></span>
                             /
-                            <span class="atestado-numero-vazio"></span>
+                            <span id="modalPasseLivreAno" class="atestado-numero-vazio"></span>
                         </p>
 
                         <div class="d-flex flex-wrap justify-content-between gap-2 small mb-4">
-                            <div>Nº do Protocolo: PROTOCOLO INDEFINIDO</div>
+                            <div id="modalPasseLivreProtocolo">Nº do Protocolo: PROTOCOLO INDEFINIDO</div>
                             <div id="modalPasseLivreData"><?= htmlspecialchars($dataExtenso(), ENT_QUOTES, 'UTF-8') ?></div>
                         </div>
 
@@ -309,6 +331,8 @@ $dataExtenso = static function (): string {
                             <span id="modalPasseLivreGeral"></span>
                         </p>
 
+                        <p class="small text-justify mt-3 mb-0 d-none" id="modalPasseLivreConferencia"></p>
+
                         <div class="atestado-assinatura text-center small">
                             <p class="fst-italic mb-2" id="modalPasseLivreAssinaturaData"></p>
                             <p class="fw-bold mb-1">GRACIELA DA SILVA LEITES</p>
@@ -318,10 +342,17 @@ $dataExtenso = static function (): string {
                         </div>
                     </div>
                 </div>
-                <div class="modal-footer justify-content-between">
-                    <a href="#" class="btn btn-primary" id="modalPasseLivrePdf" download>
-                        Baixar PDF
-                    </a>
+                <div class="modal-footer justify-content-between gap-2 flex-wrap">
+                    <div class="d-flex gap-2 flex-wrap">
+                        <?php if ($podeAssinarPasseLivre): ?>
+                            <button type="button" class="btn btn-primary" id="modalPasseLivreAssinar">
+                                Assinar
+                            </button>
+                        <?php endif; ?>
+                        <a href="#" class="btn btn-success d-none" id="modalPasseLivrePdf" download>
+                            Baixar PDF
+                        </a>
+                    </div>
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Fechar</button>
                 </div>
             </div>
@@ -365,6 +396,11 @@ $dataExtenso = static function (): string {
             vertical-align: baseline;
             margin: 0 0.15rem;
         }
+        .atestado-numero-vazio.preenchido {
+            border-bottom: none;
+            min-width: 0;
+            font-weight: 700;
+        }
         .atestado-tabela th,
         .atestado-tabela td {
             vertical-align: middle;
@@ -392,7 +428,17 @@ $dataExtenso = static function (): string {
         const assinaturaData = document.getElementById('modalPasseLivreAssinaturaData');
         const tbody = document.getElementById('modalPasseLivreDisciplinas');
         const pdfLink = document.getElementById('modalPasseLivrePdf');
+        const btnAssinar = document.getElementById('modalPasseLivreAssinar');
+        const podeAssinar = <?= $podeAssinarPasseLivre ? 'true' : 'false' ?>;
+        const elNumero = document.getElementById('modalPasseLivreNumero');
+        const elAno = document.getElementById('modalPasseLivreAno');
+        const elProtocolo = document.getElementById('modalPasseLivreProtocolo');
+        const elData = document.getElementById('modalPasseLivreData');
+        const elConferencia = document.getElementById('modalPasseLivreConferencia');
         const pdfBase = <?= json_encode(url('/passe-livre/pdf'), JSON_UNESCAPED_UNICODE) ?>;
+        const assinarUrl = <?= json_encode(url('/passe-livre/assinar'), JSON_UNESCAPED_UNICODE) ?>;
+        const dataHoje = <?= json_encode($dataExtenso(), JSON_UNESCAPED_UNICODE) ?>;
+        let dadosAtuais = null;
 
         function fmtPct(valor) {
             if (valor === null || valor === undefined || valor === '' || Number.isNaN(Number(valor))) {
@@ -418,7 +464,70 @@ $dataExtenso = static function (): string {
             return limpo !== '' ? limpo : traco;
         }
 
+        function limparNumero() {
+            elNumero.textContent = '';
+            elAno.textContent = '';
+            elNumero.classList.add('atestado-numero-vazio');
+            elAno.classList.add('atestado-numero-vazio');
+            elNumero.classList.remove('preenchido');
+            elAno.classList.remove('preenchido');
+            elProtocolo.textContent = 'Nº do Protocolo: PROTOCOLO INDEFINIDO';
+            elData.textContent = dataHoje;
+            elConferencia.classList.add('d-none');
+            elConferencia.textContent = '';
+            assinaturaData.textContent = '';
+            pdfLink.classList.add('d-none');
+            pdfLink.href = '#';
+            if (btnAssinar) {
+                btnAssinar.classList.remove('d-none');
+                btnAssinar.disabled = false;
+                btnAssinar.textContent = 'Assinar';
+                btnAssinar.dataset.renovar = '0';
+            }
+        }
+
+        function aplicarAtestado(atestado) {
+            if (!atestado) {
+                limparNumero();
+                return;
+            }
+
+            elNumero.textContent = String(atestado.numero);
+            elAno.textContent = String(atestado.ano);
+            elNumero.classList.add('preenchido');
+            elAno.classList.add('preenchido');
+            elProtocolo.textContent = 'Nº do Protocolo: ' + atestado.numero_formatado;
+            elData.textContent = atestado.data_documento || dataHoje;
+            assinaturaData.textContent = '(Assinado digitalmente em '
+                + (atestado.assinado_em_fmt || atestado.assinado_em || '')
+                + ')';
+
+            const link = atestado.link_conferencia || '';
+            if (link) {
+                elConferencia.innerHTML =
+                    'Documento assinado digitalmente. Para conferir a autenticidade da assinatura, acesse: '
+                    + '<a href="' + escapeHtml(link) + '" target="_blank" rel="noopener">'
+                    + escapeHtml(link) + '</a>';
+                elConferencia.classList.remove('d-none');
+            }
+
+            if (dadosAtuais && dadosAtuais.id) {
+                pdfLink.href = pdfBase + '?id=' + encodeURIComponent(String(dadosAtuais.id));
+                pdfLink.classList.remove('d-none');
+            }
+
+            if (btnAssinar) {
+                btnAssinar.classList.remove('d-none');
+                btnAssinar.disabled = false;
+                btnAssinar.textContent = 'Assinar novamente';
+                btnAssinar.dataset.renovar = '1';
+            }
+        }
+
         function abrir(dados) {
+            dadosAtuais = dados;
+            limparNumero();
+
             const nome = valorOu('---', dados.nome);
             const matricula = valorOu('---', dados.matricula);
             const ingresso = valorOu('---', dados.ingresso);
@@ -440,15 +549,6 @@ $dataExtenso = static function (): string {
 
             geral.textContent = fmtPct(dados.frequencia);
 
-            const agora = new Date();
-            const pad = function (n) { return String(n).padStart(2, '0'); };
-            assinaturaData.textContent = '(Assinado digitalmente em '
-                + pad(agora.getDate()) + '/'
-                + pad(agora.getMonth() + 1) + '/'
-                + agora.getFullYear() + ' '
-                + pad(agora.getHours()) + ':'
-                + pad(agora.getMinutes()) + ')';
-
             tbody.innerHTML = '';
             const discs = Array.isArray(dados.disciplinas) ? dados.disciplinas : [];
             discs.forEach(function (d) {
@@ -463,15 +563,67 @@ $dataExtenso = static function (): string {
                 tbody.appendChild(tr);
             });
 
-            if (dados.id) {
-                pdfLink.href = pdfBase + '?id=' + encodeURIComponent(String(dados.id));
-                pdfLink.classList.remove('disabled');
-            } else {
-                pdfLink.href = '#';
-                pdfLink.classList.add('disabled');
+            if (dados.atestado) {
+                aplicarAtestado(dados.atestado);
             }
 
             bootstrap.Modal.getOrCreateInstance(modalEl).show();
+        }
+
+        if (btnAssinar) {
+            btnAssinar.addEventListener('click', function () {
+            if (!dadosAtuais || !dadosAtuais.id) {
+                return;
+            }
+
+            const renovar = btnAssinar.dataset.renovar === '1';
+            if (renovar && !window.confirm(
+                'Assinar novamente? Será gerado um novo número e uma nova data. '
+                + 'O link de conferência anterior continuará válido para o documento antigo.'
+            )) {
+                return;
+            }
+
+            btnAssinar.disabled = true;
+            btnAssinar.textContent = 'Assinando…';
+
+            const corpo = new FormData();
+            corpo.append('id', String(dadosAtuais.id));
+            if (renovar) {
+                corpo.append('renovar', '1');
+            }
+
+            fetch(assinarUrl, {
+                method: 'POST',
+                body: corpo,
+                credentials: 'same-origin'
+            }).then(function (resp) {
+                return resp.json().then(function (json) {
+                    return { okHttp: resp.ok, json: json };
+                });
+            }).then(function (resultado) {
+                if (!resultado.json || !resultado.json.ok || !resultado.json.atestado) {
+                    throw new Error((resultado.json && resultado.json.erro) || 'Falha ao assinar.');
+                }
+                dadosAtuais.atestado = resultado.json.atestado;
+                aplicarAtestado(resultado.json.atestado);
+
+                const linha = document.querySelector(
+                    '.linha-passe-livre[data-id="' + String(dadosAtuais.id) + '"]'
+                );
+                if (linha) {
+                    try {
+                        const atual = JSON.parse(linha.getAttribute('data-passe-livre') || '{}');
+                        atual.atestado = resultado.json.atestado;
+                        linha.setAttribute('data-passe-livre', JSON.stringify(atual));
+                    } catch (e) {}
+                }
+            }).catch(function (err) {
+                alert(err.message || 'Não foi possível assinar o documento.');
+                btnAssinar.disabled = false;
+                btnAssinar.textContent = renovar ? 'Assinar novamente' : 'Assinar';
+            });
+            });
         }
 
         function lerDados(linha) {

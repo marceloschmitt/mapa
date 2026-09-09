@@ -10,6 +10,7 @@ CREATE TABLE IF NOT EXISTS usuarios (
     auth_type TEXT NOT NULL DEFAULT 'local' CHECK (auth_type IN ('local', 'ldap')),
     perfil TEXT NOT NULL CHECK (perfil IN ('administrador', 'coordenador_curso', 'geral', 'professor')),
     ativo INTEGER NOT NULL DEFAULT 1,
+    pode_assinar_passe_livre INTEGER NOT NULL DEFAULT 0,
     criado_em TEXT NOT NULL DEFAULT (datetime('now'))
 );
 
@@ -443,4 +444,30 @@ CREATE TABLE IF NOT EXISTS feriados (
 
 CREATE INDEX IF NOT EXISTS idx_feriados_data
     ON feriados(data);
+
+-- Atestados de passe livre assinados (numero sequencial unico; data congelada).
+CREATE TABLE IF NOT EXISTS passe_livre_atestados (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    passe_livre_aluno_curso_id INTEGER UNIQUE,
+    numero INTEGER NOT NULL UNIQUE,
+    ano INTEGER NOT NULL,
+    data_documento TEXT NOT NULL,
+    assinado_em TEXT NOT NULL,
+    codigo_verificacao TEXT NOT NULL UNIQUE,
+    usuario_id INTEGER,
+    nome_aluno TEXT NOT NULL DEFAULT '',
+    matricula TEXT NOT NULL DEFAULT '',
+    nome_curso TEXT NOT NULL DEFAULT '',
+    periodo TEXT NOT NULL DEFAULT '',
+    frequencia_geral REAL,
+    disciplinas_json TEXT NOT NULL DEFAULT '[]',
+    FOREIGN KEY (passe_livre_aluno_curso_id) REFERENCES passe_livre_aluno_curso(id) ON DELETE SET NULL,
+    FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_codigo
+    ON passe_livre_atestados(codigo_verificacao);
+
+CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_ano_numero
+    ON passe_livre_atestados(ano, numero);
 

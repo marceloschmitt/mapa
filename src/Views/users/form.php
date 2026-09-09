@@ -13,6 +13,9 @@ $valorCpf = $editando ? (string)($usuarioForm['cpf'] ?? '') : '';
 $valorPerfil = $editando ? (string)($usuarioForm['perfil'] ?? '') : '';
 $valorAuth = $editando ? (string)($usuarioForm['auth_type'] ?? 'local') : '';
 $ativoMarcado = $editando ? ((int)($usuarioForm['ativo'] ?? 1) === 1) : true;
+$assinarPasseLivreMarcado = $editando
+    ? ((int)($usuarioForm['pode_assinar_passe_livre'] ?? 0) === 1)
+    : false;
 ?>
 
 <div class="mb-4">
@@ -154,6 +157,23 @@ $ativoMarcado = $editando ? ((int)($usuarioForm['ativo'] ?? 1) === 1) : true;
                            value="1"
                         <?= $ativoMarcado ? 'checked' : '' ?>>
                     <label class="form-check-label" for="ativo">Usuário ativo</label>
+                </div>
+            </div>
+
+            <div class="col-12">
+                <div class="form-check">
+                    <input class="form-check-input"
+                           type="checkbox"
+                           id="pode_assinar_passe_livre"
+                           name="pode_assinar_passe_livre"
+                           value="1"
+                        <?= $assinarPasseLivreMarcado ? 'checked' : '' ?>>
+                    <label class="form-check-label" for="pode_assinar_passe_livre">
+                        Pode assinar atestados de passe livre
+                    </label>
+                </div>
+                <div class="form-text">
+                    Libera o botão Assinar na tela de passe livre (número, data e link de conferência).
                 </div>
             </div>
 

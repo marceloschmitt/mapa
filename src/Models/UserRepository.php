@@ -21,7 +21,8 @@ class UserRepository
     public function all(): array
     {
         $statement = $this->db->query(
-            'SELECT id, username, nome, email, cpf, auth_type, perfil, ativo, criado_em
+            'SELECT id, username, nome, email, cpf, auth_type, perfil, ativo,
+                    pode_assinar_passe_livre, criado_em
              FROM usuarios
              ORDER BY nome ASC'
         );
@@ -37,7 +38,8 @@ class UserRepository
     public function findAdminPendenteSenha(): ?array
     {
         $statement = $this->db->query(
-            "SELECT id, username, nome, email, cpf, senha_hash, auth_type, perfil, ativo, criado_em
+            "SELECT id, username, nome, email, cpf, senha_hash, auth_type, perfil, ativo,
+                    pode_assinar_passe_livre, criado_em
              FROM usuarios
              WHERE perfil = 'administrador'
                AND auth_type = 'local'
@@ -55,7 +57,8 @@ class UserRepository
     public function findByUsername(string $username): ?array
     {
         $statement = $this->db->prepare(
-            'SELECT id, username, nome, email, cpf, senha_hash, auth_type, perfil, ativo, criado_em
+            'SELECT id, username, nome, email, cpf, senha_hash, auth_type, perfil, ativo,
+                    pode_assinar_passe_livre, criado_em
              FROM usuarios
              WHERE username = :username
              LIMIT 1'
@@ -70,7 +73,8 @@ class UserRepository
     public function findById(int $id): ?array
     {
         $statement = $this->db->prepare(
-            'SELECT id, username, nome, email, cpf, senha_hash, auth_type, perfil, ativo, criado_em
+            'SELECT id, username, nome, email, cpf, senha_hash, auth_type, perfil, ativo,
+                    pode_assinar_passe_livre, criado_em
              FROM usuarios
              WHERE id = :id
              LIMIT 1'
@@ -91,8 +95,13 @@ class UserRepository
         }
 
         $statement = $this->db->prepare(
-            'INSERT INTO usuarios (username, nome, email, cpf, senha_hash, auth_type, perfil, ativo)
-             VALUES (:username, :nome, :email, :cpf, :senha_hash, :auth_type, :perfil, :ativo)'
+            'INSERT INTO usuarios (
+                username, nome, email, cpf, senha_hash, auth_type, perfil, ativo,
+                pode_assinar_passe_livre
+             ) VALUES (
+                :username, :nome, :email, :cpf, :senha_hash, :auth_type, :perfil, :ativo,
+                :pode_assinar_passe_livre
+             )'
         );
         $statement->execute([
             'username' => trim((string)$data['username']),
@@ -103,6 +112,7 @@ class UserRepository
             'auth_type' => $authType,
             'perfil' => (string)$data['perfil'],
             'ativo' => !empty($data['ativo']) ? 1 : 0,
+            'pode_assinar_passe_livre' => !empty($data['pode_assinar_passe_livre']) ? 1 : 0,
         ]);
 
         $id = (int)$this->db->lastInsertId();
@@ -124,6 +134,7 @@ class UserRepository
             'auth_type' => $authType,
             'perfil' => (string)$data['perfil'],
             'ativo' => !empty($data['ativo']) ? 1 : 0,
+            'pode_assinar_passe_livre' => !empty($data['pode_assinar_passe_livre']) ? 1 : 0,
         ];
 
         if ($authType === 'ldap') {
@@ -136,6 +147,7 @@ class UserRepository
                      auth_type = :auth_type,
                      perfil = :perfil,
                      ativo = :ativo,
+                     pode_assinar_passe_livre = :pode_assinar_passe_livre,
                      senha_hash = NULL
                  WHERE id = :id'
             );
@@ -151,6 +163,7 @@ class UserRepository
                      auth_type = :auth_type,
                      perfil = :perfil,
                      ativo = :ativo,
+                     pode_assinar_passe_livre = :pode_assinar_passe_livre,
                      senha_hash = :senha_hash
                  WHERE id = :id'
             );
@@ -164,7 +177,8 @@ class UserRepository
                      cpf = :cpf,
                      auth_type = :auth_type,
                      perfil = :perfil,
-                     ativo = :ativo
+                     ativo = :ativo,
+                     pode_assinar_passe_livre = :pode_assinar_passe_livre
                  WHERE id = :id'
             );
             $statement->execute($params);
