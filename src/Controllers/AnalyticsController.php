@@ -84,7 +84,7 @@ class AnalyticsController extends Controller
                 'resumo' => [
                     'total_disciplinas' => 0,
                     'media_frequencia' => 0.0,
-                    'abaixo_75' => 0,
+                    'abaixo_limite' => 0,
                     'total_alarmes' => 0,
                     'nao_visualizados' => 0,
                     'percentual_baixo' => 0,
@@ -124,7 +124,7 @@ class AnalyticsController extends Controller
                 }
             ));
             $resumo['total_disciplinas'] = count($disciplinasCriticas);
-            $resumo['abaixo_75'] = $repo->contarAlunosAbaixo75(
+            $resumo['abaixo_limite'] = $repo->contarAlunosAbaixoLimite(
                 $coletaId,
                 null,
                 $codigosProfessor

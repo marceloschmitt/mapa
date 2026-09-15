@@ -11,9 +11,28 @@ class AnalyticsRepository
     /** @var PDO */
     private $db;
 
+    /** @var float|null */
+    private $limiteFrequencia = null;
+
     public function __construct()
     {
         $this->db = Database::connection();
+    }
+
+    /**
+     * Limite de frequencia (%) configurado em Configuracoes -> Alarmes.
+     *
+     * Abaixo dele o aluno entra nos indicadores de risco e na regra
+     * percentual_baixo de gerar_alarmes.py.
+     */
+    public function limiteFrequencia(): float
+    {
+        if ($this->limiteFrequencia === null) {
+            $config = (new ConfigRepository($this->db))->getAlarmeConfig();
+            $this->limiteFrequencia = (float)$config['frequencia_limite'];
+        }
+
+        return $this->limiteFrequencia;
     }
 
     /** @return array<string, mixed>|null */
@@ -38,7 +57,7 @@ class AnalyticsRepository
             return [
                 'total_disciplinas' => 0,
                 'media_frequencia' => 0.0,
-                'abaixo_75' => 0,
+                'abaixo_limite' => 0,
                 'total_alarmes' => 0,
                 'nao_visualizados' => 0,
                 'percentual_baixo' => 0,
@@ -51,7 +70,8 @@ class AnalyticsRepository
             'SELECT
                 COUNT(*) AS total_disciplinas,
                 ROUND(AVG(percentual_frequencia), 1) AS media_frequencia,
-                COUNT(DISTINCT CASE WHEN percentual_frequencia < 75 THEN aluno_id END) AS abaixo_75
+                COUNT(DISTINCT CASE WHEN percentual_frequencia < :limite_frequencia THEN aluno_id END)
+                    AS abaixo_limite
              FROM frequencia_disciplina
              WHERE coleta_id = :coleta_id',
             $cursoIds,
@@ -59,6 +79,7 @@ class AnalyticsRepository
         );
         $freq = $this->db->prepare($freqSql);
         $freq->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $freq->bindValue('limite_frequencia', $this->limiteFrequencia());
         $this->bindCursoParams($freq, $freqParams);
         $freq->execute();
         $freqRow = $freq->fetch() ?: [];
@@ -84,7 +105,7 @@ class AnalyticsRepository
         return [
             'total_disciplinas' => (int)($freqRow['total_disciplinas'] ?? 0),
             'media_frequencia' => (float)($freqRow['media_frequencia'] ?? 0),
-            'abaixo_75' => (int)($freqRow['abaixo_75'] ?? 0),
+            'abaixo_limite' => (int)($freqRow['abaixo_limite'] ?? 0),
             'total_alarmes' => (int)($alarmeRow['total_alarmes'] ?? 0),
             'nao_visualizados' => (int)($alarmeRow['nao_visualizados'] ?? 0),
             'percentual_baixo' => (int)($alarmeRow['percentual_baixo'] ?? 0),
@@ -94,12 +115,12 @@ class AnalyticsRepository
     }
 
     /**
-     * Alunos distintos com pelo menos uma disciplina abaixo de 75%.
+     * Alunos distintos com pelo menos uma disciplina abaixo do limite configurado.
      *
      * @param list<int>|null $cursoIds
      * @param list<string>|null $codigosDisciplina
      */
-    public function contarAlunosAbaixo75(
+    public function contarAlunosAbaixoLimite(
         int $coletaId,
         ?array $cursoIds = null,
         ?array $codigosDisciplina = null
@@ -114,7 +135,7 @@ class AnalyticsRepository
                 FROM frequencia_disciplina
                 WHERE coleta_id = :coleta_id
                   AND percentual_frequencia IS NOT NULL
-                  AND percentual_frequencia < 75';
+                  AND percentual_frequencia < :limite_frequencia';
         [$sql, $cursoParams] = $this->appendCursoFilter($sql, $cursoIds, 'curso_id');
         [$sql, $discParams] = $this->appendCodigoDisciplinaFilter(
             $sql,
@@ -124,6 +145,7 @@ class AnalyticsRepository
 
         $statement = $this->db->prepare($sql);
         $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $statement->bindValue('limite_frequencia', $this->limiteFrequencia());
         $this->bindNamedParams($statement, $cursoParams);
         $this->bindNamedParams($statement, $discParams);
         $statement->execute();
@@ -327,7 +349,8 @@ class AnalyticsRepository
                     g.semestre_oferta,
                     ROUND(AVG(f.percentual_frequencia), 1) AS media,
                     COUNT(*) AS alunos,
-                    SUM(CASE WHEN f.percentual_frequencia < 75 THEN 1 ELSE 0 END) AS abaixo_75
+                    SUM(CASE WHEN f.percentual_frequencia < :limite_frequencia THEN 1 ELSE 0 END)
+                        AS abaixo_limite
              FROM frequencia_disciplina f
              INNER JOIN cursos c ON c.id = f.curso_id
              LEFT JOIN disciplina_grade g
@@ -339,8 +362,8 @@ class AnalyticsRepository
             'f.curso_id'
         );
         $sql .= ' GROUP BY f.codigo_disciplina, f.disciplina, f.curso_id, c.id, c.nome_curso, g.semestre_oferta
-             HAVING abaixo_75 > 0
-             ORDER BY media ASC, abaixo_75 DESC';
+             HAVING abaixo_limite > 0
+             ORDER BY media ASC, abaixo_limite DESC';
 
         if ($limite !== null) {
             $sql .= ' LIMIT :limite';
@@ -348,6 +371,7 @@ class AnalyticsRepository
 
         $statement = $this->db->prepare($sql);
         $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $statement->bindValue('limite_frequencia', $this->limiteFrequencia());
         $this->bindCursoParams($statement, $params);
         if ($limite !== null) {
             $statement->bindValue('limite', $limite, PDO::PARAM_INT);
@@ -1517,7 +1541,7 @@ class AnalyticsRepository
     }
 
     /**
-     * Ingressantes do periodo com frequencia do curso < 75%.
+     * Ingressantes do periodo com frequencia do curso abaixo do limite configurado.
      *
      * @param list<int>|null $cursoIds
      * @param list<string>|null $codigosDisciplina
@@ -1561,7 +1585,7 @@ class AnalyticsRepository
                 WHERE fc.coleta_id = :coleta_id
                   AND ac.ano_semestre_ingresso = :periodo
                   AND fc.percentual_frequencia IS NOT NULL
-                  AND fc.percentual_frequencia < 75';
+                  AND fc.percentual_frequencia < :limite_frequencia';
 
         [$sql, $cursoParams] = $this->appendCursoFilter($sql, $cursoIds, 'fc.curso_id');
 
@@ -1593,6 +1617,7 @@ class AnalyticsRepository
         $statement = $this->db->prepare($sql);
         $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
         $statement->bindValue('periodo', $periodoIngresso, PDO::PARAM_STR);
+        $statement->bindValue('limite_frequencia', $this->limiteFrequencia());
         $this->bindNamedParams($statement, $cursoParams);
         $this->bindNamedParams($statement, $discParams);
         $statement->execute();

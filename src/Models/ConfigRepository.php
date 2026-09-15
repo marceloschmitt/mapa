@@ -37,10 +37,50 @@ class ConfigRepository
     public const EMAIL_FROM_ADDRESS = 'email_from_address';
     public const EMAIL_FROM_NAME = 'email_from_name';
 
+    public const ALARME_FREQUENCIA_ATIVO = 'alarme_frequencia_ativo';
+    public const ALARME_FREQUENCIA_LIMITE = 'alarme_frequencia_limite';
+    public const ALARME_FREQUENCIA_LIMITE_CRITICO = 'alarme_frequencia_limite_critico';
+    public const ALARME_FREQUENCIA_CARENCIA_SEMANAS = 'alarme_frequencia_carencia_semanas';
+    public const ALARME_FREQUENCIA_MENSAGEM = 'alarme_frequencia_mensagem';
+
+    public const ALARME_FALTAS_DIAS_ATIVO = 'alarme_faltas_dias_ativo';
+    public const ALARME_FALTAS_DIAS_MINIMO = 'alarme_faltas_dias_minimo';
+    public const ALARME_FALTAS_DIAS_JANELA = 'alarme_faltas_dias_janela';
+    public const ALARME_FALTAS_DIAS_CRITICO = 'alarme_faltas_dias_critico';
+    public const ALARME_FALTAS_DIAS_MENSAGEM = 'alarme_faltas_dias_mensagem';
+
+    public const ALARME_FALTAS_SEMANAS_ATIVO = 'alarme_faltas_semanas_ativo';
+    public const ALARME_FALTAS_SEMANAS_TOTAL = 'alarme_faltas_semanas_total';
+    public const ALARME_FALTAS_SEMANAS_JANELA_DIAS = 'alarme_faltas_semanas_janela_dias';
+    public const ALARME_FALTAS_SEMANAS_SEVERIDADE = 'alarme_faltas_semanas_severidade';
+    public const ALARME_FALTAS_SEMANAS_MENSAGEM = 'alarme_faltas_semanas_mensagem';
+
+    /** Valores usados quando o administrador ainda nao configurou os alarmes. */
+    public const ALARME_PADRAO = [
+        'frequencia_ativo' => true,
+        'frequencia_limite' => 75.0,
+        'frequencia_limite_critico' => 50.0,
+        'frequencia_carencia_semanas' => 3,
+        'frequencia_mensagem' => 'Frequência {percentual}% (abaixo de {limite}%)',
+        'faltas_dias_ativo' => true,
+        'faltas_dias_minimo' => 3,
+        'faltas_dias_janela' => 4,
+        'faltas_dias_critico' => 4,
+        'faltas_dias_mensagem' => '{dias} dias úteis: {datas}',
+        'faltas_semanas_ativo' => true,
+        'faltas_semanas_total' => 3,
+        'faltas_semanas_janela_dias' => 7,
+        'faltas_semanas_severidade' => 'critico',
+        'faltas_semanas_mensagem' => 'Faltas em {semanas} semanas consecutivas na disciplina',
+    ];
+
     public const APP_URL = 'app_url';
 
     /** @var PDO */
     private $pdo;
+
+    /** @var array<string, mixed>|null */
+    private $alarmeConfigCache = null;
 
     public function __construct(?PDO $pdo = null)
     {
@@ -370,6 +410,309 @@ class ConfigRepository
     public function hasEmailPassword(): bool
     {
         return trim($this->get(self::EMAIL_PASSWORD)) !== '';
+    }
+
+    /**
+     * Parametros das regras de alarme (limites, janelas e mensagens).
+     *
+     * Lidos tambem pelo Python (python/config_alarmes.py) na geracao dos
+     * alarmes: o portal e a coleta usam exatamente os mesmos valores.
+     *
+     * @return array{
+     *   frequencia_ativo: bool,
+     *   frequencia_limite: float,
+     *   frequencia_limite_critico: float,
+     *   frequencia_carencia_semanas: int,
+     *   frequencia_mensagem: string,
+     *   faltas_dias_ativo: bool,
+     *   faltas_dias_minimo: int,
+     *   faltas_dias_janela: int,
+     *   faltas_dias_critico: int,
+     *   faltas_dias_mensagem: string,
+     *   faltas_semanas_ativo: bool,
+     *   faltas_semanas_total: int,
+     *   faltas_semanas_janela_dias: int,
+     *   faltas_semanas_severidade: string,
+     *   faltas_semanas_mensagem: string
+     * }
+     */
+    public function getAlarmeConfig(): array
+    {
+        if ($this->alarmeConfigCache !== null) {
+            return $this->alarmeConfigCache;
+        }
+
+        $statement = $this->pdo->query(
+            "SELECT chave, valor FROM configuracoes WHERE chave LIKE 'alarme|_%' ESCAPE '|'"
+        );
+        $gravado = [];
+        foreach ($statement !== false ? $statement->fetchAll() : [] as $row) {
+            $gravado[(string)$row['chave']] = (string)$row['valor'];
+        }
+
+        $entrada = [];
+        foreach (self::chavesAlarme() as $campo => $chave) {
+            if (array_key_exists($chave, $gravado) && trim($gravado[$chave]) !== '') {
+                $entrada[$campo] = $gravado[$chave];
+            }
+        }
+
+        $this->alarmeConfigCache = $this->normalizarAlarmeConfig($entrada);
+
+        return $this->alarmeConfigCache;
+    }
+
+    /**
+     * Grava os parametros das regras de alarme (ja validados).
+     *
+     * @param array<string, mixed> $config
+     */
+    public function saveAlarmeConfig(array $config): void
+    {
+        $config = $this->normalizarAlarmeConfig($config);
+        $descricoes = self::descricoesAlarme();
+
+        foreach (self::chavesAlarme() as $campo => $chave) {
+            $valor = $config[$campo];
+            if (is_bool($valor)) {
+                $valor = $valor ? 'true' : 'false';
+            }
+            $this->set($chave, (string)$valor, $descricoes[$campo] ?? null);
+        }
+
+        $this->alarmeConfigCache = $config;
+    }
+
+    /**
+     * Valida a entrada do formulario de alarmes.
+     *
+     * @param array<string, mixed> $entrada
+     * @return array{config: array<string, mixed>, erros: list<string>}
+     */
+    public function validarAlarmeConfig(array $entrada): array
+    {
+        $erros = [];
+        $config = $this->normalizarAlarmeConfig($entrada);
+
+        $limite = self::numero($entrada['frequencia_limite'] ?? null);
+        if ($limite === null || $limite <= 0.0 || $limite > 100.0) {
+            $erros[] = 'O limite de frequência deve ser um número entre 0,1 e 100.';
+        }
+
+        $critico = self::numero($entrada['frequencia_limite_critico'] ?? null);
+        if ($critico === null || $critico < 0.0 || $critico > 100.0) {
+            $erros[] = 'O limite crítico de frequência deve ser um número entre 0 e 100.';
+        } elseif ($limite !== null && $critico > $limite) {
+            $erros[] = 'O limite crítico não pode ser maior que o limite de frequência.';
+        }
+
+        $carencia = self::inteiro($entrada['frequencia_carencia_semanas'] ?? null);
+        if ($carencia === null || $carencia < 0 || $carencia > 52) {
+            $erros[] = 'A carência do início da disciplina deve ter de 0 a 52 semanas.';
+        }
+
+        $minimo = self::inteiro($entrada['faltas_dias_minimo'] ?? null);
+        if ($minimo === null || $minimo < 2 || $minimo > 30) {
+            $erros[] = 'O mínimo de dias úteis consecutivos deve ficar entre 2 e 30.';
+        }
+
+        $janela = self::inteiro($entrada['faltas_dias_janela'] ?? null);
+        if ($janela === null || $janela < 1 || $janela > 30) {
+            $erros[] = 'A janela de dias úteis recentes deve ficar entre 1 e 30.';
+        }
+
+        $diasCritico = self::inteiro($entrada['faltas_dias_critico'] ?? null);
+        if ($diasCritico === null || $diasCritico < 2 || $diasCritico > 60) {
+            $erros[] = 'Os dias para severidade crítica devem ficar entre 2 e 60.';
+        } elseif ($minimo !== null && $diasCritico < $minimo) {
+            $erros[] = 'Os dias para severidade crítica não podem ser menores que o mínimo de dias consecutivos.';
+        }
+
+        $semanas = self::inteiro($entrada['faltas_semanas_total'] ?? null);
+        if ($semanas === null || $semanas < 2 || $semanas > 20) {
+            $erros[] = 'O número de semanas consecutivas deve ficar entre 2 e 20.';
+        }
+
+        $janelaSemanas = self::inteiro($entrada['faltas_semanas_janela_dias'] ?? null);
+        if ($janelaSemanas === null || $janelaSemanas < 1 || $janelaSemanas > 90) {
+            $erros[] = 'A janela de recência das semanas deve ficar entre 1 e 90 dias.';
+        }
+
+        $severidade = strtolower(trim((string)($entrada['faltas_semanas_severidade'] ?? '')));
+        if (!in_array($severidade, ['alto', 'critico'], true)) {
+            $erros[] = 'Severidade inválida para a regra de semanas consecutivas.';
+        }
+
+        foreach (
+            [
+                'frequencia_mensagem' => 'da regra de frequência',
+                'faltas_dias_mensagem' => 'da regra de dias consecutivos',
+                'faltas_semanas_mensagem' => 'da regra de semanas consecutivas',
+            ] as $campo => $rotulo
+        ) {
+            $texto = trim((string)($entrada[$campo] ?? ''));
+            if ($texto === '') {
+                $erros[] = 'A mensagem ' . $rotulo . ' não pode ficar em branco.';
+            } elseif (mb_strlen($texto) > 200) {
+                $erros[] = 'A mensagem ' . $rotulo . ' deve ter no máximo 200 caracteres.';
+            }
+        }
+
+        return ['config' => $config, 'erros' => $erros];
+    }
+
+    /**
+     * Aplica padroes e limites seguros a qualquer origem de dados.
+     *
+     * @param array<string, mixed> $entrada
+     * @return array<string, mixed>
+     */
+    private function normalizarAlarmeConfig(array $entrada): array
+    {
+        $padrao = self::ALARME_PADRAO;
+
+        $limite = self::numero($entrada['frequencia_limite'] ?? null) ?? $padrao['frequencia_limite'];
+        $limite = min(100.0, max(0.1, $limite));
+
+        $critico = self::numero($entrada['frequencia_limite_critico'] ?? null)
+            ?? $padrao['frequencia_limite_critico'];
+        $critico = min($limite, max(0.0, $critico));
+
+        $minimo = self::inteiro($entrada['faltas_dias_minimo'] ?? null) ?? $padrao['faltas_dias_minimo'];
+        $minimo = min(30, max(2, $minimo));
+
+        $diasCritico = self::inteiro($entrada['faltas_dias_critico'] ?? null) ?? $padrao['faltas_dias_critico'];
+        $diasCritico = min(60, max($minimo, $diasCritico));
+
+        $severidade = strtolower(trim((string)($entrada['faltas_semanas_severidade'] ?? '')));
+        if (!in_array($severidade, ['alto', 'critico'], true)) {
+            $severidade = (string)$padrao['faltas_semanas_severidade'];
+        }
+
+        return [
+            'frequencia_ativo' => self::booleano($entrada['frequencia_ativo'] ?? null, (bool)$padrao['frequencia_ativo']),
+            'frequencia_limite' => round($limite, 1),
+            'frequencia_limite_critico' => round($critico, 1),
+            'frequencia_carencia_semanas' => min(52, max(0, self::inteiro($entrada['frequencia_carencia_semanas'] ?? null)
+                ?? $padrao['frequencia_carencia_semanas'])),
+            'frequencia_mensagem' => self::texto(
+                $entrada['frequencia_mensagem'] ?? null,
+                (string)$padrao['frequencia_mensagem']
+            ),
+            'faltas_dias_ativo' => self::booleano($entrada['faltas_dias_ativo'] ?? null, (bool)$padrao['faltas_dias_ativo']),
+            'faltas_dias_minimo' => $minimo,
+            'faltas_dias_janela' => min(30, max(1, self::inteiro($entrada['faltas_dias_janela'] ?? null)
+                ?? $padrao['faltas_dias_janela'])),
+            'faltas_dias_critico' => $diasCritico,
+            'faltas_dias_mensagem' => self::texto(
+                $entrada['faltas_dias_mensagem'] ?? null,
+                (string)$padrao['faltas_dias_mensagem']
+            ),
+            'faltas_semanas_ativo' => self::booleano(
+                $entrada['faltas_semanas_ativo'] ?? null,
+                (bool)$padrao['faltas_semanas_ativo']
+            ),
+            'faltas_semanas_total' => min(20, max(2, self::inteiro($entrada['faltas_semanas_total'] ?? null)
+                ?? $padrao['faltas_semanas_total'])),
+            'faltas_semanas_janela_dias' => min(90, max(1, self::inteiro($entrada['faltas_semanas_janela_dias'] ?? null)
+                ?? $padrao['faltas_semanas_janela_dias'])),
+            'faltas_semanas_severidade' => $severidade,
+            'faltas_semanas_mensagem' => self::texto(
+                $entrada['faltas_semanas_mensagem'] ?? null,
+                (string)$padrao['faltas_semanas_mensagem']
+            ),
+        ];
+    }
+
+    /** @return array<string, string> campo do formulario => chave em configuracoes */
+    public static function chavesAlarme(): array
+    {
+        return [
+            'frequencia_ativo' => self::ALARME_FREQUENCIA_ATIVO,
+            'frequencia_limite' => self::ALARME_FREQUENCIA_LIMITE,
+            'frequencia_limite_critico' => self::ALARME_FREQUENCIA_LIMITE_CRITICO,
+            'frequencia_carencia_semanas' => self::ALARME_FREQUENCIA_CARENCIA_SEMANAS,
+            'frequencia_mensagem' => self::ALARME_FREQUENCIA_MENSAGEM,
+            'faltas_dias_ativo' => self::ALARME_FALTAS_DIAS_ATIVO,
+            'faltas_dias_minimo' => self::ALARME_FALTAS_DIAS_MINIMO,
+            'faltas_dias_janela' => self::ALARME_FALTAS_DIAS_JANELA,
+            'faltas_dias_critico' => self::ALARME_FALTAS_DIAS_CRITICO,
+            'faltas_dias_mensagem' => self::ALARME_FALTAS_DIAS_MENSAGEM,
+            'faltas_semanas_ativo' => self::ALARME_FALTAS_SEMANAS_ATIVO,
+            'faltas_semanas_total' => self::ALARME_FALTAS_SEMANAS_TOTAL,
+            'faltas_semanas_janela_dias' => self::ALARME_FALTAS_SEMANAS_JANELA_DIAS,
+            'faltas_semanas_severidade' => self::ALARME_FALTAS_SEMANAS_SEVERIDADE,
+            'faltas_semanas_mensagem' => self::ALARME_FALTAS_SEMANAS_MENSAGEM,
+        ];
+    }
+
+    /** @return array<string, string> */
+    private static function descricoesAlarme(): array
+    {
+        return [
+            'frequencia_ativo' => 'Gerar alarmes de frequência abaixo do limite',
+            'frequencia_limite' => 'Limite de frequência (%) que gera alarme',
+            'frequencia_limite_critico' => 'Frequência (%) abaixo da qual o alarme é crítico',
+            'frequencia_carencia_semanas' => 'Semanas de carência após o início da disciplina',
+            'frequencia_mensagem' => 'Mensagem do alarme de frequência (placeholders entre chaves)',
+            'faltas_dias_ativo' => 'Gerar alarmes de faltas em dias úteis consecutivos',
+            'faltas_dias_minimo' => 'Mínimo de dias úteis consecutivos de falta',
+            'faltas_dias_janela' => 'Janela de dias úteis recentes considerada',
+            'faltas_dias_critico' => 'Dias consecutivos a partir dos quais o alarme é crítico',
+            'faltas_dias_mensagem' => 'Mensagem do alarme de dias consecutivos',
+            'faltas_semanas_ativo' => 'Gerar alarmes de faltas em semanas consecutivas',
+            'faltas_semanas_total' => 'Semanas consecutivas com falta que geram alarme',
+            'faltas_semanas_janela_dias' => 'Dias de recência da última falta da sequência',
+            'faltas_semanas_severidade' => 'Severidade do alarme de semanas consecutivas',
+            'faltas_semanas_mensagem' => 'Mensagem do alarme de semanas consecutivas',
+        ];
+    }
+
+    private static function numero(mixed $valor): ?float
+    {
+        if (is_float($valor) || is_int($valor)) {
+            return (float)$valor;
+        }
+
+        $texto = str_replace(',', '.', trim((string)$valor));
+        if ($texto === '' || !is_numeric($texto)) {
+            return null;
+        }
+
+        return (float)$texto;
+    }
+
+    private static function inteiro(mixed $valor): ?int
+    {
+        $numero = self::numero($valor);
+        if ($numero === null || $numero != (int)$numero) {
+            return null;
+        }
+
+        return (int)$numero;
+    }
+
+    private static function booleano(mixed $valor, bool $padrao): bool
+    {
+        if ($valor === null) {
+            return $padrao;
+        }
+
+        if (is_bool($valor)) {
+            return $valor;
+        }
+
+        return in_array(strtolower(trim((string)$valor)), ['1', 'true', 'yes', 'on'], true);
+    }
+
+    private static function texto(mixed $valor, string $padrao): string
+    {
+        $texto = trim((string)($valor ?? ''));
+        if ($texto === '') {
+            return $padrao;
+        }
+
+        return mb_substr($texto, 0, 200);
     }
 
     /**

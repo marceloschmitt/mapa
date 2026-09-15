@@ -13,6 +13,10 @@ $semSeletorCurso = !empty($semSeletorCurso);
 $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
 $cursosDisponiveis = $cursosDisponiveis ?? [];
 $mostrarBadgeCurso = $semSeletorCurso;
+
+// Limite de frequencia configurado em Configuracoes -> Alarmes.
+$alarmeConfig = $alarmeConfig ?? [];
+$limiteFrequencia = (float)($alarmeConfig['frequencia_limite'] ?? 75);
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
@@ -28,7 +32,7 @@ $mostrarBadgeCurso = $semSeletorCurso;
         <p class="text-secondary mb-2">
             Alunos com ingresso em
             <strong><?= htmlspecialchars($periodo !== '' ? $periodo : '—', ENT_QUOTES, 'UTF-8') ?></strong>
-            e frequência do curso abaixo de 75%
+            e frequência do curso abaixo de <?= htmlspecialchars(View::rotuloLimite($limiteFrequencia), ENT_QUOTES, 'UTF-8') ?>%
             <?php if ($coleta !== null): ?>
                 (<?= htmlspecialchars(View::rotuloColeta($coleta), ENT_QUOTES, 'UTF-8') ?>).
             <?php else: ?>
@@ -89,7 +93,8 @@ $mostrarBadgeCurso = $semSeletorCurso;
 <?php if ($porCurso === [] && empty($erro) && empty($avisoCoordenador)): ?>
     <div class="card border-0 shadow-sm">
         <div class="card-body text-secondary">
-            Nenhum ingressante com frequência do curso abaixo de 75% neste período.
+            Nenhum ingressante com frequência do curso abaixo de
+            <?= htmlspecialchars(View::rotuloLimite($limiteFrequencia), ENT_QUOTES, 'UTF-8') ?>% neste período.
         </div>
     </div>
 <?php else: ?>

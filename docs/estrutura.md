@@ -34,3 +34,5 @@ mapa/
 | `docs/` | Documentacao complementar ao [INSTALL.md](../INSTALL.md) |
 
 LDAP e API SIGAA ficam no banco (`/configuracoes/ldap`, `/configuracoes/api`), nao no `.env`.
+As regras de alarme (limite de frequencia, janelas de faltas e texto dos alertas) tambem: 
+`/configuracoes/alarmes`, lidas pelo portal e por `python/gerar_alarmes.py`.

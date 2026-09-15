@@ -28,7 +28,9 @@ python3 python/executar_coleta.py
 ```
 
 API OAuth/SIGAA: tabela `configuracoes` (tela Configurações → API).  
-Datas de frequência/referência: `config/consultas.json`.
+Datas de frequência/referência: `config/consultas.json`.  
+Critérios dos alarmes (limite de frequência, janelas de faltas e texto dos
+alertas): tabela `configuracoes` (tela Configurações → Alarmes).
 
 **Status (regras da coleta):** a 1ª consulta pode trazer vários status (não só
 `ATIVO`). A 2ª consulta roda para **ATIVO**, **FORMANDO** e **trancados** da 1ª.
@@ -49,7 +51,7 @@ Trancamento é confirmado na 2ª (`TRANCADO` / `TRANC. AUTOMÁTICO`).
 | 6 | `importar_professores.py` | Cursos, docentes e vínculos | `resposta_matriculas.json` | BD (`cursos`, `professores`, `disciplina_professores`) |
 | 7 | `importar_grade.py` | Datas de aula a partir de `turno_turma` | `resposta_matriculas.json` | BD (`disciplina_grade`, `disciplina_aulas`) |
 | 8 | `importar_chamadas.py` | Última aula / histórico de chamadas | `resposta_alunos.json`, BD (coleta) | BD (`disciplina_ultima_aula`, `disciplina_chamadas`) |
-| 9 | `gerar_alarmes.py` | Regras de risco de evasão | BD (coleta + faltas), `config/consultas.json` | BD (`alarmes`) |
+| 9 | `gerar_alarmes.py` | Regras de risco de evasão (limites, janelas e mensagens vindos do portal) | BD (coleta + faltas + `configuracoes`), `config/consultas.json` | BD (`alarmes`) |
 | 10 | `enviar_emails_chamadas.php` | Avisa chamadas em atraso (2+ dias) | BD + `.env` (`EMAIL_SEND`) | BD (`chamada_emails`) + e-mail SMTP |
 | 11 | `enviar_emails_alarmes_alunos.php` | E-mails de acolhimento aos alunos (alarmes críticos) | BD + `.env` | BD (`alarme_emails`, `alarmes`) + SMTP |
 | 12 | `enviar_emails_alarmes_staff.php` | Resumos a professores/coordenadores | BD + `.env` | BD (`alarme_emails.staff_avisado_em`) + SMTP |
@@ -66,6 +68,7 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 | `db.py` | Conexão SQLite (`DB_PATH`) e `schema.sql` |
 | `api_auth.py` | Token OAuth e URLs da API |
 | `config_consultas.py` | Lê `config/consultas.json` |
+| `config_alarmes.py` | Lê as regras de alarme (`alarme_*` em `configuracoes`, tela Configurações → Alarmes) com os padrões antigos como fallback |
 | `status_aluno.py` | Regras ATIVO/FORMANDO/trancado |
 | `turno_turma.py` | Expande intervalos de aula (usado por `importar_grade.py`) |
 | `explorar_aprovacoes.py` | Fora do pipeline: consulta um período e resume aprovações/reprovações |

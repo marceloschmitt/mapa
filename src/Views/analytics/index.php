@@ -8,6 +8,11 @@ $porMesJson = json_encode($porMes, JSON_UNESCAPED_UNICODE);
 $isProfessor = !empty($isProfessor);
 $semSeletorCurso = !empty($isCoordenador) || $isProfessor;
 $mostrarFaltas = !$isProfessor;
+
+// Limite de frequencia configurado em Configuracoes -> Alarmes.
+$alarmeConfig = $alarmeConfig ?? [];
+$limiteFrequencia = (float)($alarmeConfig['frequencia_limite'] ?? 75);
+$rotuloLimite = View::rotuloLimite($limiteFrequencia);
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
@@ -69,9 +74,10 @@ $mostrarFaltas = !$isProfessor;
             <div class="card border-0 shadow-sm h-100">
                 <div class="card-body">
                     <div class="text-secondary small">
-                        Alunos com frequência menor do que 75% em alguma disciplina
+                        Alunos com frequência menor do que
+                        <?= htmlspecialchars($rotuloLimite, ENT_QUOTES, 'UTF-8') ?>% em alguma disciplina
                     </div>
-                    <div class="fs-3 fw-bold text-danger"><?= (int)$resumo['abaixo_75'] ?></div>
+                    <div class="fs-3 fw-bold text-danger"><?= (int)$resumo['abaixo_limite'] ?></div>
                 </div>
             </div>
         </div>
@@ -142,7 +148,7 @@ $mostrarFaltas = !$isProfessor;
     <div class="card border-0 shadow-sm mb-4">
         <div class="card-body">
             <h2 class="h6 mb-3">
-                Disciplinas críticas (mais alunos abaixo de 75%)
+                Disciplinas críticas (mais alunos abaixo de <?= htmlspecialchars($rotuloLimite, ENT_QUOTES, 'UTF-8') ?>%)
                 <?php if ($disciplinasCriticas !== []): ?>
                     <span class="text-secondary fw-normal" id="criticasContador"></span>
                 <?php endif; ?>
@@ -164,8 +170,9 @@ $mostrarFaltas = !$isProfessor;
                             <th scope="col">Curso</th>
                             <th scope="col" class="text-end text-nowrap">Média %</th>
                             <th scope="col" class="text-end text-nowrap">Alunos</th>
-                            <th scope="col" class="text-end text-nowrap" title="Alunos com frequência abaixo de 75%">
-                                &lt; 75%
+                            <th scope="col" class="text-end text-nowrap"
+                                title="Alunos com frequência abaixo de <?= htmlspecialchars($rotuloLimite, ENT_QUOTES, 'UTF-8') ?>%">
+                                &lt; <?= htmlspecialchars($rotuloLimite, ENT_QUOTES, 'UTF-8') ?>%
                             </th>
                         </tr>
                     </thead>
@@ -195,7 +202,7 @@ $mostrarFaltas = !$isProfessor;
                                     <td><?= htmlspecialchars((string)$disc['nome_curso'], ENT_QUOTES, 'UTF-8') ?></td>
                                     <td class="text-end text-nowrap"><?= htmlspecialchars((string)$disc['media'], ENT_QUOTES, 'UTF-8') ?></td>
                                     <td class="text-end text-nowrap"><?= (int)$disc['alunos'] ?></td>
-                                    <td class="text-end text-nowrap"><?= (int)$disc['abaixo_75'] ?></td>
+                                    <td class="text-end text-nowrap"><?= (int)$disc['abaixo_limite'] ?></td>
                                 </tr>
                             <?php endforeach; ?>
                         <?php endif; ?>
@@ -250,22 +257,26 @@ $mostrarFaltas = !$isProfessor;
     const larguraEixoCursos = Math.min(520, Math.max(180, maiorRotuloCurso * 7.2));
     const idsCursos = Array.isArray(porCurso.ids) ? porCurso.ids : [];
 
+    // Limite configurado no portal; acima dele, 5 pontos de zona de atencao.
+    const limiteFrequencia = <?= json_encode($limiteFrequencia) ?>;
+    const limiteAtencao = limiteFrequencia + 5;
+
     function corBarraCurso(media, destacado, haFiltro) {
         // Visao geral: cores cheias. Com filtro: curso selecionado cheio, demais suaves.
         const forte = !haFiltro || destacado;
         if (forte) {
-            if (media < 75) {
+            if (media < limiteFrequencia) {
                 return '#c53030';
             }
-            if (media < 80) {
+            if (media < limiteAtencao) {
                 return '#d69e2e';
             }
             return '#2c5282';
         }
-        if (media < 75) {
+        if (media < limiteFrequencia) {
             return 'rgba(197, 48, 48, 0.45)';
         }
-        if (media < 80) {
+        if (media < limiteAtencao) {
             return 'rgba(214, 158, 46, 0.45)';
         }
         return 'rgba(44, 82, 130, 0.45)';

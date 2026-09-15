@@ -1194,6 +1194,12 @@ class AlarmeEmailService
         return $saida;
     }
 
+    /** Semanas consecutivas exigidas pela regra (Configuracoes -> Alarmes). */
+    private function semanasConsecutivas(): int
+    {
+        return (int)$this->config->getAlarmeConfig()['faltas_semanas_total'];
+    }
+
     /**
      * @param array<string, mixed> $alarme
      */
@@ -1234,7 +1240,7 @@ class AlarmeEmailService
                 : "{$contexto}: faltas recentes em dias letivos consecutivos"
                     . ($mensagem !== '' ? " ({$mensagem})" : ''),
             'faltas_3semanas' => $comSeveridade
-                ? "{$contexto}: faltas em três semanas consecutivas"
+                ? "{$contexto}: faltas em {$this->semanasConsecutivas()} semanas consecutivas"
                     . ($mensagem !== '' ? " — {$mensagem}" : '')
                 : "{$contexto}: faltas em semanas consecutivas"
                     . ($mensagem !== '' ? " ({$mensagem})" : ''),

@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Mapa\Controllers\AlarmeConfigController;
 use Mapa\Controllers\AlarmeController;
 use Mapa\Controllers\AnalyticsController;
 use Mapa\Controllers\ApiConfigController;
@@ -62,6 +63,8 @@ return static function (Router $router): void {
     $router->post('/configuracoes/email', [EmailConfigController::class, 'save']);
     $router->get('/configuracoes/coordenacao', [CoordenacaoConfigController::class, 'form']);
     $router->post('/configuracoes/coordenacao', [CoordenacaoConfigController::class, 'save']);
+    $router->get('/configuracoes/alarmes', [AlarmeConfigController::class, 'form']);
+    $router->post('/configuracoes/alarmes', [AlarmeConfigController::class, 'save']);
     $router->get('/configuracoes/feriados', [FeriadoController::class, 'index']);
     $router->post('/configuracoes/feriados', [FeriadoController::class, 'criar']);
     $router->post('/configuracoes/feriados/excluir', [FeriadoController::class, 'excluir']);

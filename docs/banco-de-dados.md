@@ -192,6 +192,28 @@ Chave/valor para parâmetros sensíveis do sistema (não ficam no `.env`).
 | `ldap_bind_password` | Senha do bind (nunca exibida no formulário) |
 | `ldap_user_attribute` | Atributo de login (`sAMAccountName`, `uid`, etc.) |
 
+**Chaves das regras de alarme** (tela `/configuracoes/alarmes`, só administrador).
+Lidas pelo portal e por `python/gerar_alarmes.py` — sem elas valem os padrões da
+coluna à direita:
+
+| Chave | Uso | Padrão |
+|-------|-----|--------|
+| `alarme_frequencia_ativo` | Liga/desliga a regra de frequência | `true` |
+| `alarme_frequencia_limite` | Frequência (%) que gera alarme | `75` |
+| `alarme_frequencia_limite_critico` | Frequência (%) que torna o alarme `critico` | `50` |
+| `alarme_frequencia_carencia_semanas` | Semanas de aula antes de alarmar | `3` |
+| `alarme_frequencia_mensagem` | Texto do alerta (campos `{percentual}`, `{limite}`, `{limite_critico}`, `{ausencias}`, `{horarios}`, `{disciplina}`, `{codigo_disciplina}`, `{carencia_semanas}`) | `Frequência {percentual}% (abaixo de {limite}%)` |
+| `alarme_faltas_dias_ativo` | Liga/desliga a regra de dias consecutivos | `true` |
+| `alarme_faltas_dias_minimo` | Mínimo de dias úteis seguidos de falta | `3` |
+| `alarme_faltas_dias_janela` | Janela de dias úteis recentes que a sequência precisa tocar | `4` |
+| `alarme_faltas_dias_critico` | Tamanho da sequência que vira `critico` | `4` |
+| `alarme_faltas_dias_mensagem` | Texto do alerta (campos `{dias}`, `{datas}`, `{primeira_falta}`, `{ultima_falta}`, `{minimo}`, `{janela}`) | `{dias} dias úteis: {datas}` |
+| `alarme_faltas_semanas_ativo` | Liga/desliga a regra de semanas consecutivas | `true` |
+| `alarme_faltas_semanas_total` | Semanas seguidas com falta | `3` |
+| `alarme_faltas_semanas_janela_dias` | Recência da última falta da sequência (dias) | `7` |
+| `alarme_faltas_semanas_severidade` | `alto` ou `critico` | `critico` |
+| `alarme_faltas_semanas_mensagem` | Texto do alerta (campos `{semanas}`, `{ultima_falta}`, `{disciplina}`, `{codigo_disciplina}`, `{janela_dias}`) | `Faltas em {semanas} semanas consecutivas na disciplina` |
+
 ---
 
 ### `usuario_cursos`
@@ -380,13 +402,21 @@ Não há FK direta de `faltas_dia` / `alarmes` para `frequencia_disciplina`: o v
 
 ## Tipos de alarme
 
+Os tipos são fixos; **os critérios e as mensagens são configuráveis** em
+Configurações → Alarmes (chaves `alarme_*` de `configuracoes`). Entre parênteses,
+o valor padrão de cada parâmetro:
+
 | Tipo | Critério | Escopo típico |
 |------|----------|---------------|
-| `percentual_baixo` | Frequência &lt; 75% na disciplina | Por disciplina |
-| `faltas_4dias` | 3 ou mais dias úteis de falta nos últimos 4 dias úteis | Por aluno/curso (agregado) |
-| `faltas_3semanas` | Falta em 3 semanas consecutivas; última falta na janela (referência até 7 dias antes); severidade `critico` | Por disciplina |
+| `percentual_baixo` | Frequência abaixo do limite (75%) na disciplina, após a carência (3 semanas) do início; abaixo do limite crítico (50%) a severidade é `critico` | Por disciplina |
+| `faltas_4dias` | Mínimo de dias úteis seguidos de falta (3) tocando a janela de dias úteis recentes (4); a partir de certo tamanho (4) vira `critico` | Por aluno/curso (agregado) |
+| `faltas_3semanas` | Falta em N semanas consecutivas (3); última falta dentro da janela de recência (7 dias antes da referência); severidade configurável (`critico`) | Por disciplina |
 
-Gerados por `python/gerar_alarmes.py` com a `data_referencia` de `config/consultas.json`.
+Cada regra pode ser desligada no portal — os alarmes **abertos** daquele tipo
+somem na geração seguinte (os já tratados continuam preservados).
+
+Gerados por `python/gerar_alarmes.py` com a `data_referencia` de `config/consultas.json`
+e os parâmetros de `configuracoes` (ver `python/config_alarmes.py`).
 
 ---
 

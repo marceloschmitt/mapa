@@ -10,8 +10,25 @@ abstract class Controller
         $data['usuario'] = Auth::user();
         $data['isAdmin'] = $data['isAdmin'] ?? Auth::isAdmin();
         $data['podeVerChamadas'] = $data['podeVerChamadas'] ?? Auth::canVerChamadas();
+        // Limites e textos das regras de alarme: as telas nao fixam mais 75%.
+        $data['alarmeConfig'] = $data['alarmeConfig'] ?? self::alarmeConfig();
 
         View::render($view, $data, $layout);
+    }
+
+    /**
+     * Configuracao das regras de alarme (uma leitura por requisicao).
+     *
+     * @return array<string, mixed>
+     */
+    protected static function alarmeConfig(): array
+    {
+        static $config = null;
+        if ($config === null) {
+            $config = (new \Mapa\Models\ConfigRepository())->getAlarmeConfig();
+        }
+
+        return $config;
     }
 
     protected function redirect(string $path): void

@@ -112,6 +112,13 @@ Gravado no banco (não no `.env`):
 1. **Configurações → API** — OAuth/SIGAA (necessário para a coleta)
 2. **Configurações → LDAP** — opcional
 3. **Configurações → E-mail** — SMTP + interruptor (só envia se `EMAIL_SEND=true`)
+4. **Configurações → Alarmes** — critérios de risco: limite de frequência (padrão 75%),
+   limite crítico (50%), carência do início da disciplina, janelas de faltas e o texto de
+   cada alerta. Sem mexer, o comportamento é o mesmo de antes; o que for salvo vale para o
+   portal e para a próxima execução de `gerar_alarmes.py`.
+
+Alarmes **críticos** disparam o e-mail automático ao aluno — mudar os limites muda o volume
+de e-mails.
 
 ### 5. Rodar a coleta
 
@@ -141,4 +148,5 @@ Pipeline (ordem e arquivos): [python/README.md](python/README.md).
 - [ ] Senha do `admin` definida em `/setup`
 - [ ] API SIGAA configurada
 - [ ] E-mail/SMTP (se for usar avisos)
+- [ ] Critérios de alarme conferidos em Configurações → Alarmes
 - [ ] Cron da coleta

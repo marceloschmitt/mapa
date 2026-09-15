@@ -2,10 +2,17 @@
 
 use Mapa\Core\View;
 
+$alarmeConfig = $alarmeConfig ?? [];
+$limiteFrequencia = (float)($alarmeConfig['frequencia_limite'] ?? 75);
+$minimoDiasFalta = (int)($alarmeConfig['faltas_dias_minimo'] ?? 3);
+$janelaDiasFalta = (int)($alarmeConfig['faltas_dias_janela'] ?? 4);
+$semanasConsecutivas = (int)($alarmeConfig['faltas_semanas_total'] ?? 3);
+
+// Rotulos seguem os criterios configurados em Configuracoes -> Alarmes.
 $rotulosTipo = [
-    'percentual_baixo' => 'Frequência < 75%',
-    'faltas_4dias' => 'Faltas recentes (4 dias)',
-    'faltas_3semanas' => '3 semanas consecutivas',
+    'percentual_baixo' => 'Frequência < ' . View::rotuloLimite($limiteFrequencia) . '%',
+    'faltas_4dias' => 'Faltas recentes (' . $janelaDiasFalta . ' dias)',
+    'faltas_3semanas' => $semanasConsecutivas . ' semanas consecutivas',
 ];
 $rotulosContato = $rotulosContato ?? [
     'email' => 'E-mail enviado',

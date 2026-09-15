@@ -19,6 +19,17 @@ class View
         return 'Coleta em ' . $data;
     }
 
+    /** Formata limite de frequencia para exibicao (75.0 → "75"; 72.5 → "72,5"). */
+    public static function rotuloLimite(mixed $valor): string
+    {
+        $texto = number_format((float)$valor, 1, ',', '');
+        if (substr($texto, -2) === ',0') {
+            $texto = substr($texto, 0, -2);
+        }
+
+        return $texto;
+    }
+
     /** Formata semestre_oferta (ex.: "3" → "3º"). */
     public static function rotuloSemestre(mixed $semestre): string
     {

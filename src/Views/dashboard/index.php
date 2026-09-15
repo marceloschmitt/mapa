@@ -1,3 +1,14 @@
+<?php
+
+use Mapa\Core\View;
+
+// Criterios de risco configurados em Configuracoes -> Alarmes.
+$alarmeConfig = $alarmeConfig ?? [];
+$limiteFrequencia = (float)($alarmeConfig['frequencia_limite'] ?? 75);
+$janelaDiasFalta = (int)($alarmeConfig['faltas_dias_janela'] ?? 4);
+$semanasConsecutivas = (int)($alarmeConfig['faltas_semanas_total'] ?? 3);
+?>
+
 <?php if (!empty($sucesso)): ?>
     <div class="alert alert-success"><?= htmlspecialchars($sucesso, ENT_QUOTES, 'UTF-8') ?></div>
 <?php endif; ?>
@@ -26,8 +37,10 @@
                 <div class="card-body">
                     <h2 class="h5">Alarmes de risco</h2>
                     <p class="text-secondary mb-0 small">
-                        Frequência &lt; 75%, faltas nos últimos 4 dias úteis e 3 semanas
-                        consecutivas — gerados no banco por <code>gerar_alarmes.py</code>.
+                        Frequência &lt; <?= htmlspecialchars(View::rotuloLimite($limiteFrequencia), ENT_QUOTES, 'UTF-8') ?>%,
+                        faltas nos últimos <?= $janelaDiasFalta ?> dias úteis e
+                        <?= $semanasConsecutivas ?> semanas consecutivas — critérios definidos em
+                        Configurações &rarr; Alarmes.
                     </p>
                 </div>
             </div>
@@ -39,7 +52,8 @@
                 <div class="card-body">
                     <h2 class="h5">Ingressantes</h2>
                     <p class="text-secondary mb-0 small">
-                        Alunos do período letivo atual com frequência do curso abaixo de 75%,
+                        Alunos do período letivo atual com frequência do curso abaixo de
+                        <?= htmlspecialchars(View::rotuloLimite($limiteFrequencia), ENT_QUOTES, 'UTF-8') ?>%,
                         organizados por curso.
                     </p>
                 </div>
