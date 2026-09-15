@@ -83,12 +83,12 @@ def proximo_dia_util(dia: date) -> date:
     return atual
 
 
-def obter_janela_uteis(referencia: date, quantidade: int = JANELA_DIAS_UTEIS) -> list[date]:
+def obter_janela_uteis(referencia: date, quantidade: int) -> list[date]:
     """Lista os N dias uteis ate a data de referencia (inclusive).
 
     Args:
         referencia: Data final.
-        quantidade: Quantidade de dias uteis.
+        quantidade: Quantidade de dias uteis (configuravel).
 
     Returns:
         Lista de datas uteis em ordem crescente.
@@ -337,12 +337,22 @@ def gerar_percentual_baixo(
     cursor: Any,
     coleta_id: int,
     referencia: date,
+<<<<<<< Updated upstream
     config: dict[str, Any] | None = None,
 ) -> int:
     """Gera alarmes de frequencia abaixo do limite configurado.
 
     So conta apos a carencia configurada (padrao 3 semanas) do inicio
     efetivo da disciplina para o aluno:
+=======
+    limite_percentual: float,
+    semanas_carencia: int,
+) -> int:
+    """Gera alarmes de frequencia abaixo do limite configurado.
+
+    So conta apos `semanas_carencia` semanas do inicio efetivo da
+    disciplina para o aluno:
+>>>>>>> Stashed changes
     - primeiro dia de aula da disciplina na grade; ou
     - se houver matricula atrasada, o primeiro dia de aula a partir do
       dia seguinte ao fim do intervalo de atraso.
@@ -351,7 +361,12 @@ def gerar_percentual_baixo(
         cursor: Cursor SQLite.
         coleta_id: Coleta.
         referencia: Data de referencia dos alarmes.
+<<<<<<< Updated upstream
         config: Parametros das regras (padrao: os gravados no banco).
+=======
+        limite_percentual: Percentual minimo aceitavel (configuravel).
+        semanas_carencia: Semanas de carencia antes de alarmar (configuravel).
+>>>>>>> Stashed changes
 
     Returns:
         Quantidade de alarmes gerados.
@@ -389,7 +404,11 @@ def gerar_percentual_baixo(
           AND fd.percentual_frequencia < ?
           AND fd.horarios > 0
         """,
+<<<<<<< Updated upstream
         (coleta_id, limite),
+=======
+        (coleta_id, limite_percentual),
+>>>>>>> Stashed changes
     )
     rows = cursor.fetchall()
     total = 0
@@ -403,6 +422,7 @@ def gerar_percentual_baixo(
         except ValueError:
             continue
 
+<<<<<<< Updated upstream
         if referencia < primeira + timedelta(weeks=carencia):
             continue
 
@@ -421,6 +441,13 @@ def gerar_percentual_baixo(
                 "carencia_semanas": carencia,
             },
         )
+=======
+        if referencia < primeira + timedelta(weeks=semanas_carencia):
+            continue
+
+        percentual = float(row["percentual_frequencia"])
+        severidade = "critico" if percentual < limite_percentual * (2 / 3) else "alto"
+>>>>>>> Stashed changes
         inserir_alarme(
             cursor,
             coleta_id=coleta_id,
@@ -430,9 +457,14 @@ def gerar_percentual_baixo(
             disciplina=row["disciplina"],
             tipo="percentual_baixo",
             severidade=severidade,
+<<<<<<< Updated upstream
             mensagem=mensagem,
+=======
+            mensagem=f"Frequencia {percentual:.1f}% (abaixo de {limite_percentual:.0f}%)",
+>>>>>>> Stashed changes
             detalhe={
                 "percentual_frequencia": percentual,
+                "limite_percentual": limite_percentual,
                 "ausencias": int(row["ausencias"]),
                 "horarios": int(row["horarios"]),
                 "primeira_aula": str(primeira_txt),
@@ -527,6 +559,7 @@ def gerar_faltas_4dias(
     cursor: Any,
     coleta_id: int,
     referencia: date,
+<<<<<<< Updated upstream
     config: dict[str, Any] | None = None,
 ) -> int:
     """Gera alarmes de faltas em dias uteis consecutivos (recentes).
@@ -534,16 +567,32 @@ def gerar_faltas_4dias(
     A sequencia e medida em dias uteis: quinta, sexta e segunda contam
     como 3 dias seguidos. Sabados nao entram nem quebram a sequencia.
     So dispara se a sequencia toca a janela de dias uteis configurada.
+=======
+    janela_dias_uteis: int,
+    minimo_faltas_uteis: int,
+) -> int:
+    """Gera alarmes de dias uteis consecutivos de falta (recentes).
+
+    A sequencia e medida em dias uteis: quinta, sexta e segunda contam
+    como 3 dias seguidos. Sabados nao entram nem quebram a sequencia.
+    So dispara se a sequencia toca a janela dos ultimos N dias uteis.
+>>>>>>> Stashed changes
 
     Args:
         cursor: Cursor SQLite.
         coleta_id: Coleta.
         referencia: Data de referencia.
+<<<<<<< Updated upstream
         config: Parametros das regras (padrao: os gravados no banco).
+=======
+        janela_dias_uteis: Tamanho da janela recente, em dias uteis (configuravel).
+        minimo_faltas_uteis: Minimo de faltas consecutivas para alarmar (configuravel).
+>>>>>>> Stashed changes
 
     Returns:
         Quantidade de alarmes.
     """
+<<<<<<< Updated upstream
     config = config or carregar_config_alarmes(cursor)
     if not config["faltas_dias_ativo"]:
         return 0
@@ -553,6 +602,9 @@ def gerar_faltas_4dias(
     dias_critico = int(config["faltas_dias_critico"])
 
     janela = set(obter_janela_uteis(referencia, dias_janela))
+=======
+    janela = set(obter_janela_uteis(referencia, janela_dias_uteis))
+>>>>>>> Stashed changes
     faltas = carregar_faltas_por_aluno(cursor, coleta_id)
     total = 0
 
@@ -560,14 +612,22 @@ def gerar_faltas_4dias(
         candidatas = [
             seq
             for seq in sequencias_faltas_uteis(datas, referencia)
+<<<<<<< Updated upstream
             if len(seq) >= minimo and any(d in janela for d in seq)
+=======
+            if len(seq) >= minimo_faltas_uteis and any(d in janela for d in seq)
+>>>>>>> Stashed changes
         ]
         if not candidatas:
             continue
 
         # Prefere a sequencia mais longa; em empate, a que termina mais tarde.
         sequencia = max(candidatas, key=lambda seq: (len(seq), seq[-1]))
+<<<<<<< Updated upstream
         severidade = "critico" if len(sequencia) >= dias_critico else "alto"
+=======
+        severidade = "critico" if len(sequencia) >= janela_dias_uteis else "alto"
+>>>>>>> Stashed changes
         dias_fmt = ", ".join(d.strftime("%d/%m") for d in sequencia)
         mensagem = formatar_mensagem(
             str(config["faltas_dias_mensagem"]),
@@ -605,8 +665,12 @@ def gerar_faltas_4dias(
 def encontrar_sequencia_3_semanas(
     datas: list[date],
     referencia: date,
+<<<<<<< Updated upstream
     semanas_consecutivas: int = SEMANAS_CONSECUTIVAS,
     janela_dias: int = 7,
+=======
+    semanas_consecutivas: int,
+>>>>>>> Stashed changes
 ) -> list[tuple[int, int]] | None:
     """Encontra N semanas consecutivas com falta e ultima na janela recente.
 
@@ -616,8 +680,12 @@ def encontrar_sequencia_3_semanas(
     Args:
         datas: Datas de falta da disciplina.
         referencia: Data de referencia.
+<<<<<<< Updated upstream
         semanas_consecutivas: Quantas semanas seguidas exigir.
         janela_dias: Recencia maxima da ultima falta da sequencia.
+=======
+        semanas_consecutivas: Quantidade de semanas seguidas exigida (configuravel).
+>>>>>>> Stashed changes
 
     Returns:
         Sequencia de semanas ou None.
@@ -662,15 +730,25 @@ def gerar_faltas_3semanas(
     cursor: Any,
     coleta_id: int,
     referencia: date,
+<<<<<<< Updated upstream
     config: dict[str, Any] | None = None,
 ) -> int:
     """Gera alarmes de N semanas consecutivas com falta.
+=======
+    semanas_consecutivas: int,
+) -> int:
+    """Gera alarmes de semanas consecutivas com falta.
+>>>>>>> Stashed changes
 
     Args:
         cursor: Cursor SQLite.
         coleta_id: Coleta.
         referencia: Data de referencia.
+<<<<<<< Updated upstream
         config: Parametros das regras (padrao: os gravados no banco).
+=======
+        semanas_consecutivas: Quantidade de semanas seguidas exigida (configuravel).
+>>>>>>> Stashed changes
 
     Returns:
         Quantidade de alarmes.
@@ -688,12 +766,16 @@ def gerar_faltas_3semanas(
 
     for chave, datas in faltas.items():
         aluno_id, curso_id, codigo = chave
+<<<<<<< Updated upstream
         sequencia = encontrar_sequencia_3_semanas(
             datas,
             referencia,
             semanas_consecutivas,
             janela_dias,
         )
+=======
+        sequencia = encontrar_sequencia_3_semanas(datas, referencia, semanas_consecutivas)
+>>>>>>> Stashed changes
         if sequencia is None:
             continue
 
@@ -724,6 +806,7 @@ def gerar_faltas_3semanas(
             codigo_disciplina=codigo,
             disciplina=nomes.get(chave, codigo),
             tipo="faltas_3semanas",
+<<<<<<< Updated upstream
             severidade=severidade,
             mensagem=mensagem,
             detalhe={
@@ -732,6 +815,11 @@ def gerar_faltas_3semanas(
                 "janela_dias": janela_dias,
                 "ultima_falta": ultima.isoformat(),
             },
+=======
+            severidade="critico",
+            mensagem=f"Faltas em {semanas_consecutivas} semanas consecutivas na disciplina",
+            detalhe={"semanas": semanas_rotulo},
+>>>>>>> Stashed changes
         )
         total += 1
 
@@ -743,6 +831,9 @@ def gerar(coleta_id: int | None = None) -> dict[str, Any]:
 
     Os parametros (limites, janelas e mensagens) vem da configuracao
     gravada pelo administrador no portal.
+
+    Le a configuracao dinamica (config_alarmes) antes de gerar, permitindo
+    que o admin ajuste limites sem alterar o codigo.
 
     Args:
         coleta_id: Coleta especifica ou a mais recente.
@@ -763,9 +854,32 @@ def gerar(coleta_id: int | None = None) -> dict[str, Any]:
 
     limpar_alarmes_coleta(cursor, coleta_id)
     n_tratados = trazer_alarmes_tratados(cursor, coleta_id)
+<<<<<<< Updated upstream
     n_percentual = gerar_percentual_baixo(cursor, coleta_id, referencia, config)
     n_4dias = gerar_faltas_4dias(cursor, coleta_id, referencia, config)
     n_3semanas = gerar_faltas_3semanas(cursor, coleta_id, referencia, config)
+=======
+    n_percentual = gerar_percentual_baixo(
+        cursor,
+        coleta_id,
+        referencia,
+        float(config["limite_percentual"]),
+        int(config["semanas_carencia"]),
+    )
+    n_4dias = gerar_faltas_4dias(
+        cursor,
+        coleta_id,
+        referencia,
+        int(config["janela_dias_uteis"]),
+        int(config["minimo_faltas_uteis"]),
+    )
+    n_3semanas = gerar_faltas_3semanas(
+        cursor,
+        coleta_id,
+        referencia,
+        int(config["semanas_consecutivas"]),
+    )
+>>>>>>> Stashed changes
     n_staff_cancelados = cancelar_avisos_staff_alunos_ausentes(cursor, coleta_id)
 
     conn.commit()
@@ -777,7 +891,11 @@ def gerar(coleta_id: int | None = None) -> dict[str, Any]:
         "faltas_3semanas": n_3semanas,
         "staff_cancelados_ausentes": n_staff_cancelados,
         "total": n_percentual + n_4dias + n_3semanas,
+<<<<<<< Updated upstream
         "config": config,
+=======
+        "config_usada": config,
+>>>>>>> Stashed changes
     }
 
 
@@ -821,11 +939,18 @@ def main() -> int:
     print("Alarmes gerados")
     print(f"Coleta ID: {resumo['coleta_id']}")
     print(f"Tratados preservados: {resumo['tratados_preservados']}")
+<<<<<<< Updated upstream
     print(f"{rotulo_percentual}: {resumo['percentual_baixo']}")
     print(f"{rotulo_dias}: {resumo['faltas_4dias']}")
     print(f"{rotulo_semanas}: {resumo['faltas_3semanas']}")
+=======
+    print(f"Percentual < {resumo['config_usada']['limite_percentual']:.0f}%: {resumo['percentual_baixo']}")
+    print(f"Faltas consecutivas: {resumo['faltas_4dias']}")
+    print(f"Faltas em semanas consecutivas: {resumo['faltas_3semanas']}")
+>>>>>>> Stashed changes
     print(f"Avisos staff cancelados (aluno ausente): {resumo['staff_cancelados_ausentes']}")
     print(f"Total (regras): {resumo['total']}")
+    print(f"Config usada: {resumo['config_usada']}")
     return 0
 
 
