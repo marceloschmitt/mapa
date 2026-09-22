@@ -298,7 +298,7 @@ $dataExtenso = static function (): string {
                         </div>
 
                         <p class="atestado-titulo fw-bold text-uppercase mb-2">
-                            Atestado de Matrícula Nº
+                            Atestado de Frequência Nº
                             <span id="modalPasseLivreNumero" class="atestado-numero-vazio"></span>
                             /
                             <span id="modalPasseLivreAno" class="atestado-numero-vazio"></span>

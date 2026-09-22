@@ -18,7 +18,7 @@ $fmtPct = static function ($valor): string {
 
 <h1 class="h5 mb-3">Conferência de assinatura digital</h1>
 <p class="text-secondary small mb-4">
-    Verificação de autenticidade do atestado de matrícula / passe livre.
+    Verificação de autenticidade do atestado de frequência / passe livre.
     Confira se o número, a data e as frequências coincidem com o documento apresentado.
 </p>
 

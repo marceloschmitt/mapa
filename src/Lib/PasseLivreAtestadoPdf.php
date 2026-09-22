@@ -4,7 +4,7 @@ declare(strict_types=1);
 namespace Mapa\Lib;
 
 /**
- * Atestado de matrícula / frequência (passe livre) no formato institucional IFRS.
+ * Atestado de frequência (passe livre) no formato institucional IFRS.
  */
 class PasseLivreAtestadoPdf
 {
@@ -52,8 +52,8 @@ class PasseLivreAtestadoPdf
         $numero = isset($dados['numero']) ? (int)$dados['numero'] : 0;
         $ano = isset($dados['ano']) ? (int)$dados['ano'] : 0;
         $titulo = $numero > 0 && $ano > 0
-            ? sprintf('ATESTADO DE MATRÍCULA Nº %d / %d', $numero, $ano)
-            : 'ATESTADO DE MATRÍCULA Nº          /          ';
+            ? sprintf('ATESTADO DE FREQUÊNCIA Nº %d / %d', $numero, $ano)
+            : 'ATESTADO DE FREQUÊNCIA Nº          /          ';
         $pdf->textAligned($titulo, 9.0, 'left', true);
         $pdf->spacer(6);
 
