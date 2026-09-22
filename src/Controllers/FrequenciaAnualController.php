@@ -16,7 +16,7 @@ class FrequenciaAnualController extends Controller
         $this->requireAuth();
         if (!Auth::canVerFrequenciaAnual()) {
             http_response_code(403);
-            Session::flash('erro', 'Acesso ao relatório de frequência corrente restrito a professores e administradores.');
+            Session::flash('erro', 'Acesso ao relatório de frequência corrente restrito.');
             $this->redirect('/');
         }
 

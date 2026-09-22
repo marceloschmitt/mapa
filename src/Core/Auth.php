@@ -111,12 +111,12 @@ class Auth
     }
 
     /**
-     * Relatório de frequência anual: professores e administradores.
-     * Lista campus (mesmos dados do passe livre do ano corrente).
+     * Relatório de frequência corrente: administradores, perfil geral e professores.
+     * Lista campus (mesmos dados do passe livre do semestre atual).
      */
     public static function canVerFrequenciaAnual(): bool
     {
-        return self::isAdmin() || self::isProfessor();
+        return self::isAdmin() || self::isGeral() || self::isProfessor();
     }
 
     /** Usuários com permissão explícita para assinar atestados de passe livre. */
