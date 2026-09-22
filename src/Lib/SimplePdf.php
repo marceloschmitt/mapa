@@ -59,6 +59,36 @@ class SimplePdf
         return $this->pageWidth - (2 * $this->margin);
     }
 
+    /**
+     * Redistribui larguras de coluna para ocupar exatamente a largura util.
+     *
+     * @param list<float> $proporcoes
+     * @return list<float>
+     */
+    public function distributeColWidths(array $proporcoes): array
+    {
+        $soma = array_sum($proporcoes);
+        if ($soma <= 0.0) {
+            return $proporcoes;
+        }
+
+        $total = $this->contentWidth();
+        $resultado = [];
+        $acumulado = 0.0;
+        $ultimo = count($proporcoes) - 1;
+        foreach ($proporcoes as $i => $parte) {
+            if ($i === $ultimo) {
+                $resultado[] = max(0.0, $total - $acumulado);
+                break;
+            }
+            $w = round(($parte / $soma) * $total, 2);
+            $resultado[] = $w;
+            $acumulado += $w;
+        }
+
+        return $resultado;
+    }
+
     public function ensureSpace(float $needed): void
     {
         if ($this->y - $needed < $this->margin) {
@@ -67,15 +97,17 @@ class SimplePdf
     }
 
     /** @param list<float> $colWidths */
-    public function tableHeader(array $colWidths, array $cells): void
+    /** @param list<string> $alignments left|right|center por coluna */
+    public function tableHeader(array $colWidths, array $cells, array $alignments = []): void
     {
-        $this->drawRow($colWidths, $cells, true);
+        $this->drawRow($colWidths, $cells, true, $alignments);
     }
 
     /** @param list<float> $colWidths */
-    public function tableRow(array $colWidths, array $cells): void
+    /** @param list<string> $alignments left|right|center por coluna */
+    public function tableRow(array $colWidths, array $cells, array $alignments = []): void
     {
-        $this->drawRow($colWidths, $cells, false);
+        $this->drawRow($colWidths, $cells, false, $alignments);
     }
 
     /** @param list<float> $colWidths */
@@ -122,9 +154,9 @@ class SimplePdf
         $this->textAligned($text, $fontSize, 'center', $bold);
     }
 
-    public function paragraph(string $text, float $fontSize = 10.0, bool $bold = false): void
+    public function paragraph(string $text, float $fontSize = 10.0, bool $bold = false, string $align = 'left'): void
     {
-        $this->textAligned($text, $fontSize, 'left', $bold);
+        $this->textAligned($text, $fontSize, $align, $bold);
     }
 
     public function textAligned(string $text, float $fontSize, string $align, bool $bold = false): void
@@ -137,6 +169,7 @@ class SimplePdf
         $blockH = count($lines) * $lineH;
         $this->ensureSpace($blockH + 4);
 
+        $last = count($lines) - 1;
         foreach ($lines as $i => $line) {
             $lineWidth = $this->textWidth($line, $fontSize);
             $x = $this->margin;
@@ -146,7 +179,8 @@ class SimplePdf
                 $x = $this->margin + max(0.0, $width - $lineWidth);
             }
             $y = $this->y - $fontSize - ($i * $lineH);
-            $this->drawText($x, $y, $line, $bold);
+            $justificar = $align === 'justify' && $i < $last;
+            $this->drawText($x, $y, $line, $bold, $justificar ? $width : null);
         }
         $this->y -= $blockH + 2;
         $this->fontSize = $previous;
@@ -201,7 +235,8 @@ class SimplePdf
     }
 
     /** @param list<float> $colWidths */
-    private function drawRow(array $colWidths, array $cells, bool $header): void
+    /** @param list<string> $alignments */
+    private function drawRow(array $colWidths, array $cells, bool $header, array $alignments = []): void
     {
         $wrapped = [];
         $maxLines = 1;
@@ -221,13 +256,15 @@ class SimplePdf
 
         foreach ($colWidths as $i => $w) {
             $this->rect($x, $yBottom, $w, $rowHeight, $fill !== null, $fill ?? [1, 1, 1]);
+            $align = (string)($alignments[$i] ?? 'left');
             $this->drawLinesInCell(
                 $x + $this->cellPadX,
                 $yBottom,
                 $w - (2 * $this->cellPadX),
                 $rowHeight,
                 $wrapped[$i],
-                $header
+                $header,
+                $align
             );
             $x += $w;
         }
@@ -247,7 +284,8 @@ class SimplePdf
         float $w,
         float $h,
         array $lines,
-        bool $bold
+        bool $bold,
+        string $align = 'left'
     ): void {
         if ($lines === []) {
             $lines = [''];
@@ -264,18 +302,37 @@ class SimplePdf
 
         foreach ($lines as $i => $line) {
             $textY = $startY - ($i * $lineH);
-            $this->drawText($x, $textY, $line, $bold);
+            $textX = $x;
+            $lineWidth = $this->textWidth($line, $this->fontSize);
+            if ($align === 'right') {
+                $textX = $x + max(0.0, $w - $lineWidth);
+            } elseif ($align === 'center') {
+                $textX = $x + max(0.0, ($w - $lineWidth) / 2);
+            }
+            $this->drawText($textX, $textY, $line, $bold);
         }
-        unset($w);
     }
 
-    private function drawText(float $x, float $y, string $text, bool $bold): void
+    private function drawText(float $x, float $y, string $text, bool $bold, ?float $justifyWidth = null): void
     {
         $encoded = $this->toWin1252($text);
         $escaped = $this->escape($encoded);
+        $wordSpacing = 0.0;
+        if ($justifyWidth !== null && $justifyWidth > 0.0) {
+            $spaces = substr_count($encoded, ' ');
+            if ($spaces > 0) {
+                $natural = $this->textWidth($text, $this->fontSize);
+                $extra = $justifyWidth - $natural;
+                if ($extra > 0.0) {
+                    $wordSpacing = $extra / $spaces;
+                }
+            }
+        }
+
         $this->current[] = 'BT /F' . ($bold ? '2' : '1') . sprintf(
-            ' %.2F Tf 1 0 0 1 %.2F %.2F Tm (%s) Tj ET',
+            ' %.2F Tf %.3F Tw 1 0 0 1 %.2F %.2F Tm (%s) Tj 0 Tw ET',
             $this->fontSize,
+            $wordSpacing,
             $x,
             $y,
             $escaped

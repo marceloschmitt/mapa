@@ -29,7 +29,9 @@ class PasseLivreAtestadoPdf
     public static function gerar(array $dados): SimplePdf
     {
         $pdf = new SimplePdf(false);
-        $larguras = [55.0, 70.0, 280.0, 80.0];
+        // Proporcoes da grade; total = largura util da pagina (mesmo limite direito do paragrafo).
+        $larguras = $pdf->distributeColWidths([55.0, 70.0, 280.0, 80.0]);
+        $alinhamentos = ['left', 'left', 'left', 'right'];
 
         $brasao = self::brasaoPath();
         if (is_file($brasao)) {
@@ -76,7 +78,7 @@ class PasseLivreAtestadoPdf
             trim($dados['curso']),
             trim($dados['periodo'])
         );
-        $pdf->paragraph($texto, 10.0);
+        $pdf->paragraph($texto, 10.0, false, 'justify');
         $pdf->spacer(8);
 
         $pdf->setFontSize(9);
@@ -85,7 +87,7 @@ class PasseLivreAtestadoPdf
             'Código',
             'Disciplina',
             'Frequência*',
-        ]);
+        ], $alinhamentos);
 
         $periodo = trim($dados['periodo']);
         foreach ($dados['disciplinas'] as $disc) {
@@ -94,7 +96,7 @@ class PasseLivreAtestadoPdf
                 (string)($disc['codigo'] ?? ''),
                 (string)($disc['nome'] ?? ''),
                 self::fmtPct($disc['frequencia'] ?? null),
-            ]);
+            ], $alinhamentos);
         }
 
         $pdf->spacer(4);
