@@ -162,8 +162,10 @@ $escapar = static function ($texto): string {
                 </label>
             </div>
             <p class="text-secondary small">
-                Um alarme por disciplina quando o aluno falta em semanas seguidas e a última falta da
-                sequência é recente.
+                Um alarme por disciplina quando o aluno falta em <strong>todas</strong> as aulas
+                previstas da disciplina em semanas seguidas (ex.: aula na segunda e na quarta —
+                faltar só na segunda não conta a semana) e a última falta da sequência é recente.
+                Exige grade importada (`disciplina_aulas`).
             </p>
 
             <div class="row g-3">

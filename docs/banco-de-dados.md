@@ -209,7 +209,7 @@ coluna à direita:
 | `alarme_faltas_dias_critico` | Tamanho da sequência que vira `critico` | `4` |
 | `alarme_faltas_dias_mensagem` | Texto do alerta (campos `{dias}`, `{datas}`, `{primeira_falta}`, `{ultima_falta}`, `{minimo}`, `{janela}`) | `{dias} dias úteis: {datas}` |
 | `alarme_faltas_semanas_ativo` | Liga/desliga a regra de semanas consecutivas | `true` |
-| `alarme_faltas_semanas_total` | Semanas seguidas com falta | `3` |
+| `alarme_faltas_semanas_total` | Semanas seguidas em que faltou em todas as aulas da disciplina | `3` |
 | `alarme_faltas_semanas_janela_dias` | Recência da última falta da sequência (dias) | `7` |
 | `alarme_faltas_semanas_severidade` | `alto` ou `critico` | `critico` |
 | `alarme_faltas_semanas_mensagem` | Texto do alerta (campos `{semanas}`, `{ultima_falta}`, `{disciplina}`, `{codigo_disciplina}`, `{janela_dias}`) | `Faltas em {semanas} semanas consecutivas na disciplina` |
@@ -410,7 +410,7 @@ o valor padrão de cada parâmetro:
 |------|----------|---------------|
 | `percentual_baixo` | Frequência abaixo do limite (75%) na disciplina, após a carência (3 semanas) do início; abaixo do limite crítico (50%) a severidade é `critico` | Por disciplina |
 | `faltas_4dias` | Mínimo de dias úteis seguidos de falta (3) tocando a janela de dias úteis recentes (4); a partir de certo tamanho (4) vira `critico` | Por aluno/curso (agregado) |
-| `faltas_3semanas` | Falta em N semanas consecutivas (3); última falta dentro da janela de recência (7 dias antes da referência); severidade configurável (`critico`) | Por disciplina |
+| `faltas_3semanas` | N semanas ISO consecutivas em que o aluno faltou em **todas** as aulas previstas da disciplina na grade (`disciplina_aulas`); semana incompleta não conta; última falta dentro da janela de recência (7 dias); severidade configurável (`critico`) | Por disciplina |
 
 Cada regra pode ser desligada no portal — os alarmes **abertos** daquele tipo
 somem na geração seguinte (os já tratados continuam preservados).

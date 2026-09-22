@@ -3,12 +3,14 @@
 
 Formato tipico:
   2N1234 (29/07/2026 - 07/08/2026),  7N1234 (08/08/2026 - 09/08/2026), ...
+  5T56 6T23 (29/07/2026 - 13/11/2026)  — dois dias no mesmo intervalo
 
-O primeiro digito e o dia da semana no padrao SIGAA:
+O primeiro digito de cada codigo e o dia da semana no padrao SIGAA:
   1=domingo, 2=segunda, 3=terca, 4=quarta, 5=quinta, 6=sexta, 7=sabado.
 
 Cada bloco traz um intervalo; as datas efetivas de aula sao os dias
-daquele weekday dentro do intervalo (inclusive).
+daqueles weekdays dentro do intervalo (inclusive). Varios codigos antes
+do mesmo parenteses compartilham o intervalo.
 """
 
 from __future__ import annotations
@@ -30,13 +32,15 @@ ROTULOS_DIA = {
     7: "sábado",
 }
 
-# Bloco: 2N1234 (29/07/2026 - 07/08/2026)
-# Tambem: 4T6  4N1234 (29/07/2026 - 28/08/2026) — o dia e o codigo imediatamente
-# antes do intervalo, nao o primeiro token da serie.
+# Bloco com um ou mais codigos de dia compartilhando o mesmo intervalo:
+#   2N1234 (29/07/2026 - 07/08/2026)
+#   5T56 6T23 (29/07/2026 - 13/11/2026)  → quinta E sexta no periodo
+#   4T6  4N1234 (29/07/2026 - 28/08/2026)
 _RE_BLOCO = re.compile(
-    r"([1-7])[A-Za-z]\w*\s*"
+    r"((?:[1-7][A-Za-z]\w*\s*)+)"
     r"\((\d{2}/\d{2}/\d{4})\s*-\s*(\d{2}/\d{2}/\d{4})\)"
 )
+_RE_DIA_TOKEN = re.compile(r"([1-7])[A-Za-z]\w*")
 
 # Digito do dia no inicio de cada bloco (fallback sem intervalo)
 _RE_DIA = re.compile(r"(?:^|,)\s*([1-7])[A-Za-z]")
@@ -81,8 +85,12 @@ def extrair_datas_aula(
 
     datas: set[date] = set()
     for match in _RE_BLOCO.finditer(texto):
-        dia_sigaa = int(match.group(1))
-        if dia_sigaa not in permitidos:
+        dias_bloco = [
+            int(token.group(1))
+            for token in _RE_DIA_TOKEN.finditer(match.group(1))
+            if int(token.group(1)) in permitidos
+        ]
+        if not dias_bloco:
             continue
 
         inicio = _parse_data_br(match.group(2))
@@ -92,10 +100,10 @@ def extrair_datas_aula(
         if fim < inicio:
             inicio, fim = fim, inicio
 
-        alvo = _sigaa_para_weekday_python(dia_sigaa)
+        alvos = {_sigaa_para_weekday_python(dia) for dia in dias_bloco}
         atual = inicio
         while atual <= fim:
-            if atual.weekday() == alvo:
+            if atual.weekday() in alvos:
                 datas.add(atual)
             atual += timedelta(days=1)
 
