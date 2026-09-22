@@ -24,7 +24,11 @@ class PasseLivreController extends Controller
         }
 
         $repo = new AnalyticsRepository();
-        $periodosDisponiveis = $repo->listarPeriodosPasseLivre();
+        $periodoAtual = trim((string)((new ConfigRepository())->get(ConfigRepository::API_PERIODO_LETIVO) ?? ''));
+        $periodosDisponiveis = array_values(array_filter(
+            $repo->listarPeriodosPasseLivre(),
+            static fn(string $periodo): bool => $periodo !== $periodoAtual
+        ));
         $semestreSelecionado = $this->semestreSelecionado($periodosDisponiveis);
         $meta = $semestreSelecionado !== ''
             ? $repo->metaPasseLivre($semestreSelecionado)
@@ -297,6 +301,7 @@ class PasseLivreController extends Controller
                         'codigo' => (string)($disc['codigo_disciplina'] ?? ''),
                         'nome' => (string)($disc['disciplina'] ?? ''),
                         'frequencia' => $disc['frequencia'] ?? null,
+                        'situacao' => (string)($disc['situacao'] ?? ''),
                     ];
                 },
                 $disciplinas

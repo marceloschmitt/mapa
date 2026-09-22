@@ -221,6 +221,7 @@ $dataExtenso = static function (): string {
                                             'codigo' => (string)($d['codigo_disciplina'] ?? ''),
                                             'nome' => (string)($d['disciplina'] ?? ''),
                                             'frequencia' => $d['frequencia'],
+                                            'situacao' => (string)($d['situacao'] ?? ''),
                                         ];
                                     },
                                     $disciplinas
@@ -457,6 +458,14 @@ $dataExtenso = static function (): string {
             }) + '%';
         }
 
+        function fmtFreqDisc(d) {
+            const sit = String((d && d.situacao) || '').trim();
+            if (sit !== '') {
+                return sit;
+            }
+            return fmtPct(d && d.frequencia);
+        }
+
         function escapeHtml(texto) {
             return String(texto)
                 .replace(/&/g, '&amp;')
@@ -566,7 +575,7 @@ $dataExtenso = static function (): string {
                         ? '<code>' + escapeHtml(d.codigo) + '</code>'
                         : '<span class="text-secondary">—</span>') + '</td>' +
                     '<td>' + escapeHtml(d.nome || '') + '</td>' +
-                    '<td class="text-end">' + escapeHtml(fmtPct(d.frequencia)) + '</td>';
+                    '<td class="text-end">' + escapeHtml(fmtFreqDisc(d)) + '</td>';
                 tbody.appendChild(tr);
             });
 

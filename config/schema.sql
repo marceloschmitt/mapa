@@ -400,6 +400,7 @@ CREATE TABLE IF NOT EXISTS passe_livre_disciplina (
     codigo_disciplina TEXT NOT NULL DEFAULT '',
     disciplina TEXT NOT NULL DEFAULT '',
     frequencia REAL,
+    situacao TEXT,
     FOREIGN KEY (aluno_curso_id) REFERENCES passe_livre_aluno_curso(id) ON DELETE CASCADE
 );
 
@@ -470,4 +471,21 @@ CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_codigo
 
 CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_ano_numero
     ON passe_livre_atestados(ano, numero);
+
+-- Carga horaria oficial observada na API de alunos (frequencia).
+-- Null e esperado para TCC, dissertacao, etc. (sem horario semanal).
+-- Uma linha por disciplina + curso (mesmo codigo pode aparecer em cursos distintos).
+CREATE TABLE IF NOT EXISTS disciplina_carga_horaria (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    codigo_disciplina TEXT NOT NULL,
+    disciplina TEXT NOT NULL DEFAULT '',
+    nome_curso TEXT NOT NULL DEFAULT '',
+    carga_horaria INTEGER,
+    origem_periodo TEXT,
+    atualizado_em TEXT NOT NULL,
+    UNIQUE (codigo_disciplina, nome_curso)
+);
+
+CREATE INDEX IF NOT EXISTS idx_disciplina_carga_horaria_codigo
+    ON disciplina_carga_horaria(codigo_disciplina);
 

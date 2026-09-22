@@ -1204,11 +1204,11 @@ class AnalyticsRepository
                 'al'
             );
         } else {
-            [$sql, $discParams] = $this->appendCodigoDisciplinaFilter(
-                $sql,
-                $codigosDisciplina,
-                'al.codigo_disciplina'
-            );
+        [$sql, $discParams] = $this->appendCodigoDisciplinaFilter(
+            $sql,
+            $codigosDisciplina,
+            'al.codigo_disciplina'
+        );
         }
 
         $sql .= ' ORDER BY COALESCE(NULLIF(TRIM(a.nome_social), \'\'), a.nome) ASC,
@@ -1281,11 +1281,11 @@ class AnalyticsRepository
                 'alarmes'
             );
         } else {
-            [$sql, $discParams] = $this->appendCodigoDisciplinaFilter(
-                $sql,
-                $codigosDisciplina,
-                'codigo_disciplina'
-            );
+        [$sql, $discParams] = $this->appendCodigoDisciplinaFilter(
+            $sql,
+            $codigosDisciplina,
+            'codigo_disciplina'
+        );
         }
 
         $sql .= ' GROUP BY tipo';
@@ -1341,11 +1341,11 @@ class AnalyticsRepository
                 'alarmes'
             );
         } else {
-            [$sqlBase, $discParams] = $this->appendCodigoDisciplinaFilter(
-                $sqlBase,
-                $codigosDisciplina,
-                'codigo_disciplina'
-            );
+        [$sqlBase, $discParams] = $this->appendCodigoDisciplinaFilter(
+            $sqlBase,
+            $codigosDisciplina,
+            'codigo_disciplina'
+        );
         }
 
         $sqlAbertos = 'SELECT COUNT(*) AS alarmes,
@@ -1824,6 +1824,28 @@ class AnalyticsRepository
     }
 
     /**
+     * Periodos de passe livre do ano informado (AAAA), mais recente primeiro.
+     *
+     * @return list<string>
+     */
+    public function listarPeriodosPasseLivreAno(int $ano): array
+    {
+        if ($ano < 2000 || $ano > 2100) {
+            return [];
+        }
+
+        $prefixo = sprintf('%04d/', $ano);
+        $saida = [];
+        foreach ($this->listarPeriodosPasseLivre() as $periodo) {
+            if (str_starts_with($periodo, $prefixo)) {
+                $saida[] = $periodo;
+            }
+        }
+
+        return $saida;
+    }
+
+    /**
      * Metadados da carga de passe livre de um semestre.
      *
      * @return array<string, mixed>|null
@@ -1958,7 +1980,8 @@ class AnalyticsRepository
             $params[$key] = (int)$id;
         }
 
-        $sql = 'SELECT pd.aluno_curso_id, pd.codigo_disciplina, pd.disciplina, pd.frequencia
+        $sql = 'SELECT pd.aluno_curso_id, pd.codigo_disciplina, pd.disciplina,
+                       pd.frequencia, pd.situacao
                 FROM passe_livre_disciplina pd
                 WHERE pd.aluno_curso_id IN (' . implode(', ', $placeholders) . ')';
 

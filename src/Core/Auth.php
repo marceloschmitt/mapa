@@ -110,6 +110,15 @@ class Auth
         return self::canAssinarPasseLivre();
     }
 
+    /**
+     * Relatório de frequência anual: professores e administradores.
+     * Lista campus (mesmos dados do passe livre do ano corrente).
+     */
+    public static function canVerFrequenciaAnual(): bool
+    {
+        return self::isAdmin() || self::isProfessor();
+    }
+
     /** Usuários com permissão explícita para assinar atestados de passe livre. */
     public static function canAssinarPasseLivre(): bool
     {

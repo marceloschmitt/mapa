@@ -24,6 +24,7 @@ PASSOS = (
     "consulta_inicial.py",
     "consulta_alunos.py",
     "analisar_frequencia.py",
+    "sincronizar_passe_livre_semestre_atual.py",
     "importar_frequencia.py",
     "importar_trancados.py",
     "importar_professores.py",

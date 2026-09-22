@@ -94,8 +94,10 @@ class Database
         self::ensureColumn('perda_vaga_candidatos', 'status_periodo_atual', 'TEXT');
         self::ensureColumn('passe_livre_atestados', 'frequencia_geral', 'REAL');
         self::ensureColumn('passe_livre_atestados', 'disciplinas_json', "TEXT NOT NULL DEFAULT '[]'");
+        self::ensureColumn('passe_livre_disciplina', 'situacao', 'TEXT');
         self::migrarPasseLivreAtestadosNullable();
         self::migrarDatasAulaCsvParaTabela();
+        self::migrarDisciplinaCargaHorariaCurso();
         self::seedAdminIfEmpty();
         self::migrateLdapConfigFromEnv();
         self::migrateApiConfigFromEnv();
@@ -417,6 +419,73 @@ class Database
                 ]);
             }
         }
+    }
+
+    /**
+     * Passa disciplina_carga_horaria de UNIQUE(codigo) para UNIQUE(codigo, nome_curso).
+     */
+    private static function migrarDisciplinaCargaHorariaCurso(): void
+    {
+        $existe = self::$connection->query(
+            "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'disciplina_carga_horaria'"
+        )->fetch();
+        if ($existe === false) {
+            return;
+        }
+
+        $cols = self::$connection->query('PRAGMA table_info(disciplina_carga_horaria)')->fetchAll();
+        $nomes = [];
+        foreach ($cols as $col) {
+            $nomes[(string)$col['name']] = true;
+        }
+
+        if (!isset($nomes['nome_curso'])) {
+            self::$connection->exec('PRAGMA foreign_keys = OFF');
+            self::$connection->exec('BEGIN');
+            try {
+                self::$connection->exec(
+                    'CREATE TABLE disciplina_carga_horaria_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        codigo_disciplina TEXT NOT NULL,
+                        disciplina TEXT NOT NULL DEFAULT \'\',
+                        nome_curso TEXT NOT NULL DEFAULT \'\',
+                        carga_horaria INTEGER,
+                        origem_periodo TEXT,
+                        atualizado_em TEXT NOT NULL,
+                        UNIQUE (codigo_disciplina, nome_curso)
+                    )'
+                );
+                self::$connection->exec(
+                    'INSERT INTO disciplina_carga_horaria_new (
+                        id, codigo_disciplina, disciplina, nome_curso,
+                        carga_horaria, origem_periodo, atualizado_em
+                     )
+                     SELECT id, codigo_disciplina, disciplina, \'\',
+                            carga_horaria, origem_periodo, atualizado_em
+                     FROM disciplina_carga_horaria'
+                );
+                self::$connection->exec('DROP TABLE disciplina_carga_horaria');
+                self::$connection->exec(
+                    'ALTER TABLE disciplina_carga_horaria_new RENAME TO disciplina_carga_horaria'
+                );
+                self::$connection->exec(
+                    'CREATE INDEX IF NOT EXISTS idx_disciplina_carga_horaria_codigo
+                     ON disciplina_carga_horaria(codigo_disciplina)'
+                );
+                self::$connection->exec('COMMIT');
+            } catch (\Throwable $e) {
+                self::$connection->exec('ROLLBACK');
+                self::$connection->exec('PRAGMA foreign_keys = ON');
+                throw $e;
+            }
+
+            self::$connection->exec('PRAGMA foreign_keys = ON');
+        }
+
+        self::$connection->exec(
+            'CREATE INDEX IF NOT EXISTS idx_disciplina_carga_horaria_curso
+             ON disciplina_carga_horaria(nome_curso)'
+        );
     }
 
     /**

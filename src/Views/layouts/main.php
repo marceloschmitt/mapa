@@ -98,6 +98,13 @@ $authLocal = ($usuario['auth_type'] ?? 'local') === 'local';
                                 </a>
                             </li>
                         <?php endif; ?>
+                        <?php if (!empty($podeVerFrequenciaAnual)): ?>
+                            <li>
+                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/frequencia-anual'), ENT_QUOTES, 'UTF-8') ?>">
+                                    Frequência corrente
+                                </a>
+                            </li>
+                        <?php endif; ?>
                     </ul>
                 </li>
                 <?php if (!empty($podeVerChamadas)): ?>
@@ -135,6 +142,9 @@ $authLocal = ($usuario['auth_type'] ?? 'local') === 'local';
                             </li>
                             <li>
                                 <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/feriados'), ENT_QUOTES, 'UTF-8') ?>">Feriados</a>
+                            </li>
+                            <li>
+                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/carga-horaria'), ENT_QUOTES, 'UTF-8') ?>">Carga horária</a>
                             </li>
                         </ul>
                     </li>

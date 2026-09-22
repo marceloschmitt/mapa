@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Gera dados de passe livre (frequencia do semestre anterior) — manual.
+"""Gera dados de passe livre (frequencia dos semestres anteriores) — manual.
 
 Usa alunos ATIVO/FORMANDO do semestre atual (resposta_matriculas.json ou BD)
-e consulta a frequencia mensal de cada um com frequencia_periodo do semestre
-anterior. Grava em passe_livre_* (sem entrar em executar_coleta.py).
+e consulta a frequencia mensal (frequencia_periodo) de cada semestre anterior.
+Grava em passe_livre_* e salva cache JSON (resposta_alunos_AAAA_S_mensal.json).
 
-Sempre consulta a API de alunos (nao usa cache JSON de frequencia).
+Disciplinas em ausencias_especiais.trancamento_cancelamento ficam com
+situacao TRANCADO/CANCELADO; o percentual total do curso e recalculado
+excluindo horarios/ausencias/presencas dessas disciplinas.
 
 Uso:
     python3 gerar_passe_livre.py
@@ -22,6 +24,7 @@ import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
+from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -34,12 +37,16 @@ from api_auth import (
     url_alunos,
     verificar_ssl,
 )
+from ausencias_especiais import (
+    aplicar_situacao_trancamento,
+    codigos_trancamento_cancelamento,
+    recalcular_frequencia_geral_sem_trancadas,
+)
 from consulta_alunos import eh_erro_http_temporario, eh_erro_temporario
 from db import conectar, fechar, row_to_dict
-from paths import JSON_RESPOSTA_MATRICULAS
+from paths import DIR_JSON, JSON_RESPOSTA_MATRICULAS, garantir_diretorios
 from status_aluno import status_eh_controle
 
-# Mesmos defaults de consulta_alunos.py (modo mensal e mais leve que intervalo).
 CONCORRENCIA = 50
 TIMEOUT_SEGUNDOS = 120
 TENTATIVAS = 3
@@ -126,7 +133,7 @@ def consultar_webservice(
 
 
 def montar_url_alunos_mensal(base: str, login: str, periodo: str) -> str:
-    """URL de alunos em modo mensal com frequencia_periodo (sem datas)."""
+    """URL de alunos em modo mensal com frequencia_periodo."""
     url = base
     if re.search(r"[?&]tipo_frequencia=", url):
         url = re.sub(r"([?&])tipo_frequencia=[^&]*", r"\1tipo_frequencia=mensal", url)
@@ -156,28 +163,14 @@ def parse_nome_disciplina_mensal(chave: str) -> tuple[str, str]:
     return "", texto
 
 
-def extrair_frequencia_geral_mensal(frequencias: dict[str, Any]) -> dict[str, Any] | None:
-    """Percentual do curso a partir de FREQUÊNCIA GLOBAL (modo mensal)."""
-    disciplinas = frequencias.get("disciplinas")
-    if not isinstance(disciplinas, dict):
-        return None
-    global_ = disciplinas.get(FREQUENCIA_GLOBAL)
-    if not isinstance(global_, dict):
-        return None
-    total = global_.get("total")
-    if not isinstance(total, dict):
-        return None
-    pct = total.get("percentual_frequencia")
-    if pct is None:
-        return None
-    return {"percentual_frequencia_total": pct}
-
-
 def extrair_disciplinas_mensal(frequencias: dict[str, Any]) -> list[dict[str, Any]]:
-    """Disciplinas do modo mensal (ignora FREQUÊNCIA GLOBAL)."""
+    """Disciplinas do modo mensal (ignora FREQUÊNCIA GLOBAL).
+
+    Inclui horarios/ausencias/presencas do total mensal para recalculo do curso.
+    """
     disciplinas = frequencias.get("disciplinas")
     if not isinstance(disciplinas, dict):
-        return []
+        disciplinas = {}
 
     saida: list[dict[str, Any]] = []
     for chave, dados in disciplinas.items():
@@ -187,17 +180,137 @@ def extrair_disciplinas_mensal(frequencias: dict[str, Any]) -> list[dict[str, An
             continue
         total = dados.get("total")
         if not isinstance(total, dict):
-            continue
+            total = {}
         pct = total.get("percentual_frequencia")
-        if pct is None and not dados.get("possui_controle_frequencia"):
+        horarios = total.get("horarios")
+        if (
+            pct is None
+            and horarios is None
+            and not dados.get("possui_controle_frequencia")
+        ):
             continue
         codigo, nome = parse_nome_disciplina_mensal(str(chave))
         saida.append({
             "codigo_disciplina": codigo,
             "disciplina": nome,
+            "horarios": total.get("horarios") or 0,
+            "ausencias": total.get("ausencias") or 0,
+            "presencas": total.get("presencas") or 0,
             "percentual_frequencia": pct,
+            "situacao": None,
         })
-    return saida
+
+    return aplicar_situacao_trancamento(
+        saida,
+        codigos_trancamento_cancelamento(frequencias.get("ausencias_especiais")),
+    )
+
+
+def extrair_registros_passe_livre(aluno: dict[str, Any]) -> list[dict[str, Any]]:
+    """Extrai frequencias por curso ATIVO/FORMANDO (formato mensal)."""
+    if aluno.get("status") != 200:
+        return []
+
+    nome = str(aluno.get("nome", ""))
+    login = str(aluno.get("login", ""))
+    matricula = aluno.get("matricula", "")
+    dados = aluno.get("dados")
+    if not isinstance(dados, dict):
+        return []
+
+    registros: list[dict[str, Any]] = []
+    for perfil in dados.values():
+        if not isinstance(perfil, dict):
+            continue
+        email = perfil.get("email")
+        nome_social = str(perfil.get("nome_social") or "").strip()
+        nome_civil = str(
+            perfil.get("nome_civil")
+            or perfil.get("nome_completo")
+            or nome
+            or ""
+        ).strip()
+
+        for curso in perfil.get("cursos", []):
+            if not isinstance(curso, dict):
+                continue
+            status_discente = str(curso.get("status_discente") or "").strip()
+            if not status_eh_controle(status_discente):
+                continue
+            matricula_curso = curso.get("matricula")
+            if matricula_curso in (None, ""):
+                matricula_curso = matricula
+
+            frequencias = curso.get("frequencias", {})
+            if not isinstance(frequencias, dict):
+                continue
+            disciplinas = extrair_disciplinas_mensal(frequencias)
+            frequencia_geral = recalcular_frequencia_geral_sem_trancadas(disciplinas)
+            if frequencia_geral is None and disciplinas == []:
+                continue
+
+            registros.append({
+                "nome": nome_civil or nome or login,
+                "nome_social": nome_social or None,
+                "login": login,
+                "matricula": matricula_curso,
+                "email": email,
+                "nome_curso": curso.get("nome_curso") or "Curso nao informado",
+                "status_discente": status_discente,
+                "frequencia_geral": frequencia_geral,
+                "disciplinas": disciplinas,
+            })
+    return registros
+
+
+def consultar_um_aluno(
+    aluno: dict[str, str],
+    *,
+    base_url: str,
+    token: str,
+    config: dict[str, str],
+    periodo: str,
+    timeout: int,
+    tentativas: int,
+) -> dict[str, Any]:
+    """Consulta um aluno (modo mensal) com retries como consulta_alunos.py."""
+    login = aluno["login"]
+    url = montar_url_alunos_mensal(base_url, login, periodo)
+    ultimo_erro = ""
+    for tentativa in range(1, tentativas + 1):
+        try:
+            status, body = consultar_webservice(url, token, config, timeout=timeout)
+            if status == 200:
+                try:
+                    dados = json.loads(body)
+                except json.JSONDecodeError as error:
+                    ultimo_erro = str(error)
+                    break
+                return {
+                    "login": login,
+                    "nome": aluno.get("nome", ""),
+                    "matricula": aluno.get("matricula", ""),
+                    "status": status,
+                    "dados": dados,
+                    "tentativas": tentativa,
+                }
+            ultimo_erro = f"HTTP {status}"
+            if tentativa < tentativas and eh_erro_http_temporario(status):
+                continue
+            break
+        except (HTTPError, URLError, TimeoutError, OSError) as error:
+            ultimo_erro = str(error)
+            if tentativa < tentativas and eh_erro_temporario(error):
+                continue
+            break
+    return {
+        "login": login,
+        "nome": aluno.get("nome", ""),
+        "matricula": aluno.get("matricula", ""),
+        "status": 0,
+        "erro": ultimo_erro,
+        "tentativas": tentativas,
+    }
 
 
 def carregar_registros_matriculas(dados: Any) -> list[dict[str, Any]]:
@@ -276,128 +389,6 @@ def carregar_logins_semestre_atual() -> tuple[list[dict[str, str]], str]:
     return list(por_login.values()), "banco (ultima coleta)"
 
 
-def extrair_registros_passe_livre(aluno: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extrai frequencias por curso ATIVO/FORMANDO com dados no periodo."""
-    if aluno.get("status") != 200:
-        return []
-
-    nome = str(aluno.get("nome", ""))
-    login = str(aluno.get("login", ""))
-    matricula = aluno.get("matricula", "")
-    dados = aluno.get("dados")
-    if not isinstance(dados, dict):
-        return []
-
-    registros: list[dict[str, Any]] = []
-    for perfil in dados.values():
-        if not isinstance(perfil, dict):
-            continue
-        email = perfil.get("email")
-        nome_social = str(perfil.get("nome_social") or "").strip()
-        nome_civil = str(
-            perfil.get("nome_civil")
-            or perfil.get("nome_completo")
-            or nome
-            or ""
-        ).strip()
-
-        for curso in perfil.get("cursos", []):
-            if not isinstance(curso, dict):
-                continue
-            status_discente = str(curso.get("status_discente") or "").strip()
-            if not status_eh_controle(status_discente):
-                continue
-            matricula_curso = curso.get("matricula")
-            if matricula_curso in (None, ""):
-                matricula_curso = matricula
-
-            frequencias = curso.get("frequencias", {})
-            if not isinstance(frequencias, dict):
-                continue
-            frequencia_geral = extrair_frequencia_geral_mensal(frequencias)
-            disciplinas = extrair_disciplinas_mensal(frequencias)
-            if frequencia_geral is None and disciplinas == []:
-                continue
-
-            registros.append({
-                "nome": nome_civil or nome or login,
-                "nome_social": nome_social or None,
-                "login": login,
-                "matricula": matricula_curso,
-                "email": email,
-                "nome_curso": curso.get("nome_curso") or "Curso nao informado",
-                "status_discente": status_discente,
-                "frequencia_geral": frequencia_geral,
-                "disciplinas": disciplinas,
-            })
-    return registros
-
-
-def consultar_um_aluno(
-    aluno: dict[str, str],
-    *,
-    base_url: str,
-    token: str,
-    config: dict[str, str],
-    periodo: str,
-    timeout: int,
-    tentativas: int,
-) -> dict[str, Any]:
-    """Consulta um aluno (modo mensal) com retries como consulta_alunos.py."""
-    login = aluno["login"]
-    url = montar_url_alunos_mensal(base_url, login, periodo)
-    ultimo_erro = ""
-    for tentativa in range(1, tentativas + 1):
-        try:
-            status, body = consultar_webservice(url, token, config, timeout=timeout)
-            if status == 200:
-                try:
-                    dados = json.loads(body)
-                except json.JSONDecodeError as error:
-                    ultimo_erro = str(error)
-                    break
-                return {
-                    "login": login,
-                    "nome": aluno.get("nome", ""),
-                    "matricula": aluno.get("matricula", ""),
-                    "status": status,
-                    "dados": dados,
-                    "tentativas": tentativa,
-                }
-            ultimo_erro = f"HTTP {status}"
-            if tentativa < tentativas and eh_erro_http_temporario(status):
-                continue
-            break
-        except HTTPError as error:
-            ultimo_erro = error.read().decode("utf-8", errors="replace")
-            if tentativa < tentativas and eh_erro_http_temporario(error.code):
-                continue
-            break
-        except URLError as error:
-            ultimo_erro = f"Falha de conexao: {error.reason}"
-            if tentativa < tentativas and eh_erro_temporario(ultimo_erro):
-                continue
-            break
-        except TimeoutError:
-            ultimo_erro = f"Tempo limite excedido ({timeout}s)."
-            if tentativa < tentativas:
-                continue
-            break
-        except OSError as error:
-            ultimo_erro = str(error)
-            if tentativa < tentativas and eh_erro_temporario(ultimo_erro):
-                continue
-            break
-    return {
-        "login": login,
-        "nome": aluno.get("nome", ""),
-        "matricula": aluno.get("matricula", ""),
-        "status": 0,
-        "erro": ultimo_erro,
-        "tentativas": tentativas,
-    }
-
-
 def consultar_alunos_periodo(
     logins: list[dict[str, str]],
     *,
@@ -408,17 +399,19 @@ def consultar_alunos_periodo(
     timeout: int = TIMEOUT_SEGUNDOS,
     tentativas: int = TENTATIVAS,
     ao_aluno: Any | None = None,
-) -> int:
-    """Consulta frequencia mensal em paralelo; grava no BD a cada aluno (ao_aluno).
+) -> tuple[int, list[dict[str, Any]]]:
+    """Consulta frequencia mensal em paralelo; grava no BD a cada aluno.
 
     Returns:
-        Total de registros aluno/curso gravados via ao_aluno.
+        Tupla (total gravado via ao_aluno, respostas brutas no formato
+        resposta_alunos*_mensal.json para cache).
     """
     base = url_alunos(config)
     gravados = 0
     erros = 0
     feitos = 0
     total = len(logins)
+    resultados: list[dict[str, Any]] = []
     inicio = time.perf_counter()
     print(
         f"Consultando frequencia mensal de {total} aluno(s) "
@@ -446,6 +439,7 @@ def consultar_alunos_periodo(
         }
         for future in as_completed(futures):
             item = future.result()
+            resultados.append(item)
             feitos += 1
             if item.get("status") != 200:
                 erros += 1
@@ -471,7 +465,24 @@ def consultar_alunos_periodo(
                     flush=True,
                 )
 
-    return gravados
+    resultados.sort(key=lambda r: str(r.get("login") or ""))
+    return gravados, resultados
+
+
+def caminho_cache_mensal(periodo: str) -> Path:
+    """Caminho do cache JSON mensal (resposta_alunos_AAAA_S_mensal.json)."""
+    return DIR_JSON / f"resposta_alunos_{periodo.replace('/', '_')}_mensal.json"
+
+
+def salvar_cache_mensal(periodo: str, resultados: list[dict[str, Any]]) -> Path:
+    """Grava o cache bruto da consulta mensal."""
+    garantir_diretorios()
+    caminho = caminho_cache_mensal(periodo)
+    caminho.write_text(
+        json.dumps(resultados, ensure_ascii=False, indent=2),
+        encoding="utf-8",
+    )
+    return caminho
 
 
 def upsert_aluno(cursor: Any, registro: dict[str, Any]) -> int:
@@ -515,12 +526,35 @@ def upsert_curso(cursor: Any, nome_curso: str) -> int:
     return int(row_to_dict(cursor.fetchone())["id"])
 
 
-def limpar_passe_livre() -> None:
-    """Remove dados anteriores de passe livre."""
+def limpar_passe_livre(periodos: list[str] | None = None) -> None:
+    """Remove dados de passe livre.
+
+    Se periodos for informado, apaga so esses semestres (preserva os demais,
+    inclusive o semestre atual sincronizado pela coleta).
+    """
     conn = conectar()
     cursor = conn.cursor()
-    cursor.execute("DELETE FROM passe_livre_disciplina")
-    cursor.execute("DELETE FROM passe_livre_aluno_curso")
+    if periodos:
+        for periodo in periodos:
+            periodo = str(periodo).strip()
+            if periodo == "":
+                continue
+            cursor.execute(
+                """
+                DELETE FROM passe_livre_disciplina
+                WHERE aluno_curso_id IN (
+                    SELECT id FROM passe_livre_aluno_curso WHERE periodo = ?
+                )
+                """,
+                (periodo,),
+            )
+            cursor.execute(
+                "DELETE FROM passe_livre_aluno_curso WHERE periodo = ?",
+                (periodo,),
+            )
+    else:
+        cursor.execute("DELETE FROM passe_livre_disciplina")
+        cursor.execute("DELETE FROM passe_livre_aluno_curso")
     conn.commit()
 
 
@@ -572,17 +606,21 @@ def inserir_registros(
         total += 1
         for disc in registro.get("disciplinas") or []:
             pct = disc.get("percentual_frequencia")
+            situacao = str(disc.get("situacao") or "").strip() or None
+            if situacao:
+                pct = None
             cursor.execute(
                 """
                 INSERT INTO passe_livre_disciplina (
-                    aluno_curso_id, codigo_disciplina, disciplina, frequencia
-                ) VALUES (?, ?, ?, ?)
+                    aluno_curso_id, codigo_disciplina, disciplina, frequencia, situacao
+                ) VALUES (?, ?, ?, ?, ?)
                 """,
                 (
                     aluno_curso_id,
                     str(disc.get("codigo_disciplina") or ""),
                     str(disc.get("disciplina") or ""),
                     float(pct) if pct is not None else None,
+                    situacao,
                 ),
             )
 
@@ -598,8 +636,8 @@ def gravar_banco(
     data_final: str,
     gerado_em: str | None = None,
 ) -> int:
-    """Substitui dados de passe livre (so percentual de frequencia)."""
-    limpar_passe_livre()
+    """Substitui dados de passe livre do periodo informado."""
+    limpar_passe_livre([periodo])
     if gerado_em is None:
         gerado_em = time.strftime("%Y-%m-%d %H:%M:%S")
     return inserir_registros(
@@ -716,8 +754,11 @@ def main(argv: list[str] | None = None) -> int:
         tentativas = max(1, int(args.tentativas))
 
         gerado_em = time.strftime("%Y-%m-%d %H:%M:%S")
-        limpar_passe_livre()
-        print("BD limpo; gravando a cada aluno (tela atualiza durante a execucao).")
+        limpar_passe_livre(periodos)
+        print(
+            "BD: removidos apenas os semestres a regenerar "
+            f"({', '.join(periodos)}); gravando a cada aluno."
+        )
 
         total_geral = 0
         for periodo in periodos:
@@ -743,7 +784,7 @@ def main(argv: list[str] | None = None) -> int:
                     gerado_em=gerado_em,
                 )
 
-            total_geral += consultar_alunos_periodo(
+            total_periodo, brutos = consultar_alunos_periodo(
                 logins,
                 config=config,
                 token=token,
@@ -753,6 +794,9 @@ def main(argv: list[str] | None = None) -> int:
                 tentativas=tentativas,
                 ao_aluno=ao_aluno,
             )
+            total_geral += total_periodo
+            cache = salvar_cache_mensal(periodo, brutos)
+            print(f"Cache mensal: {cache}")
         total = total_geral
     except (
         FileNotFoundError,

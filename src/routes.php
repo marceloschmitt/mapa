@@ -9,9 +9,11 @@ use Mapa\Controllers\AuthController;
 use Mapa\Controllers\ChamadasController;
 use Mapa\Controllers\DashboardController;
 use Mapa\Controllers\CoordenacaoConfigController;
+use Mapa\Controllers\DisciplinaCargaHorariaController;
 use Mapa\Controllers\EmailConfigController;
 use Mapa\Controllers\EstatisticasUsoController;
 use Mapa\Controllers\FeriadoController;
+use Mapa\Controllers\FrequenciaAnualController;
 use Mapa\Controllers\IngressantesController;
 use Mapa\Controllers\LdapConfigController;
 use Mapa\Controllers\TrancadosController;
@@ -43,6 +45,7 @@ return static function (Router $router): void {
     $router->post('/passe-livre/assinar', [PasseLivreController::class, 'assinar']);
     $router->get('/passe-livre/pdf', [PasseLivreController::class, 'pdf']);
     $router->get('/passe-livre/conferencia', [PasseLivreController::class, 'conferencia']);
+    $router->get('/frequencia-anual', [FrequenciaAnualController::class, 'index']);
     $router->get('/chamadas', [ChamadasController::class, 'index']);
     $router->get('/chamadas/exportar-atrasadas-1-semestre', [ChamadasController::class, 'exportarAtrasadasPrimeiroSemestre']);
 
@@ -68,4 +71,6 @@ return static function (Router $router): void {
     $router->get('/configuracoes/feriados', [FeriadoController::class, 'index']);
     $router->post('/configuracoes/feriados', [FeriadoController::class, 'criar']);
     $router->post('/configuracoes/feriados/excluir', [FeriadoController::class, 'excluir']);
+    $router->get('/configuracoes/carga-horaria', [DisciplinaCargaHorariaController::class, 'index']);
+    $router->post('/configuracoes/carga-horaria/gerar', [DisciplinaCargaHorariaController::class, 'gerar']);
 };

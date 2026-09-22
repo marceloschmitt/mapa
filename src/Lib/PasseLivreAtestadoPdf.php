@@ -95,7 +95,7 @@ class PasseLivreAtestadoPdf
                 $periodo,
                 (string)($disc['codigo'] ?? ''),
                 (string)($disc['nome'] ?? ''),
-                self::fmtPct($disc['frequencia'] ?? null),
+                self::fmtFreqDisc($disc),
             ], $alinhamentos);
         }
 
@@ -169,6 +169,19 @@ class PasseLivreAtestadoPdf
         }
 
         return number_format((float)$valor, 1, ',', '.') . '%';
+    }
+
+    /**
+     * @param array<string, mixed> $disc
+     */
+    private static function fmtFreqDisc(array $disc): string
+    {
+        $situacao = trim((string)($disc['situacao'] ?? ''));
+        if ($situacao !== '') {
+            return $situacao;
+        }
+
+        return self::fmtPct($disc['frequencia'] ?? null);
     }
 
     public static function dataExtenso(): string

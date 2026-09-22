@@ -46,6 +46,7 @@ Trancamento é confirmado na 2ª (`TRANCADO` / `TRANC. AUTOMÁTICO`).
 | 1 | `consulta_inicial.py` | Lista matriculados na API SIGAA | BD (`configuracoes` API) | `data/json/resposta_matriculas.json` |
 | 2 | `consulta_alunos.py` | Frequência por aluno (ATIVO/FORMANDO/trancados da 1ª) | `resposta_matriculas.json`, BD (API), `config/consultas.json` | `data/json/resposta_alunos.json` (+ `erros_alunos.json` se houver falha) |
 | 3 | `analisar_frequencia.py` | Frequência (ATIVO/FORMANDO); trancados pela 2ª | `resposta_alunos.json` | `tabela_frequencia.json`, `alunos_trancados.json` |
+| 3b | `sincronizar_passe_livre_semestre_atual.py` | Espelha o semestre atual (`api_periodo_letivo`) em `passe_livre_*` para frequência anual | `tabela_frequencia.json` | BD (`passe_livre_aluno_curso`, `passe_livre_disciplina`) |
 | 4 | `importar_frequencia.py` | Nova coleta no SQLite (alunos, frequência, faltas) | `tabela_frequencia.json`, `config/consultas.json` | BD (`coletas`, `alunos`, `frequencia_disciplina`, `faltas_dia`, …) |
 | 5 | `importar_trancados.py` | Alunos TRANCADO / TRANC. AUTOMÁTICO | `alunos_trancados.json` | BD (`alunos_trancados`) |
 | 6 | `importar_professores.py` | Cursos, docentes e vínculos | `resposta_matriculas.json` | BD (`cursos`, `professores`, `disciplina_professores`) |
@@ -71,6 +72,7 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 | `config_alarmes.py` | Lê as regras de alarme (`alarme_*` em `configuracoes`, tela Configurações → Alarmes) com os padrões antigos como fallback |
 | `status_aluno.py` | Regras ATIVO/FORMANDO/trancado |
 | `turno_turma.py` | Expande intervalos de aula (usado por `importar_grade.py`) |
-| `explorar_aprovacoes.py` | Fora do pipeline: consulta um período e resume aprovações/reprovações |
 | `gerar_perda_vaga.py` | Manual: candidatos a perda de vaga (2 semestres anteriores) → BD |
-| `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência mensal (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`). Opção `--semestres N` (padrão 3). |
+| `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência **mensal** (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`) + cache `resposta_alunos_AAAA_S_mensal.json`. Trancadas (`ausencias_especiais`) → `situacao`; % total recalculado sem horários/ausências/presenças delas. Não apaga o semestre atual. Opção `--semestres N` (padrão 3). |
+| `sincronizar_passe_livre_semestre_atual.py` | Coleta: grava o semestre de `api_periodo_letivo` (datas da frequência) em `passe_livre_*` a partir de `tabela_frequencia.json`. |
+| `gerar_carga_horaria.py` | Manual (também via Configurações → Carga horária): API alunos nos **4 últimos semestres** → `disciplina_carga_horaria` (`carga_horaria`, null permitido). |

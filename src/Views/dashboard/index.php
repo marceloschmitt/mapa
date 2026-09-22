@@ -120,4 +120,19 @@ $semanasConsecutivas = (int)($alarmeConfig['faltas_semanas_total'] ?? 3);
             </a>
         <?php endif; ?>
     </div>
+    <div class="col-md-4">
+        <?php if (!empty($podeVerFrequenciaAnual)): ?>
+            <a href="<?= htmlspecialchars(url('/frequencia-anual'), ENT_QUOTES, 'UTF-8') ?>" class="text-decoration-none">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body">
+                        <h2 class="h5">Frequência corrente</h2>
+                        <p class="text-secondary mb-0 small">
+                            Percentuais por disciplina e total do curso, só no ano
+                            corrente. Sem atestado ou assinatura.
+                        </p>
+                    </div>
+                </div>
+            </a>
+        <?php endif; ?>
+    </div>
 </div>
