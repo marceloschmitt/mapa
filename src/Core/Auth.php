@@ -100,6 +100,16 @@ class Auth
         return self::isAdmin();
     }
 
+    /**
+     * Relatório de passe livre: mesma marcação de assinar.
+     * Sem ela, o item some do menu e a rota é bloqueada.
+     * A lista não é filtrada por perfil coordenador/professor.
+     */
+    public static function canVerPasseLivre(): bool
+    {
+        return self::canAssinarPasseLivre();
+    }
+
     /** Usuários com permissão explícita para assinar atestados de passe livre. */
     public static function canAssinarPasseLivre(): bool
     {

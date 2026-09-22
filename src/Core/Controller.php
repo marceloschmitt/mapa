@@ -10,6 +10,7 @@ abstract class Controller
         $data['usuario'] = Auth::user();
         $data['isAdmin'] = $data['isAdmin'] ?? Auth::isAdmin();
         $data['podeVerChamadas'] = $data['podeVerChamadas'] ?? Auth::canVerChamadas();
+        $data['podeVerPasseLivre'] = $data['podeVerPasseLivre'] ?? Auth::canVerPasseLivre();
         // Limites e textos das regras de alarme: as telas nao fixam mais 75%.
         $data['alarmeConfig'] = $data['alarmeConfig'] ?? self::alarmeConfig();
 

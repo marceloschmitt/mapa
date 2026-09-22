@@ -91,11 +91,13 @@ $authLocal = ($usuario['auth_type'] ?? 'local') === 'local';
                                 Perda de vaga
                             </a>
                         </li>
-                        <li>
-                            <a class="dropdown-item" href="<?= htmlspecialchars(url('/passe-livre'), ENT_QUOTES, 'UTF-8') ?>">
-                                Passe livre
-                            </a>
-                        </li>
+                        <?php if (!empty($podeVerPasseLivre)): ?>
+                            <li>
+                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/passe-livre'), ENT_QUOTES, 'UTF-8') ?>">
+                                    Passe livre
+                                </a>
+                            </li>
+                        <?php endif; ?>
                     </ul>
                 </li>
                 <?php if (!empty($podeVerChamadas)): ?>

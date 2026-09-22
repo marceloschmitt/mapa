@@ -106,16 +106,18 @@ $semanasConsecutivas = (int)($alarmeConfig['faltas_semanas_total'] ?? 3);
         </a>
     </div>
     <div class="col-md-4">
-        <a href="<?= htmlspecialchars(url('/passe-livre'), ENT_QUOTES, 'UTF-8') ?>" class="text-decoration-none">
-            <div class="card border-0 shadow-sm h-100">
-                <div class="card-body">
-                    <h2 class="h5">Passe livre</h2>
-                    <p class="text-secondary mb-0 small">
-                        Frequência dos alunos no semestre anterior (por curso e
-                        disciplina), gerada pelo script manual.
-                    </p>
+        <?php if (!empty($podeVerPasseLivre)): ?>
+            <a href="<?= htmlspecialchars(url('/passe-livre'), ENT_QUOTES, 'UTF-8') ?>" class="text-decoration-none">
+                <div class="card border-0 shadow-sm h-100">
+                    <div class="card-body">
+                        <h2 class="h5">Passe livre</h2>
+                        <p class="text-secondary mb-0 small">
+                            Frequência dos alunos no semestre anterior (por curso e
+                            disciplina), gerada pelo script manual.
+                        </p>
+                    </div>
                 </div>
-            </div>
-        </a>
+            </a>
+        <?php endif; ?>
     </div>
 </div>

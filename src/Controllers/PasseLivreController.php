@@ -17,6 +17,11 @@ class PasseLivreController extends Controller
     public function index(): void
     {
         $this->requireAuth();
+        if (!Auth::canVerPasseLivre()) {
+            http_response_code(403);
+            Session::flash('erro', 'Acesso ao passe livre restrito a usuários autorizados.');
+            $this->redirect('/');
+        }
 
         $repo = new AnalyticsRepository();
         $periodosDisponiveis = $repo->listarPeriodosPasseLivre();
@@ -25,12 +30,9 @@ class PasseLivreController extends Controller
             ? $repo->metaPasseLivre($semestreSelecionado)
             : null;
 
-        $isCoordenador = Auth::isCoordenador();
-        $isProfessor = Auth::isProfessor();
-        $semSeletorCurso = $isCoordenador || $isProfessor;
         $podeGerar = Auth::canGerarPasseLivre();
 
-        $cursosDisponiveis = $semSeletorCurso ? [] : $repo->listarCursos(null);
+        $cursosDisponiveis = $repo->listarCursos(null);
         $cursoSelecionado = $this->cursoSelecionado($cursosDisponiveis);
         $escopo = $this->resolverEscopo($repo, $cursoSelecionado);
         $filtroNome = $this->filtroNome();
@@ -39,10 +41,10 @@ class PasseLivreController extends Controller
         $disciplinasPorLinha = [];
         $atestadosPorLinha = [];
 
-        if ($semestreSelecionado !== '' && $escopo['aviso'] === null) {
+        if ($semestreSelecionado !== '') {
             $linhas = $repo->linhasPasseLivre(
                 $escopo['cursoIds'],
-                $escopo['codigosDisciplina'],
+                null,
                 $filtroNome,
                 $semestreSelecionado
             );
@@ -77,8 +79,8 @@ class PasseLivreController extends Controller
             'cursoExibido' => $escopo['cursoExibido'],
             'filtroNome' => $filtroNome,
             'rotuloGeral' => 'Todos os cursos',
-            'semSeletorCurso' => $semSeletorCurso,
-            'avisoCoordenador' => $escopo['aviso'],
+            'semSeletorCurso' => false,
+            'avisoCoordenador' => null,
             'erro' => $erro,
             'sucesso' => Session::flash('sucesso'),
             'podeGerarPasseLivre' => $podeGerar,
@@ -90,6 +92,11 @@ class PasseLivreController extends Controller
     public function gerar(): void
     {
         $this->requireAuth();
+        if (!Auth::canVerPasseLivre()) {
+            http_response_code(403);
+            Session::flash('erro', 'Acesso ao passe livre restrito a usuários autorizados.');
+            $this->redirect('/');
+        }
         if (!Auth::canGerarPasseLivre()) {
             http_response_code(403);
             Session::flash('erro', 'Acesso restrito a administradores.');
@@ -153,7 +160,7 @@ class PasseLivreController extends Controller
         $this->requireAuth();
         header('Content-Type: application/json; charset=utf-8');
 
-        if (!Auth::canAssinarPasseLivre()) {
+        if (!Auth::canVerPasseLivre() || !Auth::canAssinarPasseLivre()) {
             http_response_code(403);
             echo json_encode(
                 ['ok' => false, 'erro' => 'Seu usuário não tem permissão para assinar atestados.'],
@@ -171,16 +178,11 @@ class PasseLivreController extends Controller
 
         $repo = new AnalyticsRepository();
         $escopo = $this->resolverEscopo($repo, 'todos');
-        if ($escopo['aviso'] !== null) {
-            http_response_code(403);
-            echo json_encode(['ok' => false, 'erro' => 'Acesso negado.'], JSON_UNESCAPED_UNICODE);
-            exit;
-        }
 
         $linha = $repo->linhaPasseLivrePorId(
             $id,
             $escopo['cursoIds'],
-            $escopo['codigosDisciplina']
+            null
         );
         if ($linha === null) {
             http_response_code(404);
@@ -217,6 +219,10 @@ class PasseLivreController extends Controller
     public function pdf(): void
     {
         $this->requireAuth();
+        if (!Auth::canVerPasseLivre()) {
+            http_response_code(403);
+            exit;
+        }
 
         $id = (int)($_GET['id'] ?? 0);
         if ($id <= 0) {
@@ -226,15 +232,11 @@ class PasseLivreController extends Controller
 
         $repo = new AnalyticsRepository();
         $escopo = $this->resolverEscopo($repo, 'todos');
-        if ($escopo['aviso'] !== null) {
-            http_response_code(403);
-            exit;
-        }
 
         $linha = $repo->linhaPasseLivrePorId(
             $id,
             $escopo['cursoIds'],
-            $escopo['codigosDisciplina']
+            null
         );
         if ($linha === null) {
             http_response_code(404);
@@ -404,37 +406,20 @@ class PasseLivreController extends Controller
     }
 
     /**
+     * Escopo do relatório: filtro opcional de curso na UI.
+     * Não usa cursos do coordenador nem disciplinas do professor.
+     *
      * @return array{
      *   cursoIds: list<int>|null,
-     *   codigosDisciplina: list<string>|null,
-     *   cursoExibido: string,
-     *   aviso: string|null
+     *   cursoExibido: string
      * }
      */
     private function resolverEscopo(AnalyticsRepository $repo, string $cursoSelecionado): array
     {
         $cursoIds = null;
-        $codigosDisciplina = null;
         $cursoExibido = 'Todos os cursos';
-        $aviso = null;
 
-        if (Auth::isCoordenador()) {
-            $cursoIds = Auth::cursoIds();
-            if ($cursoIds === []) {
-                $aviso = 'Nenhum curso vinculado ao seu usuário.';
-            } elseif (count($cursoIds) === 1) {
-                $cursos = $repo->listarCursos($cursoIds);
-                $cursoExibido = (string)($cursos[0]['nome_curso'] ?? 'Curso vinculado');
-            } else {
-                $cursoExibido = count($cursoIds) . ' cursos vinculados';
-            }
-        } elseif (Auth::isProfessor()) {
-            $codigosDisciplina = Auth::disciplinaCodigos();
-            $cursoExibido = 'Cursos das minhas disciplinas';
-            if ($codigosDisciplina === []) {
-                $aviso = 'Nenhuma disciplina vinculada ao seu CPF.';
-            }
-        } elseif ($cursoSelecionado !== 'todos') {
+        if ($cursoSelecionado !== 'todos') {
             $cursoIds = [(int)$cursoSelecionado];
             $cursos = $repo->listarCursos($cursoIds);
             $cursoExibido = (string)($cursos[0]['nome_curso'] ?? 'Curso selecionado');
@@ -442,9 +427,7 @@ class PasseLivreController extends Controller
 
         return [
             'cursoIds' => $cursoIds,
-            'codigosDisciplina' => $codigosDisciplina,
             'cursoExibido' => $cursoExibido,
-            'aviso' => $aviso,
         ];
     }
 
@@ -453,10 +436,6 @@ class PasseLivreController extends Controller
      */
     private function cursoSelecionado(array $cursosDisponiveis): string
     {
-        if (Auth::isCoordenador() || Auth::isProfessor()) {
-            return 'todos';
-        }
-
         $param = isset($_GET['curso']) ? trim((string)$_GET['curso']) : null;
         if ($param === null || $param === '' || $param === 'todos') {
             return 'todos';
