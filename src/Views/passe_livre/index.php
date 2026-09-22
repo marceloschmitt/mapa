@@ -253,14 +253,10 @@ $dataExtenso = static function (): string {
                                 tabindex="0"
                                 role="button"
                                 data-id="<?= (int)$linha['id'] ?>"
-                                data-passe-livre="<?= $json ?>">
+                                data-passe-livre="<?= $json ?>"
+                                <?php if (is_array($atestado)): ?>title="Assinado"<?php endif; ?>>
                                 <td class="text-end text-secondary pe-1"><?= $i + 1 ?></td>
-                                <td class="fw-semibold">
-                                    <?php if (is_array($atestado)): ?>
-                                        <span class="marca-assinado" title="Assinado" aria-label="Assinado"></span>
-                                    <?php endif; ?>
-                                    <?= htmlspecialchars($nome, ENT_QUOTES, 'UTF-8') ?>
-                                </td>
+                                <td class="fw-semibold"><?= htmlspecialchars($nome, ENT_QUOTES, 'UTF-8') ?></td>
                                 <td><?= htmlspecialchars((string)($linha['matricula'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
                                 <td><?= htmlspecialchars((string)($linha['nome_curso'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
                                 <td class="text-end">
@@ -273,7 +269,6 @@ $dataExtenso = static function (): string {
             </div>
             <p class="small text-secondary px-3 py-2 mb-0 border-top">
                 * A frequência é o percentual de presença em relação ao número de aulas ministradas.
-                <span class="ms-3"><span class="marca-assinado" aria-hidden="true"></span> Assinado</span>
             </p>
         </div>
     </div>
@@ -307,7 +302,7 @@ $dataExtenso = static function (): string {
                             <span id="modalPasseLivreAno" class="atestado-numero-vazio"></span>
                         </p>
 
-                        <div class="d-flex flex-wrap justify-content-between gap-2 small mb-4">
+                        <div class="small mb-4">
                             <div id="modalPasseLivreProtocolo">Nº do Protocolo: PROTOCOLO INDEFINIDO</div>
                             <div id="modalPasseLivreData"><?= htmlspecialchars($dataExtenso(), ENT_QUOTES, 'UTF-8') ?></div>
                         </div>
@@ -376,15 +371,6 @@ $dataExtenso = static function (): string {
         }
         .tabela-passe-livre .linha-passe-livre.is-assinado > :first-child {
             box-shadow: inset 4px 0 0 #198754;
-        }
-        .marca-assinado {
-            display: inline-block;
-            width: 0.65rem;
-            height: 0.65rem;
-            border-radius: 50%;
-            background: #198754;
-            margin-right: 0.4rem;
-            vertical-align: middle;
         }
         .atestado-passe-livre {
             max-width: 820px;
@@ -639,14 +625,7 @@ $dataExtenso = static function (): string {
                         linha.setAttribute('data-passe-livre', JSON.stringify(atual));
                     } catch (e) {}
                     linha.classList.add('is-assinado');
-                    const tdNome = linha.querySelector('td.fw-semibold');
-                    if (tdNome && !tdNome.querySelector('.marca-assinado')) {
-                        const marca = document.createElement('span');
-                        marca.className = 'marca-assinado';
-                        marca.title = 'Assinado';
-                        marca.setAttribute('aria-label', 'Assinado');
-                        tdNome.insertBefore(marca, tdNome.firstChild);
-                    }
+                    linha.setAttribute('title', 'Assinado');
                 }
             }).catch(function (err) {
                 alert(err.message || 'Não foi possível assinar o documento.');
