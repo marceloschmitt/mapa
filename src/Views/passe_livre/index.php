@@ -302,9 +302,9 @@ $dataExtenso = static function (): string {
                             <span id="modalPasseLivreAno" class="atestado-numero-vazio"></span>
                         </p>
 
-                        <div class="small mb-4">
+                        <div class="small mb-4 d-flex justify-content-between align-items-start gap-3 flex-wrap">
                             <div id="modalPasseLivreProtocolo">Nº do Protocolo: PROTOCOLO INDEFINIDO</div>
-                            <div id="modalPasseLivreData"><?= htmlspecialchars($dataExtenso(), ENT_QUOTES, 'UTF-8') ?></div>
+                            <div id="modalPasseLivreData" class="text-end ms-auto"><?= htmlspecialchars($dataExtenso(), ENT_QUOTES, 'UTF-8') ?></div>
                         </div>
 
                         <p class="small text-justify mb-4" id="modalPasseLivreTexto"></p>
