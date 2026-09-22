@@ -160,8 +160,16 @@ class SimplePdf
         $this->ensureSpace($lineH + 4);
         $y = $this->y - $fontSize;
         $this->drawText($this->margin, $y, $left, $bold);
+
+        // Largura apos conversao Win-1252 (mesma string desenhada), com metricas Helvetica.
         $rightWidth = $this->textWidth($right, $fontSize);
         $xRight = $this->margin + max(0.0, $this->contentWidth() - $rightWidth);
+        // Evita sobrepor o texto da esquerda se a data for longa demais.
+        $leftWidth = $this->textWidth($left, $fontSize);
+        $minRight = $this->margin + $leftWidth + ($fontSize * 0.6);
+        if ($xRight < $minRight) {
+            $xRight = $minRight;
+        }
         $this->drawText($xRight, $y, $right, $bold);
         $this->y -= $lineH + 2;
         $this->fontSize = $previous;
@@ -324,39 +332,58 @@ class SimplePdf
         return $lines === [] ? [''] : $lines;
     }
 
-    /** Largura aproximada em pontos (Helvetica; maiusculas mais largas). */
+    /** Largura aproximada em pontos (Helvetica WinAnsi). */
     private function textWidth(string $text, float $fontSize): float
     {
+        $encoded = $this->toWin1252($text);
         $width = 0.0;
-        $len = mb_strlen($text, 'UTF-8');
+        $len = strlen($encoded);
         for ($i = 0; $i < $len; $i++) {
-            $ch = mb_substr($text, $i, 1, 'UTF-8');
-            $width += $this->charWidthFactor($ch) * $fontSize;
+            $width += $this->helveticaWidthFactor(ord($encoded[$i])) * $fontSize;
         }
 
         return $width;
     }
 
+    /** Fatores de largura Helvetica (unidades/1000) para bytes WinAnsi. */
+    private function helveticaWidthFactor(int $code): float
+    {
+        static $widths = [
+            32 => 278, 33 => 278, 34 => 355, 35 => 556, 36 => 556, 37 => 889, 38 => 667,
+            39 => 222, 40 => 333, 41 => 333, 42 => 389, 43 => 584, 44 => 278, 45 => 333,
+            46 => 278, 47 => 278, 48 => 556, 49 => 556, 50 => 556, 51 => 556, 52 => 556,
+            53 => 556, 54 => 556, 55 => 556, 56 => 556, 57 => 556, 58 => 278, 59 => 278,
+            60 => 584, 61 => 584, 62 => 584, 63 => 556, 64 => 1015, 65 => 667, 66 => 667,
+            67 => 722, 68 => 722, 69 => 667, 70 => 611, 71 => 778, 72 => 722, 73 => 278,
+            74 => 500, 75 => 667, 76 => 556, 77 => 833, 78 => 722, 79 => 778, 80 => 667,
+            81 => 778, 82 => 722, 83 => 667, 84 => 611, 85 => 722, 86 => 667, 87 => 944,
+            88 => 667, 89 => 667, 90 => 611, 91 => 278, 92 => 278, 93 => 278, 94 => 469,
+            95 => 556, 96 => 333, 97 => 556, 98 => 556, 99 => 500, 100 => 556, 101 => 556,
+            102 => 278, 103 => 556, 104 => 556, 105 => 222, 106 => 222, 107 => 500, 108 => 222,
+            109 => 833, 110 => 556, 111 => 556, 112 => 556, 113 => 556, 114 => 333, 115 => 500,
+            116 => 278, 117 => 556, 118 => 500, 119 => 722, 120 => 500, 121 => 500, 122 => 500,
+            123 => 334, 124 => 260, 125 => 334, 126 => 584,
+            170 => 370, // ª
+            186 => 400, // º
+            192 => 667, 193 => 667, 194 => 667, 195 => 667, 196 => 667,
+            199 => 722, 200 => 667, 201 => 667, 202 => 667, 205 => 278, 209 => 722,
+            211 => 778, 212 => 778, 213 => 778, 218 => 722,
+            224 => 556, 225 => 556, 226 => 556, 227 => 556, 231 => 500,
+            232 => 556, 233 => 556, 234 => 556, 237 => 278, 241 => 556,
+            243 => 556, 244 => 556, 245 => 556, 250 => 556,
+        ];
+
+        return ($widths[$code] ?? 600) / 1000.0;
+    }
+
     private function charWidthFactor(string $ch): float
     {
-        if ($ch === ' ') {
-            return 0.28;
-        }
-        if ($ch === ',' || $ch === '.' || $ch === ';' || $ch === ':') {
-            return 0.28;
-        }
-        if ($ch === '-' || $ch === '/') {
-            return 0.33;
-        }
-        // Digitos e maiusculas (nomes SIGAA) sao mais largos.
-        if (preg_match('/[A-ZÁÀÂÃÉÊÍÓÔÕÚÇ]/u', $ch) === 1) {
-            return 0.72;
-        }
-        if (preg_match('/[0-9]/', $ch) === 1) {
-            return 0.56;
+        $encoded = $this->toWin1252($ch);
+        if ($encoded === '') {
+            return 0.50;
         }
 
-        return 0.50;
+        return $this->helveticaWidthFactor(ord($encoded[0]));
     }
 
     private function fitPrefix(string $text, float $width, float $fontSize): int
@@ -409,22 +436,58 @@ class SimplePdf
 
     private function registerImage(string $path): ?string
     {
-        if (!is_file($path) || !function_exists('imagecreatefrompng')) {
+        if (!is_file($path) || !is_readable($path)) {
             return null;
         }
 
         $ext = strtolower(pathinfo($path, PATHINFO_EXTENSION));
-        $img = match ($ext) {
-            'png' => @imagecreatefrompng($path),
-            'jpg', 'jpeg' => @imagecreatefromjpeg($path),
+
+        // JPEG: embute o arquivo direto (DCTDecode) — nao depende da extensao GD.
+        if ($ext === 'jpg' || $ext === 'jpeg') {
+            $size = @getimagesize($path);
+            $data = @file_get_contents($path);
+            if (is_array($size)
+                && isset($size[0], $size[1])
+                && is_string($data)
+                && $data !== ''
+                && (int)$size[0] > 0
+                && (int)$size[1] > 0
+            ) {
+                $this->imageCounter++;
+                $name = 'Im' . $this->imageCounter;
+                $this->images[$name] = [
+                    'width' => (int)$size[0],
+                    'height' => (int)$size[1],
+                    'data' => $data,
+                ];
+
+                return $name;
+            }
+        }
+
+        // PNG (e fallback JPEG): via GD, se disponivel.
+        $loader = match ($ext) {
+            'png' => function_exists('imagecreatefrompng') ? 'imagecreatefrompng' : null,
+            'jpg', 'jpeg' => function_exists('imagecreatefromjpeg') ? 'imagecreatefromjpeg' : null,
             default => null,
         };
+        if ($loader === null) {
+            return null;
+        }
+
+        $img = @$loader($path);
         if (!is_resource($img) && !($img instanceof \GdImage)) {
             return null;
         }
 
         $width = imagesx($img);
         $height = imagesy($img);
+        if (!function_exists('imagejpeg')) {
+            imagedestroy($img);
+
+            return null;
+        }
+
         ob_start();
         imagejpeg($img, null, 92);
         $data = ob_get_clean();
