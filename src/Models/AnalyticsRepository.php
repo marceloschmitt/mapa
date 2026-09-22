@@ -1981,7 +1981,7 @@ class AnalyticsRepository
         }
 
         $sql = 'SELECT pd.aluno_curso_id, pd.codigo_disciplina, pd.disciplina,
-                       pd.frequencia, pd.situacao
+                       pd.frequencia, pd.situacao, pd.data_trancamento
                 FROM passe_livre_disciplina pd
                 WHERE pd.aluno_curso_id IN (' . implode(', ', $placeholders) . ')';
 

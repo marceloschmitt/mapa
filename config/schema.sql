@@ -401,6 +401,7 @@ CREATE TABLE IF NOT EXISTS passe_livre_disciplina (
     disciplina TEXT NOT NULL DEFAULT '',
     frequencia REAL,
     situacao TEXT,
+    data_trancamento TEXT,
     FOREIGN KEY (aluno_curso_id) REFERENCES passe_livre_aluno_curso(id) ON DELETE CASCADE
 );
 

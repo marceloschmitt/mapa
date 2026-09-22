@@ -57,14 +57,11 @@ class PasseLivreAtestadoPdf
         $pdf->textAligned($titulo, 9.0, 'left', true);
         $pdf->spacer(6);
 
-        $protocolo = $numero > 0 && $ano > 0
-            ? sprintf('%d/%d', $numero, $ano)
-            : 'PROTOCOLO INDEFINIDO';
         $dataDoc = trim((string)($dados['data_documento'] ?? ''));
         if ($dataDoc === '') {
             $dataDoc = self::dataExtenso();
         }
-        $pdf->textRow('Nº do Protocolo: ' . $protocolo, $dataDoc, 9.0);
+        $pdf->textAligned($dataDoc, 9.0, 'right');
         $pdf->spacer(10);
 
         $ingresso = trim($dados['ingresso']) !== '' ? trim($dados['ingresso']) : '---';
@@ -103,12 +100,6 @@ class PasseLivreAtestadoPdf
         $pdf->paragraph(
             '* A frequência é o percentual de presença em relação ao número de aulas ministradas.',
             8.0
-        );
-        $pdf->spacer(6);
-        $pdf->paragraph(
-            'Frequência* global no curso: ' . self::fmtPct($dados['frequencia'] ?? null),
-            10.0,
-            true
         );
 
         $link = trim((string)($dados['link_conferencia'] ?? ''));
@@ -178,6 +169,11 @@ class PasseLivreAtestadoPdf
     {
         $situacao = trim((string)($disc['situacao'] ?? ''));
         if ($situacao !== '') {
+            $data = trim((string)($disc['data_trancamento'] ?? ''));
+            if ($data !== '') {
+                return $situacao . "\n" . $data;
+            }
+
             return $situacao;
         }
 

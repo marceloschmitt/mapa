@@ -342,51 +342,56 @@ class SimplePdf
     /** @return list<string> */
     private function wrapText(string $text, float $width, float $fontSize): array
     {
-        $text = preg_replace("/\s+/u", ' ', trim($text)) ?? trim($text);
-        if ($text === '') {
-            return [''];
-        }
+        $paragraphs = preg_split("/\r\n|\r|\n/u", $text) ?: [''];
+        $allLines = [];
 
-        // Quebra tambem apos virgula para listas de professores.
-        $text = str_replace(',', ', ', $text);
-        $text = preg_replace("/\s+/u", ' ', $text) ?? $text;
-
-        $words = preg_split('/\s+/u', $text) ?: [$text];
-        $lines = [];
-        $current = '';
-
-        foreach ($words as $word) {
-            // Palavra maior que a largura: quebra forçada por caracteres.
-            while ($this->textWidth($word, $fontSize) > $width) {
-                if ($current !== '') {
-                    $lines[] = $current;
-                    $current = '';
-                }
-                $cut = $this->fitPrefix($word, $width, $fontSize);
-                if ($cut <= 0) {
-                    $cut = 1;
-                }
-                $lines[] = mb_substr($word, 0, $cut, 'UTF-8');
-                $word = mb_substr($word, $cut, null, 'UTF-8');
-            }
-
-            $candidate = $current === '' ? $word : ($current . ' ' . $word);
-            if ($this->textWidth($candidate, $fontSize) <= $width) {
-                $current = $candidate;
+        foreach ($paragraphs as $paragraph) {
+            $paragraph = preg_replace("/\s+/u", ' ', trim($paragraph)) ?? trim($paragraph);
+            if ($paragraph === '') {
+                $allLines[] = '';
                 continue;
             }
 
-            if ($current !== '') {
-                $lines[] = $current;
+            // Quebra tambem apos virgula para listas de professores.
+            $paragraph = str_replace(',', ', ', $paragraph);
+            $paragraph = preg_replace("/\s+/u", ' ', $paragraph) ?? $paragraph;
+
+            $words = preg_split('/\s+/u', $paragraph) ?: [$paragraph];
+            $current = '';
+
+            foreach ($words as $word) {
+                // Palavra maior que a largura: quebra forçada por caracteres.
+                while ($this->textWidth($word, $fontSize) > $width) {
+                    if ($current !== '') {
+                        $allLines[] = $current;
+                        $current = '';
+                    }
+                    $cut = $this->fitPrefix($word, $width, $fontSize);
+                    if ($cut <= 0) {
+                        $cut = 1;
+                    }
+                    $allLines[] = mb_substr($word, 0, $cut, 'UTF-8');
+                    $word = mb_substr($word, $cut, null, 'UTF-8');
+                }
+
+                $candidate = $current === '' ? $word : ($current . ' ' . $word);
+                if ($this->textWidth($candidate, $fontSize) <= $width) {
+                    $current = $candidate;
+                    continue;
+                }
+
+                if ($current !== '') {
+                    $allLines[] = $current;
+                }
+                $current = $word;
             }
-            $current = $word;
+
+            if ($current !== '') {
+                $allLines[] = $current;
+            }
         }
 
-        if ($current !== '') {
-            $lines[] = $current;
-        }
-
-        return $lines === [] ? [''] : $lines;
+        return $allLines === [] ? [''] : $allLines;
     }
 
     /** Largura aproximada em pontos (Helvetica WinAnsi). */

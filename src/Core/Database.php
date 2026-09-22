@@ -95,6 +95,7 @@ class Database
         self::ensureColumn('passe_livre_atestados', 'frequencia_geral', 'REAL');
         self::ensureColumn('passe_livre_atestados', 'disciplinas_json', "TEXT NOT NULL DEFAULT '[]'");
         self::ensureColumn('passe_livre_disciplina', 'situacao', 'TEXT');
+        self::ensureColumn('passe_livre_disciplina', 'data_trancamento', 'TEXT');
         self::migrarPasseLivreAtestadosNullable();
         self::migrarDatasAulaCsvParaTabela();
         self::migrarDisciplinaCargaHorariaCurso();

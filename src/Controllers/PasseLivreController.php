@@ -302,6 +302,7 @@ class PasseLivreController extends Controller
                         'nome' => (string)($disc['disciplina'] ?? ''),
                         'frequencia' => $disc['frequencia'] ?? null,
                         'situacao' => (string)($disc['situacao'] ?? ''),
+                        'data_trancamento' => (string)($disc['data_trancamento'] ?? ''),
                     ];
                 },
                 $disciplinas

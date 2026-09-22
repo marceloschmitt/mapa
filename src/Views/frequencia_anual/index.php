@@ -159,6 +159,7 @@ $fmtPct = static function ($valor): string {
                                             'nome' => (string)($d['disciplina'] ?? ''),
                                             'frequencia' => $d['frequencia'],
                                             'situacao' => (string)($d['situacao'] ?? ''),
+                                            'data_trancamento' => (string)($d['data_trancamento'] ?? ''),
                                         ];
                                     },
                                     $disciplinas
@@ -220,13 +221,8 @@ $fmtPct = static function ($valor): string {
                             </table>
                         </div>
 
-                        <p class="small text-secondary mb-3">
+                        <p class="small text-secondary mb-0">
                             * A frequência é o percentual de presença em relação ao número de aulas ministradas.
-                        </p>
-
-                        <p class="small fw-semibold mb-0">
-                            Frequência* global no curso:
-                            <span id="modalPasseLivreGeral"></span>
                         </p>
                     </div>
                 </div>
@@ -264,7 +260,6 @@ $fmtPct = static function ($valor): string {
         }
 
         const texto = document.getElementById('modalPasseLivreTexto');
-        const geral = document.getElementById('modalPasseLivreGeral');
         const tbody = document.getElementById('modalPasseLivreDisciplinas');
 
         function fmtPct(valor) {
@@ -277,12 +272,16 @@ $fmtPct = static function ($valor): string {
             }) + '%';
         }
 
-        function fmtFreqDisc(d) {
+        function fmtFreqDiscHtml(d) {
             const sit = String((d && d.situacao) || '').trim();
             if (sit !== '') {
-                return sit;
+                const data = String((d && d.data_trancamento) || '').trim();
+                if (data !== '') {
+                    return escapeHtml(sit) + '<br>' + escapeHtml(data);
+                }
+                return escapeHtml(sit);
             }
-            return fmtPct(d && d.frequencia);
+            return escapeHtml(fmtPct(d && d.frequencia));
         }
 
         function escapeHtml(texto) {
@@ -319,8 +318,6 @@ $fmtPct = static function ($valor): string {
                 + periodo
                 + ':';
 
-            geral.textContent = fmtPct(dados.frequencia);
-
             tbody.innerHTML = '';
             const discs = Array.isArray(dados.disciplinas) ? dados.disciplinas : [];
             discs.forEach(function (d) {
@@ -331,7 +328,7 @@ $fmtPct = static function ($valor): string {
                         ? '<code>' + escapeHtml(d.codigo) + '</code>'
                         : '<span class="text-secondary">—</span>') + '</td>' +
                     '<td>' + escapeHtml(d.nome || '') + '</td>' +
-                    '<td class="text-end">' + escapeHtml(fmtFreqDisc(d)) + '</td>';
+                    '<td class="text-end">' + fmtFreqDiscHtml(d) + '</td>';
                 tbody.appendChild(tr);
             });
 

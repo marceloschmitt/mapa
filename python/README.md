@@ -73,6 +73,6 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 | `status_aluno.py` | Regras ATIVO/FORMANDO/trancado |
 | `turno_turma.py` | Expande intervalos de aula (usado por `importar_grade.py`) |
 | `gerar_perda_vaga.py` | Manual: candidatos a perda de vaga (2 semestres anteriores) → BD |
-| `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência **mensal** (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`) + cache `resposta_alunos_AAAA_S_mensal.json`. Trancadas (`ausencias_especiais`) → `situacao`; % total recalculado sem horários/ausências/presenças delas. Não apaga o semestre atual. Opção `--semestres N` (padrão 3). |
+| `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência **mensal** (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`) + cache `resposta_alunos_AAAA_S_mensal.json`. Trancadas (`ausencias_especiais`) → `situacao`; % total do curso = valor da API. Não apaga o semestre atual. Opção `--semestres N` (padrão 3). |
 | `sincronizar_passe_livre_semestre_atual.py` | Coleta: grava o semestre de `api_periodo_letivo` (datas da frequência) em `passe_livre_*` a partir de `tabela_frequencia.json`. |
 | `gerar_carga_horaria.py` | Manual (também via Configurações → Carga horária): API alunos nos **4 últimos semestres** → `disciplina_carga_horaria` (`carga_horaria`, null permitido). |

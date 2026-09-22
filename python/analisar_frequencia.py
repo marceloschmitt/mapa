@@ -23,8 +23,7 @@ from paths import (
 from status_aluno import status_eh_controle, status_eh_trancado
 from ausencias_especiais import (
     aplicar_situacao_trancamento,
-    codigos_trancamento_cancelamento,
-    recalcular_frequencia_geral_sem_trancadas,
+    mapear_trancamento_cancelamento,
 )
 
 ARQUIVO_ENTRADA = JSON_RESPOSTA_ALUNOS
@@ -168,7 +167,7 @@ def extrair_disciplinas(frequencias: dict[str, Any]) -> list[dict[str, Any]]:
     Returns:
         Lista de disciplinas com horarios, ausencias, presencas e dias de falta.
         Disciplinas em ausencias_especiais.trancamento_cancelamento ficam com
-        situacao TRANCADO/CANCELADO e percentual_frequencia None.
+        situacao Trancada e percentual_frequencia None.
     """
     disciplinas = frequencias.get("disciplinas", {})
     if not isinstance(disciplinas, dict):
@@ -193,11 +192,12 @@ def extrair_disciplinas(frequencias: dict[str, Any]) -> list[dict[str, Any]]:
             "percentual_frequencia": freq.get("percentual_frequencia"),
             "dias_falta": extrair_dias_falta(disciplina),
             "situacao": None,
+            "data_trancamento": None,
         })
 
     linhas = aplicar_situacao_trancamento(
         linhas,
-        codigos_trancamento_cancelamento(frequencias.get("ausencias_especiais")),
+        mapear_trancamento_cancelamento(frequencias.get("ausencias_especiais")),
     )
     linhas.sort(
         key=lambda linha: (
@@ -283,9 +283,6 @@ def extrair_registros_aluno(
 
             frequencia_geral = extrair_frequencia_geral(frequencias)
             disciplinas = extrair_disciplinas(frequencias)
-            recalc = recalcular_frequencia_geral_sem_trancadas(disciplinas)
-            if recalc is not None:
-                frequencia_geral = {**(frequencia_geral or {}), **recalc}
 
             if frequencia_geral is None and disciplinas == []:
                 continue

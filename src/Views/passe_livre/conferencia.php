@@ -62,12 +62,7 @@ $fmtPct = static function ($valor): string {
         <dd class="col-sm-8"><?= htmlspecialchars((string)$atestado['nome_curso'], ENT_QUOTES, 'UTF-8') ?></dd>
 
         <dt class="col-sm-4">Semestre</dt>
-        <dd class="col-sm-8"><?= htmlspecialchars((string)$atestado['periodo'], ENT_QUOTES, 'UTF-8') ?></dd>
-
-        <dt class="col-sm-4">Frequência global</dt>
-        <dd class="col-sm-8 mb-0">
-            <strong><?= htmlspecialchars($fmtPct($atestado['frequencia_geral'] ?? null), ENT_QUOTES, 'UTF-8') ?></strong>
-        </dd>
+        <dd class="col-sm-8 mb-0"><?= htmlspecialchars((string)$atestado['periodo'], ENT_QUOTES, 'UTF-8') ?></dd>
     </dl>
 
     <h2 class="h6 mb-2">Frequências por disciplina</h2>
@@ -89,6 +84,10 @@ $fmtPct = static function ($valor): string {
                 </thead>
                 <tbody>
                     <?php foreach ($disciplinas as $disc): ?>
+                        <?php
+                        $sit = trim((string)($disc['situacao'] ?? ''));
+                        $dataTranc = trim((string)($disc['data_trancamento'] ?? ''));
+                        ?>
                         <tr>
                             <td><?= htmlspecialchars((string)$atestado['periodo'], ENT_QUOTES, 'UTF-8') ?></td>
                             <td>
@@ -100,7 +99,14 @@ $fmtPct = static function ($valor): string {
                             </td>
                             <td><?= htmlspecialchars((string)($disc['nome'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
                             <td class="text-end">
-                                <?= htmlspecialchars($fmtPct($disc['frequencia'] ?? null), ENT_QUOTES, 'UTF-8') ?>
+                                <?php if ($sit !== ''): ?>
+                                    <?= htmlspecialchars($sit, ENT_QUOTES, 'UTF-8') ?>
+                                    <?php if ($dataTranc !== ''): ?>
+                                        <br><?= htmlspecialchars($dataTranc, ENT_QUOTES, 'UTF-8') ?>
+                                    <?php endif; ?>
+                                <?php else: ?>
+                                    <?= htmlspecialchars($fmtPct($disc['frequencia'] ?? null), ENT_QUOTES, 'UTF-8') ?>
+                                <?php endif; ?>
                             </td>
                         </tr>
                     <?php endforeach; ?>

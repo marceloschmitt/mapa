@@ -6,8 +6,7 @@ e consulta a frequencia mensal (frequencia_periodo) de cada semestre anterior.
 Grava em passe_livre_* e salva cache JSON (resposta_alunos_AAAA_S_mensal.json).
 
 Disciplinas em ausencias_especiais.trancamento_cancelamento ficam com
-situacao TRANCADO/CANCELADO; o percentual total do curso e recalculado
-excluindo horarios/ausencias/presencas dessas disciplinas.
+situacao Trancada; o percentual total do curso permanece o da API.
 
 Uso:
     python3 gerar_passe_livre.py
@@ -39,8 +38,7 @@ from api_auth import (
 )
 from ausencias_especiais import (
     aplicar_situacao_trancamento,
-    codigos_trancamento_cancelamento,
-    recalcular_frequencia_geral_sem_trancadas,
+    mapear_trancamento_cancelamento,
 )
 from consulta_alunos import eh_erro_http_temporario, eh_erro_temporario
 from db import conectar, fechar, row_to_dict
@@ -163,10 +161,28 @@ def parse_nome_disciplina_mensal(chave: str) -> tuple[str, str]:
     return "", texto
 
 
+def extrair_frequencia_geral_mensal(frequencias: dict[str, Any]) -> dict[str, Any] | None:
+    """Percentual do curso a partir de FREQUÊNCIA GLOBAL (modo mensal / API)."""
+    disciplinas = frequencias.get("disciplinas")
+    if not isinstance(disciplinas, dict):
+        return None
+    global_ = disciplinas.get(FREQUENCIA_GLOBAL)
+    if not isinstance(global_, dict):
+        return None
+    total = global_.get("total")
+    if not isinstance(total, dict):
+        return None
+    pct = total.get("percentual_frequencia")
+    if pct is None:
+        return None
+    return {"percentual_frequencia_total": pct}
+
+
 def extrair_disciplinas_mensal(frequencias: dict[str, Any]) -> list[dict[str, Any]]:
     """Disciplinas do modo mensal (ignora FREQUÊNCIA GLOBAL).
 
-    Inclui horarios/ausencias/presencas do total mensal para recalculo do curso.
+    Disciplinas em ausencias_especiais.trancamento_cancelamento ficam com
+    situacao Trancada no lugar do percentual.
     """
     disciplinas = frequencias.get("disciplinas")
     if not isinstance(disciplinas, dict):
@@ -198,11 +214,12 @@ def extrair_disciplinas_mensal(frequencias: dict[str, Any]) -> list[dict[str, An
             "presencas": total.get("presencas") or 0,
             "percentual_frequencia": pct,
             "situacao": None,
+            "data_trancamento": None,
         })
 
     return aplicar_situacao_trancamento(
         saida,
-        codigos_trancamento_cancelamento(frequencias.get("ausencias_especiais")),
+        mapear_trancamento_cancelamento(frequencias.get("ausencias_especiais")),
     )
 
 
@@ -244,8 +261,8 @@ def extrair_registros_passe_livre(aluno: dict[str, Any]) -> list[dict[str, Any]]
             frequencias = curso.get("frequencias", {})
             if not isinstance(frequencias, dict):
                 continue
+            frequencia_geral = extrair_frequencia_geral_mensal(frequencias)
             disciplinas = extrair_disciplinas_mensal(frequencias)
-            frequencia_geral = recalcular_frequencia_geral_sem_trancadas(disciplinas)
             if frequencia_geral is None and disciplinas == []:
                 continue
 
@@ -607,13 +624,19 @@ def inserir_registros(
         for disc in registro.get("disciplinas") or []:
             pct = disc.get("percentual_frequencia")
             situacao = str(disc.get("situacao") or "").strip() or None
+            data_trancamento = (
+                str(disc.get("data_trancamento") or "").strip() or None
+            )
             if situacao:
                 pct = None
+            else:
+                data_trancamento = None
             cursor.execute(
                 """
                 INSERT INTO passe_livre_disciplina (
-                    aluno_curso_id, codigo_disciplina, disciplina, frequencia, situacao
-                ) VALUES (?, ?, ?, ?, ?)
+                    aluno_curso_id, codigo_disciplina, disciplina,
+                    frequencia, situacao, data_trancamento
+                ) VALUES (?, ?, ?, ?, ?, ?)
                 """,
                 (
                     aluno_curso_id,
@@ -621,6 +644,7 @@ def inserir_registros(
                     str(disc.get("disciplina") or ""),
                     float(pct) if pct is not None else None,
                     situacao,
+                    data_trancamento,
                 ),
             )
 

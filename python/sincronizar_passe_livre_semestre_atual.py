@@ -67,6 +67,10 @@ def normalizar_registros(linhas: list[dict[str, Any]]) -> list[dict[str, Any]]:
                     "situacao": (
                         str(disc.get("situacao") or "").strip() or None
                     ),
+                    "data_trancamento": (
+                        str(disc.get("data_trancamento") or "").strip()
+                        or None
+                    ),
                 })
         saida.append({
             "login": login,

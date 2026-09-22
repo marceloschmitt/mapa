@@ -222,6 +222,7 @@ $dataExtenso = static function (): string {
                                             'nome' => (string)($d['disciplina'] ?? ''),
                                             'frequencia' => $d['frequencia'],
                                             'situacao' => (string)($d['situacao'] ?? ''),
+                                            'data_trancamento' => (string)($d['data_trancamento'] ?? ''),
                                         ];
                                     },
                                     $disciplinas
@@ -303,10 +304,7 @@ $dataExtenso = static function (): string {
                             <span id="modalPasseLivreAno" class="atestado-numero-vazio"></span>
                         </p>
 
-                        <div class="small mb-4 d-flex justify-content-between align-items-start gap-3 flex-wrap">
-                            <div id="modalPasseLivreProtocolo">Nº do Protocolo: PROTOCOLO INDEFINIDO</div>
-                            <div id="modalPasseLivreData" class="text-end ms-auto"><?= htmlspecialchars($dataExtenso(), ENT_QUOTES, 'UTF-8') ?></div>
-                        </div>
+                        <div class="small mb-4 text-end" id="modalPasseLivreData"><?= htmlspecialchars($dataExtenso(), ENT_QUOTES, 'UTF-8') ?></div>
 
                         <p class="small text-justify mb-4" id="modalPasseLivreTexto"></p>
 
@@ -326,11 +324,6 @@ $dataExtenso = static function (): string {
 
                         <p class="small text-secondary mb-3">
                             * A frequência é o percentual de presença em relação ao número de aulas ministradas.
-                        </p>
-
-                        <p class="small fw-semibold mb-0">
-                            Frequência* global no curso:
-                            <span id="modalPasseLivreGeral"></span>
                         </p>
 
                         <p class="small text-justify mt-3 mb-0 d-none" id="modalPasseLivreConferencia"></p>
@@ -432,7 +425,6 @@ $dataExtenso = static function (): string {
         }
 
         const texto = document.getElementById('modalPasseLivreTexto');
-        const geral = document.getElementById('modalPasseLivreGeral');
         const assinaturaData = document.getElementById('modalPasseLivreAssinaturaData');
         const tbody = document.getElementById('modalPasseLivreDisciplinas');
         const pdfLink = document.getElementById('modalPasseLivrePdf');
@@ -440,7 +432,6 @@ $dataExtenso = static function (): string {
         const podeAssinar = <?= $podeAssinarPasseLivre ? 'true' : 'false' ?>;
         const elNumero = document.getElementById('modalPasseLivreNumero');
         const elAno = document.getElementById('modalPasseLivreAno');
-        const elProtocolo = document.getElementById('modalPasseLivreProtocolo');
         const elData = document.getElementById('modalPasseLivreData');
         const elConferencia = document.getElementById('modalPasseLivreConferencia');
         const pdfBase = <?= json_encode(url('/passe-livre/pdf'), JSON_UNESCAPED_UNICODE) ?>;
@@ -458,12 +449,16 @@ $dataExtenso = static function (): string {
             }) + '%';
         }
 
-        function fmtFreqDisc(d) {
+        function fmtFreqDiscHtml(d) {
             const sit = String((d && d.situacao) || '').trim();
             if (sit !== '') {
-                return sit;
+                const data = String((d && d.data_trancamento) || '').trim();
+                if (data !== '') {
+                    return escapeHtml(sit) + '<br>' + escapeHtml(data);
+                }
+                return escapeHtml(sit);
             }
-            return fmtPct(d && d.frequencia);
+            return escapeHtml(fmtPct(d && d.frequencia));
         }
 
         function escapeHtml(texto) {
@@ -487,7 +482,6 @@ $dataExtenso = static function (): string {
             elAno.classList.add('atestado-numero-vazio');
             elNumero.classList.remove('preenchido');
             elAno.classList.remove('preenchido');
-            elProtocolo.textContent = 'Nº do Protocolo: PROTOCOLO INDEFINIDO';
             elData.textContent = dataHoje;
             elConferencia.classList.add('d-none');
             elConferencia.textContent = '';
@@ -512,7 +506,6 @@ $dataExtenso = static function (): string {
             elAno.textContent = String(atestado.ano);
             elNumero.classList.add('preenchido');
             elAno.classList.add('preenchido');
-            elProtocolo.textContent = 'Nº do Protocolo: ' + atestado.numero_formatado;
             elData.textContent = atestado.data_documento || dataHoje;
             assinaturaData.textContent = '(Assinado digitalmente em '
                 + (atestado.assinado_em_fmt || atestado.assinado_em || '')
@@ -563,8 +556,6 @@ $dataExtenso = static function (): string {
                 + periodo
                 + ', a frequência abaixo discriminada:';
 
-            geral.textContent = fmtPct(dados.frequencia);
-
             tbody.innerHTML = '';
             const discs = Array.isArray(dados.disciplinas) ? dados.disciplinas : [];
             discs.forEach(function (d) {
@@ -575,7 +566,7 @@ $dataExtenso = static function (): string {
                         ? '<code>' + escapeHtml(d.codigo) + '</code>'
                         : '<span class="text-secondary">—</span>') + '</td>' +
                     '<td>' + escapeHtml(d.nome || '') + '</td>' +
-                    '<td class="text-end">' + escapeHtml(fmtFreqDisc(d)) + '</td>';
+                    '<td class="text-end">' + fmtFreqDiscHtml(d) + '</td>';
                 tbody.appendChild(tr);
             });
 

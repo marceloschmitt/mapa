@@ -207,7 +207,7 @@ class PasseLivreAtestadoRepository
 
     /**
      * @param list<array<string, mixed>> $disciplinas
-     * @return list<array{codigo: string, nome: string, frequencia: float|null}>
+     * @return list<array{codigo: string, nome: string, frequencia: float|null, situacao: string, data_trancamento: string}>
      */
     private function snapshotDisciplinas(array $disciplinas): array
     {
@@ -216,10 +216,19 @@ class PasseLivreAtestadoRepository
             $codigo = trim((string)($disc['codigo_disciplina'] ?? $disc['codigo'] ?? ''));
             $nome = trim((string)($disc['disciplina'] ?? $disc['nome'] ?? ''));
             $freq = $disc['frequencia'] ?? null;
+            $situacao = trim((string)($disc['situacao'] ?? ''));
+            $dataTranc = trim((string)($disc['data_trancamento'] ?? ''));
+            if ($situacao !== '') {
+                $freq = null;
+            } else {
+                $dataTranc = '';
+            }
             $saida[] = [
                 'codigo' => $codigo,
                 'nome' => $nome,
                 'frequencia' => is_numeric($freq) ? (float)$freq : null,
+                'situacao' => $situacao,
+                'data_trancamento' => $dataTranc,
             ];
         }
 
@@ -271,10 +280,14 @@ class PasseLivreAtestadoRepository
                         continue;
                     }
                     $freqDisc = $item['frequencia'] ?? null;
+                    $situacao = trim((string)($item['situacao'] ?? ''));
+                    $dataTranc = trim((string)($item['data_trancamento'] ?? ''));
                     $disciplinas[] = [
                         'codigo' => (string)($item['codigo'] ?? ''),
                         'nome' => (string)($item['nome'] ?? ''),
                         'frequencia' => is_numeric($freqDisc) ? (float)$freqDisc : null,
+                        'situacao' => $situacao,
+                        'data_trancamento' => $dataTranc,
                     ];
                 }
             }
