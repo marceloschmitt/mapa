@@ -1687,6 +1687,66 @@ class AnalyticsRepository
     }
 
     /**
+     * Disciplinas trancadas/canceladas na coleta (ausencias_especiais).
+     *
+     * @param list<int>|null $cursoIds
+     * @param list<string>|null $codigosDisciplina
+     * @return list<array<string, mixed>>
+     */
+    public function disciplinasTrancadas(
+        int $coletaId,
+        ?array $cursoIds = null,
+        ?array $codigosDisciplina = null
+    ): array {
+        $sql = 'SELECT fd.aluno_id, fd.curso_id, fd.codigo_disciplina, fd.disciplina,
+                       fd.situacao, fd.data_trancamento,
+                       a.login, a.matricula, a.nome, a.nome_social, a.email,
+                       c.nome_curso
+                FROM frequencia_disciplina fd
+                INNER JOIN alunos a ON a.id = fd.aluno_id
+                INNER JOIN cursos c ON c.id = fd.curso_id
+                WHERE fd.coleta_id = :coleta_id
+                  AND fd.situacao IS NOT NULL
+                  AND TRIM(fd.situacao) != \'\'';
+        $params = [];
+
+        if ($cursoIds !== null) {
+            if ($cursoIds === []) {
+                return [];
+            }
+            $placeholders = [];
+            foreach (array_values($cursoIds) as $i => $id) {
+                $key = 'curso_' . $i;
+                $placeholders[] = ':' . $key;
+                $params[$key] = (int)$id;
+            }
+            $sql .= ' AND fd.curso_id IN (' . implode(', ', $placeholders) . ')';
+        }
+
+        if ($codigosDisciplina !== null) {
+            if ($codigosDisciplina === []) {
+                return [];
+            }
+            $placeholders = [];
+            foreach (array_values($codigosDisciplina) as $i => $codigo) {
+                $key = 'disc_' . $i;
+                $placeholders[] = ':' . $key;
+                $params[$key] = (string)$codigo;
+            }
+            $sql .= ' AND fd.codigo_disciplina IN (' . implode(', ', $placeholders) . ')';
+        }
+
+        $sql .= ' ORDER BY c.nome_curso ASC, a.nome ASC, fd.disciplina ASC, fd.codigo_disciplina ASC';
+
+        $statement = $this->db->prepare($sql);
+        $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $this->bindNamedParams($statement, $params);
+        $statement->execute();
+
+        return $statement->fetchAll();
+    }
+
+    /**
      * Ultima execucao do script de perda de vaga (manual).
      *
      * @return array<string, mixed>|null

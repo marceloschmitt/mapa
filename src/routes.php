@@ -17,6 +17,7 @@ use Mapa\Controllers\FrequenciaAnualController;
 use Mapa\Controllers\IngressantesController;
 use Mapa\Controllers\LdapConfigController;
 use Mapa\Controllers\TrancadosController;
+use Mapa\Controllers\DisciplinasTrancadasController;
 use Mapa\Controllers\PerdaVagaController;
 use Mapa\Controllers\PasseLivreController;
 use Mapa\Controllers\UserController;
@@ -39,6 +40,7 @@ return static function (Router $router): void {
     $router->post('/alarmes/enviar-email', [AlarmeController::class, 'enviarEmail']);
     $router->get('/ingressantes', [IngressantesController::class, 'index']);
     $router->get('/trancados', [TrancadosController::class, 'index']);
+    $router->get('/disciplinas-trancadas', [DisciplinasTrancadasController::class, 'index']);
     $router->get('/perda-vaga', [PerdaVagaController::class, 'index']);
     $router->get('/passe-livre', [PasseLivreController::class, 'index']);
     $router->post('/passe-livre/gerar', [PasseLivreController::class, 'gerar']);

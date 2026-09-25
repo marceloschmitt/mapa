@@ -73,6 +73,19 @@ $semanasConsecutivas = (int)($alarmeConfig['faltas_semanas_total'] ?? 3);
             </div>
         </a>
     </div>
+    <div class="col-md-4">
+        <a href="<?= htmlspecialchars(url('/disciplinas-trancadas'), ENT_QUOTES, 'UTF-8') ?>" class="text-decoration-none">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h2 class="h5">Disciplinas trancadas</h2>
+                    <p class="text-secondary mb-0 small">
+                        Disciplinas com trancamento/cancelamento na coleta, com data —
+                        sem percentual nem alarmes.
+                    </p>
+                </div>
+            </div>
+        </a>
+    </div>
     <?php if (!empty($podeVerChamadas)): ?>
         <div class="col-md-4">
             <a href="<?= htmlspecialchars(url('/chamadas'), ENT_QUOTES, 'UTF-8') ?>" class="text-decoration-none">

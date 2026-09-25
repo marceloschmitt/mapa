@@ -221,6 +221,19 @@ def trazer_alarmes_tratados(cursor: Any, coleta_id: int) -> int:
                 AND fc.aluno_id = a.aluno_id
                 AND fc.curso_id = a.curso_id
           )
+          AND (
+              TRIM(COALESCE(a.codigo_disciplina, '')) = ''
+              OR NOT EXISTS (
+                  SELECT 1
+                  FROM frequencia_disciplina fd
+                  WHERE fd.coleta_id = ?
+                    AND fd.aluno_id = a.aluno_id
+                    AND fd.curso_id = a.curso_id
+                    AND fd.codigo_disciplina = a.codigo_disciplina
+                    AND fd.situacao IS NOT NULL
+                    AND TRIM(fd.situacao) != ''
+              )
+          )
         ON CONFLICT(coleta_id, aluno_id, curso_id, codigo_disciplina, tipo)
         DO UPDATE SET
             severidade = excluded.severidade,
@@ -233,7 +246,7 @@ def trazer_alarmes_tratados(cursor: Any, coleta_id: int) -> int:
             contato_tipo = excluded.contato_tipo,
             gerado_em = excluded.gerado_em
         """,
-        (coleta_id, anterior, coleta_id),
+        (coleta_id, anterior, coleta_id, coleta_id),
     )
     return int(cursor.rowcount or 0)
 
@@ -388,6 +401,7 @@ def gerar_percentual_baixo(
          AND fc.aluno_id = fd.aluno_id
          AND fc.curso_id = fd.curso_id
         WHERE fd.coleta_id = ?
+          AND (fd.situacao IS NULL OR TRIM(fd.situacao) = '')
           AND fd.percentual_frequencia IS NOT NULL
           AND fd.percentual_frequencia < ?
           AND fd.horarios > 0
@@ -453,6 +467,9 @@ def gerar_percentual_baixo(
 def carregar_faltas_por_aluno(cursor: Any, coleta_id: int) -> dict[tuple[int, int], list[date]]:
     """Agrupa datas de falta por (aluno_id, curso_id).
 
+    Ignora faltas de disciplinas com situacao (trancadas/canceladas), para
+    nao gerar o alarme geral de dias uteis com base nelas.
+
     Args:
         cursor: Cursor SQLite.
         coleta_id: Coleta.
@@ -462,10 +479,16 @@ def carregar_faltas_por_aluno(cursor: Any, coleta_id: int) -> dict[tuple[int, in
     """
     cursor.execute(
         """
-        SELECT aluno_id, curso_id, data_falta
-        FROM faltas_dia
-        WHERE coleta_id = ?
-        ORDER BY aluno_id, curso_id, data_falta
+        SELECT fd.aluno_id, fd.curso_id, fd.data_falta
+        FROM faltas_dia fd
+        LEFT JOIN frequencia_disciplina f
+          ON f.coleta_id = fd.coleta_id
+         AND f.aluno_id = fd.aluno_id
+         AND f.curso_id = fd.curso_id
+         AND f.codigo_disciplina = fd.codigo_disciplina
+        WHERE fd.coleta_id = ?
+          AND (f.situacao IS NULL OR TRIM(COALESCE(f.situacao, '')) = '')
+        ORDER BY fd.aluno_id, fd.curso_id, fd.data_falta
         """,
         (coleta_id,),
     )
@@ -505,6 +528,7 @@ def carregar_faltas_disciplina(
          AND f.curso_id = fd.curso_id
          AND f.codigo_disciplina = fd.codigo_disciplina
         WHERE fd.coleta_id = ?
+          AND (f.situacao IS NULL OR TRIM(COALESCE(f.situacao, '')) = '')
         ORDER BY fd.aluno_id, fd.curso_id, fd.codigo_disciplina, fd.data_falta
         """,
         (coleta_id,),

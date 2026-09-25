@@ -23,6 +23,7 @@ class AccessLogRepository
         '/alarmes/enviar-email' => 'Alarmes — enviar e-mail',
         '/ingressantes' => 'Ingressantes',
         '/trancados' => 'Trancados',
+        '/disciplinas-trancadas' => 'Disciplinas trancadas',
         '/perda-vaga' => 'Perda de vaga',
         '/passe-livre' => 'Passe livre',
         '/passe-livre/gerar' => 'Passe livre — gerar',

@@ -80,6 +80,9 @@ $authLocal = ($usuario['auth_type'] ?? 'local') === 'local';
                 <li class="nav-item">
                     <a class="nav-link" href="<?= htmlspecialchars(url('/trancados'), ENT_QUOTES, 'UTF-8') ?>">Trancados</a>
                 </li>
+                <li class="nav-item">
+                    <a class="nav-link" href="<?= htmlspecialchars(url('/disciplinas-trancadas'), ENT_QUOTES, 'UTF-8') ?>">Disc. trancadas</a>
+                </li>
                 <li class="nav-item dropdown">
                     <a class="nav-link dropdown-toggle" href="#" id="navOutrosRelatorios" role="button"
                        data-bs-toggle="dropdown" aria-expanded="false">

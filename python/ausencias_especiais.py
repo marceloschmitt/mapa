@@ -112,6 +112,7 @@ def aplicar_situacao_trancamento(
             saida.append({
                 **disc,
                 "percentual_frequencia": None,
+                "dias_falta": [],
                 "situacao": SITUACAO_TRANCADO_CANCELADO,
                 "data_trancamento": datas.get(codigo),
             })
@@ -133,6 +134,7 @@ def aplicar_situacao_trancamento(
             "ausencias": 0,
             "presencas": 0,
             "percentual_frequencia": None,
+            "dias_falta": [],
             "situacao": SITUACAO_TRANCADO_CANCELADO,
             "data_trancamento": datas.get(codigo),
         })

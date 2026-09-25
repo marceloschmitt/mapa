@@ -199,22 +199,33 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
                 continue
 
             nome_disc = str(disciplina.get("disciplina", "")).strip()
+            situacao = str(disciplina.get("situacao") or "").strip() or None
+            data_trancamento = (
+                str(disciplina.get("data_trancamento") or "").strip() or None
+            )
             percentual = disciplina.get("percentual_frequencia")
+            if situacao:
+                percentual = None
+            else:
+                data_trancamento = None
 
             cursor.execute(
                 """
                 INSERT INTO frequencia_disciplina (
                     coleta_id, aluno_id, curso_id,
                     codigo_disciplina, disciplina,
-                    horarios, ausencias, presencas, percentual_frequencia
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    horarios, ausencias, presencas, percentual_frequencia,
+                    situacao, data_trancamento
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(coleta_id, aluno_id, curso_id, codigo_disciplina)
                 DO UPDATE SET
                     disciplina = excluded.disciplina,
                     horarios = excluded.horarios,
                     ausencias = excluded.ausencias,
                     presencas = excluded.presencas,
-                    percentual_frequencia = excluded.percentual_frequencia
+                    percentual_frequencia = excluded.percentual_frequencia,
+                    situacao = excluded.situacao,
+                    data_trancamento = excluded.data_trancamento
                 """,
                 (
                     coleta_id,
@@ -226,9 +237,15 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
                     int(disciplina.get("ausencias") or 0),
                     int(disciplina.get("presencas") or 0),
                     float(percentual) if percentual is not None else None,
+                    situacao,
+                    data_trancamento,
                 ),
             )
             total_disciplinas += 1
+
+            # Disciplina trancada: sem faltas nem alarmes derivados delas.
+            if situacao:
+                continue
 
             dias = disciplina.get("dias_falta", [])
             if not isinstance(dias, list):

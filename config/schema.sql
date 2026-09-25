@@ -167,6 +167,8 @@ CREATE TABLE IF NOT EXISTS frequencia_disciplina (
     ausencias INTEGER NOT NULL DEFAULT 0,
     presencas INTEGER NOT NULL DEFAULT 0,
     percentual_frequencia REAL,
+    situacao TEXT,
+    data_trancamento TEXT,
     FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE CASCADE,
     FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
