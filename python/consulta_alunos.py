@@ -30,16 +30,13 @@ from api_auth import (
 )
 from db import fechar
 from paths import (
+    DIR_JSON,
     JSON_ERROS_ALUNOS,
     JSON_RESPOSTA_ALUNOS,
     JSON_RESPOSTA_MATRICULAS,
     garantir_diretorios,
 )
-from status_aluno import (
-    status_eh_controle,
-    status_eh_trancado,
-    status_vai_segunda_consulta,
-)
+from status_aluno import status_eh_controle, status_eh_trancado
 
 # Arquivos em data/json/
 ARQUIVO_ENTRADA = JSON_RESPOSTA_MATRICULAS
@@ -118,26 +115,22 @@ def montar_url_alunos(login: str) -> str:
     ).format(login=login)
 
 
-def carregar_logins(caminho: Path) -> tuple[list[dict[str, Any]], dict[str, int]]:
-    """Le matriculados e seleciona quem vai à 2ª consulta.
+def _peso_status(status: str) -> int:
+    """Prioridade do vínculo na hora de escolher os metadados do login."""
+    if status_eh_controle(status):
+        return 2
+    if status_eh_trancado(status):
+        return 1
+    return 0
 
-    Inclui ATIVO, FORMANDO e trancados da 1ª consulta (um login por pessoa).
-    Cancelados, concluídos etc. da 1ª não são consultados de novo.
+
+def _registros_matriculas(caminho: Path) -> list[dict[str, Any]]:
+    """Normaliza o JSON de matriculados em lista de registros.
 
     Aceita:
       - lista plana (extracao Nome/Login/Matricula/Email);
       - dicionario paginado com chave 'data';
       - mapa completo matricula -> registro (com disciplinas/docentes).
-
-    Args:
-        caminho: Caminho do arquivo JSON gerado por consulta_inicial.py.
-
-    Returns:
-        Tupla (lista normalizada Login/Nome/Matricula/Email, contagens).
-
-    Raises:
-        FileNotFoundError: Quando o arquivo de entrada nao existe.
-        ValueError: Quando o conteudo nao e uma lista de alunos valida.
     """
     dados = json.loads(caminho.read_text(encoding="utf-8"))
 
@@ -149,54 +142,98 @@ def carregar_logins(caminho: Path) -> tuple[list[dict[str, Any]], dict[str, int]
     if not isinstance(dados, list):
         raise ValueError("Formato inesperado: esperava lista ou mapa de alunos.")
 
+    return [a for a in dados if isinstance(a, dict)]
+
+
+def arquivos_matriculas() -> list[Path]:
+    """Matriculados a considerar: periodo corrente + anteriores em cache.
+
+    consulta_inicial.py grava resposta_matriculas_AAAA_S.json para cada semestre
+    retroativo. O corrente vem primeiro: em empate de relevancia, os metadados
+    do vinculo mais recente prevalecem.
+    """
+    anteriores = sorted(
+        DIR_JSON.glob("resposta_matriculas_*.json"),
+        key=lambda p: p.name,
+        reverse=True,
+    )
+    return [ARQUIVO_ENTRADA, *anteriores]
+
+
+def carregar_logins(caminhos: list[Path]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Une os matriculados dos periodos e monta a lista da 2ª consulta.
+
+    Todos os logins são consultados, qualquer que seja o status. O status da 1ª
+    é só o do vínculo naquele período: a 2ª consulta devolve todos os cursos da
+    pessoa, com o status atual, e é ela que revela trancamentos. Filtrar aqui
+    escondia quem trancou o único vínculo que tinha; olhar só o período corrente
+    escondia quem trancou antes (o TRANC. AUTOMÁTICO só sai no fim do semestre).
+    O recorte de frequência (ATIVO/FORMANDO) continua em analisar_frequencia.py.
+
+    Args:
+        caminhos: JSONs de matriculados, do periodo mais recente ao mais antigo.
+
+    Returns:
+        Tupla (lista normalizada Login/Nome/Matricula/Email, contagens).
+
+    Raises:
+        FileNotFoundError: Quando o arquivo do periodo corrente nao existe.
+        ValueError: Quando o conteudo nao e uma lista de alunos valida.
+    """
     por_login: dict[str, dict[str, Any]] = {}
     total_entrada = 0
-    elegiveis = 0
-    ignorados = 0
+    sem_login = 0
+    por_arquivo: dict[str, int] = {}
 
-    for aluno in dados:
-        if not isinstance(aluno, dict):
-            continue
-        total_entrada += 1
-        status = str(aluno.get("status") or aluno.get("Status") or "").strip()
-        if not status_vai_segunda_consulta(status):
-            ignorados += 1
-            continue
-
-        login = str(aluno.get("Login") or aluno.get("login") or "").strip()
-        if login == "":
-            ignorados += 1
+    for indice, caminho in enumerate(caminhos):
+        try:
+            dados = _registros_matriculas(caminho)
+        except FileNotFoundError:
+            if indice == 0:
+                raise
             continue
 
-        elegiveis += 1
-        nome = (
-            aluno.get("Nome")
-            or aluno.get("nome_completo")
-            or aluno.get("nome")
-            or ""
-        )
-        matricula = aluno.get("Matricula") or aluno.get("matricula") or ""
-        email = aluno.get("Email") or aluno.get("email") or ""
-        novo = {
-            "Login": login,
-            "Nome": nome,
-            "Matricula": matricula,
-            "Email": email,
-            "Status": status,
-        }
-        atual = por_login.get(login)
-        # Preferir vínculo de controle se o mesmo login também vier trancado.
-        if atual is None or (
-            status_eh_controle(status)
-            and status_eh_trancado(str(atual.get("Status") or ""))
-        ):
-            por_login[login] = novo
+        antes = len(por_login)
+        for aluno in dados:
+            total_entrada += 1
+            status = str(aluno.get("status") or aluno.get("Status") or "").strip()
+
+            login = str(aluno.get("Login") or aluno.get("login") or "").strip()
+            if login == "":
+                sem_login += 1
+                continue
+
+            nome = (
+                aluno.get("Nome")
+                or aluno.get("nome_completo")
+                or aluno.get("nome")
+                or ""
+            )
+            matricula = aluno.get("Matricula") or aluno.get("matricula") or ""
+            email = aluno.get("Email") or aluno.get("email") or ""
+            novo = {
+                "Login": login,
+                "Nome": nome,
+                "Matricula": matricula,
+                "Email": email,
+                "Status": status,
+            }
+            atual = por_login.get(login)
+            # Metadados (nome/matrícula/e-mail) do vínculo mais relevante:
+            # ATIVO/FORMANDO na frente, depois trancado, depois o resto. Em
+            # empate fica o primeiro visto, ou seja, o do período mais recente.
+            if atual is None or _peso_status(status) > _peso_status(
+                str(atual.get("Status") or "")
+            ):
+                por_login[login] = novo
+
+        por_arquivo[caminho.name] = len(por_login) - antes
 
     contagens = {
         "entrada": total_entrada,
-        "elegiveis": elegiveis,
-        "ignorados": ignorados,
+        "sem_login": sem_login,
         "consultas": len(por_login),
+        "por_arquivo": por_arquivo,
     }
     return list(por_login.values()), contagens
 
@@ -347,7 +384,7 @@ def main() -> int:
         return 1
 
     try:
-        alunos, contagens = carregar_logins(ARQUIVO_ENTRADA)
+        alunos, contagens = carregar_logins(arquivos_matriculas())
     except FileNotFoundError:
         print(f"Erro: arquivo nao encontrado: {ARQUIVO_ENTRADA}", file=sys.stderr)
         print("Rode antes: python3 consulta_inicial.py", file=sys.stderr)
@@ -356,12 +393,13 @@ def main() -> int:
         print(f"Erro ao ler entrada: {error}", file=sys.stderr)
         return 1
 
+    print("Matriculados considerados (todos os status, todos os periodos):")
+    for nome_arquivo, novos in contagens["por_arquivo"].items():
+        print(f"  {nome_arquivo}: +{novos} login(s) inéditos")
     print(
-        "Filtro 1ª→2ª consulta (ATIVO, FORMANDO, trancados): "
-        f"{contagens['entrada']} na 1ª, "
-        f"{contagens['elegiveis']} elegíveis, "
-        f"{contagens['ignorados']} ignorados, "
-        f"{contagens['consultas']} login(s) únicos."
+        f"{contagens['entrada']} registro(s) lidos, "
+        f"{contagens['sem_login']} sem login, "
+        f"{contagens['consultas']} login(s) únicos a consultar."
     )
 
     if LIMITE_CONSULTAS is not None:

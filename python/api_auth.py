@@ -115,12 +115,17 @@ def ssl_context(config: dict[str, str] | None = None):
 def url_matriculados(
     config: dict[str, str] | None = None,
     periodo: str | None = None,
+    matriculado: str | None = None,
 ) -> str:
     """URL de matriculados com periodo_letivo aplicado na execucao.
 
     Args:
         config: Config da API (banco). Se None, le do SQLite.
         periodo: Se informado, usa este periodo em vez de api_periodo_letivo.
+        matriculado: 'sim' ou 'nao' para sobrepor o parametro da URL gravada.
+            None mantem o que estiver configurado (a API trata a ausencia
+            como 'sim'). Com 'nao' a API exige periodo_letivo: sem ele
+            devolve HTTP 500.
     """
     import re
 
@@ -134,9 +139,17 @@ def url_matriculados(
     # URL base nao deve trazer periodo; remove se ainda estiver gravado.
     url = url.replace("{periodo_letivo}", "")
     url = re.sub(r"([?&])periodo_letivo=[^&]*", r"\1", url)
+
+    if matriculado is not None:
+        url = re.sub(r"([?&])matriculado=[^&]*", r"\1", url)
+
     url = re.sub(r"\?&+", "?", url)
     url = re.sub(r"&&+", "&", url)
     url = re.sub(r"[?&]$", "", url)
+
+    if matriculado is not None:
+        sep = "&" if "?" in url else "?"
+        url = f"{url}{sep}matriculado={matriculado}"
 
     periodo_final = (periodo if periodo is not None else config.get("api_periodo_letivo") or "").strip()
     if not periodo_final:
