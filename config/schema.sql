@@ -449,11 +449,11 @@ CREATE TABLE IF NOT EXISTS feriados (
 CREATE INDEX IF NOT EXISTS idx_feriados_data
     ON feriados(data);
 
--- Atestados de passe livre assinados (numero sequencial unico; data congelada).
+-- Atestados de passe livre assinados (numero sequencial unico no ano; data congelada).
 CREATE TABLE IF NOT EXISTS passe_livre_atestados (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     passe_livre_aluno_curso_id INTEGER UNIQUE,
-    numero INTEGER NOT NULL UNIQUE,
+    numero INTEGER NOT NULL,
     ano INTEGER NOT NULL,
     data_documento TEXT NOT NULL,
     assinado_em TEXT NOT NULL,
@@ -465,13 +465,11 @@ CREATE TABLE IF NOT EXISTS passe_livre_atestados (
     periodo TEXT NOT NULL DEFAULT '',
     frequencia_geral REAL,
     disciplinas_json TEXT NOT NULL DEFAULT '[]',
+    UNIQUE (ano, numero),
     FOREIGN KEY (passe_livre_aluno_curso_id) REFERENCES passe_livre_aluno_curso(id) ON DELETE SET NULL,
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
 );
 
 CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_codigo
     ON passe_livre_atestados(codigo_verificacao);
-
-CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_ano_numero
-    ON passe_livre_atestados(ano, numero);
 

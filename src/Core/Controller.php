@@ -81,6 +81,12 @@ abstract class Controller
 
     protected function resolverPython3(): string
     {
+        // No macOS, /usr/bin/python3 e um atalho do xcrun que falha quando o PHP roda como x86_64.
+        $configurado = trim(Env::get('PYTHON_BIN', ''));
+        if ($configurado !== '') {
+            return $configurado;
+        }
+
         foreach (['/usr/bin/python3', '/usr/local/bin/python3'] as $caminho) {
             if (is_executable($caminho)) {
                 return $caminho;

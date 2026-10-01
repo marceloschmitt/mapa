@@ -40,6 +40,7 @@ class PasseLivreController extends Controller
         $cursoSelecionado = $this->cursoSelecionado($cursosDisponiveis);
         $escopo = $this->resolverEscopo($repo, $cursoSelecionado);
         $filtroNome = $this->filtroNome();
+        $filtroAtestado = $this->filtroAtestado();
 
         $linhas = [];
         $disciplinasPorLinha = [];
@@ -52,12 +53,21 @@ class PasseLivreController extends Controller
                 $filtroNome,
                 $semestreSelecionado
             );
-            $ids = array_map(
+            $atestadosPorLinha = (new PasseLivreAtestadoRepository())->mapearPorAlunoCursoIds(array_map(
                 static fn(array $l): int => (int)$l['id'],
                 $linhas
-            );
-            $disciplinasPorLinha = $repo->disciplinasPasseLivre($ids);
-            $atestadosPorLinha = (new PasseLivreAtestadoRepository())->mapearPorAlunoCursoIds($ids);
+            ));
+            if ($filtroAtestado !== 'todos') {
+                $querEmitidos = $filtroAtestado === 'emitidos';
+                $linhas = array_values(array_filter(
+                    $linhas,
+                    static fn(array $l): bool => isset($atestadosPorLinha[(int)$l['id']]) === $querEmitidos
+                ));
+            }
+            $disciplinasPorLinha = $repo->disciplinasPasseLivre(array_map(
+                static fn(array $l): int => (int)$l['id'],
+                $linhas
+            ));
         }
 
         $erro = Session::flash('erro');
@@ -82,6 +92,7 @@ class PasseLivreController extends Controller
             'cursoSelecionado' => $cursoSelecionado,
             'cursoExibido' => $escopo['cursoExibido'],
             'filtroNome' => $filtroNome,
+            'filtroAtestado' => $filtroAtestado,
             'rotuloGeral' => 'Todos os cursos',
             'semSeletorCurso' => false,
             'avisoCoordenador' => null,
@@ -420,6 +431,14 @@ class PasseLivreController extends Controller
         }
 
         return substr($nome, 0, 120);
+    }
+
+    /** @return 'todos'|'emitidos'|'nao_emitidos' */
+    private function filtroAtestado(): string
+    {
+        $param = isset($_GET['atestado']) ? trim((string)$_GET['atestado']) : '';
+
+        return in_array($param, ['emitidos', 'nao_emitidos'], true) ? $param : 'todos';
     }
 
     /**

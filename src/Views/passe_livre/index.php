@@ -7,6 +7,7 @@ $semSeletorCurso = !empty($semSeletorCurso);
 $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
 $cursosDisponiveis = $cursosDisponiveis ?? [];
 $filtroNome = (string)($filtroNome ?? '');
+$filtroAtestado = (string)($filtroAtestado ?? 'todos');
 $meta = $meta ?? null;
 $periodosDisponiveis = $periodosDisponiveis ?? [];
 $semestreSelecionado = (string)($semestreSelecionado ?? '');
@@ -127,8 +128,18 @@ $dataExtenso = static function (): string {
                         </select>
                     </div>
                 <?php endif; ?>
+                <div>
+                    <label for="atestado" class="form-label mb-0 small text-secondary">Atestado</label>
+                    <select class="form-select" id="atestado" name="atestado" style="min-width: 150px;"
+                            onchange="this.form.submit()">
+                        <option value="todos" <?= $filtroAtestado === 'todos' ? 'selected' : '' ?>>Todos</option>
+                        <option value="emitidos" <?= $filtroAtestado === 'emitidos' ? 'selected' : '' ?>>Emitidos</option>
+                        <option value="nao_emitidos" <?= $filtroAtestado === 'nao_emitidos' ? 'selected' : '' ?>>Não emitidos</option>
+                    </select>
+                </div>
                 <?php
                 $temFiltroExtra = $filtroNome !== ''
+                    || $filtroAtestado !== 'todos'
                     || (!$semSeletorCurso && $cursoSelecionado !== 'todos');
                 if ($temFiltroExtra):
                     $urlLimpar = url('/passe-livre');
@@ -177,6 +188,10 @@ $dataExtenso = static function (): string {
         <div class="card-body text-secondary">
             <?php if ($filtroNome !== ''): ?>
                 Nenhum aluno encontrado para “<?= htmlspecialchars($filtroNome, ENT_QUOTES, 'UTF-8') ?>”.
+            <?php elseif ($filtroAtestado === 'emitidos'): ?>
+                Nenhum atestado emitido com os filtros selecionados.
+            <?php elseif ($filtroAtestado === 'nao_emitidos'): ?>
+                Todos os alunos com os filtros selecionados já têm atestado emitido.
             <?php else: ?>
                 Nenhum aluno com frequência neste semestre.
             <?php endif; ?>
@@ -245,6 +260,9 @@ $dataExtenso = static function (): string {
                                     'link_conferencia' => $linkConferenciaBase . $sep . 'c=' . rawurlencode($codigo),
                                 ];
                             }
+                            $numerosAnteriores = is_array($atestado)
+                                ? array_column($atestado['anteriores'] ?? [], 'numero_formatado')
+                                : [];
                             $json = htmlspecialchars(
                                 (string)json_encode($payload, JSON_UNESCAPED_UNICODE),
                                 ENT_QUOTES,
@@ -258,7 +276,18 @@ $dataExtenso = static function (): string {
                                 data-passe-livre="<?= $json ?>"
                                 <?php if (is_array($atestado)): ?>title="Assinado"<?php endif; ?>>
                                 <td class="text-end text-secondary pe-1"><?= $i + 1 ?></td>
-                                <td class="fw-semibold"><?= htmlspecialchars($nome, ENT_QUOTES, 'UTF-8') ?></td>
+                                <td class="fw-semibold">
+                                    <?= htmlspecialchars($nome, ENT_QUOTES, 'UTF-8') ?>
+                                    <span class="badge text-bg-success fw-normal ms-1 numero-atestado-linha"<?= is_array($atestado) ? '' : ' hidden' ?>>
+                                        <?= is_array($atestado) ? 'Nº ' . htmlspecialchars((string)$atestado['numero_formatado'], ENT_QUOTES, 'UTF-8') : '' ?>
+                                    </span>
+                                    <span class="badge text-bg-light border text-secondary fw-normal ms-1 numeros-anteriores-linha"
+                                          data-numeros="<?= htmlspecialchars(implode(',', $numerosAnteriores), ENT_QUOTES, 'UTF-8') ?>"
+                                          title="Números anteriores deste aluno no semestre, ainda válidos na conferência"<?= $numerosAnteriores === [] ? ' hidden' : '' ?>>
+                                        <?= (count($numerosAnteriores) > 1 ? 'anteriores: Nº ' : 'anterior: Nº ')
+                                            . htmlspecialchars(implode(', ', $numerosAnteriores), ENT_QUOTES, 'UTF-8') ?>
+                                    </span>
+                                </td>
                                 <td><?= htmlspecialchars((string)($linha['matricula'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
                                 <td><?= htmlspecialchars((string)($linha['nome_curso'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
                                 <td class="text-end">
@@ -626,6 +655,23 @@ $dataExtenso = static function (): string {
                     } catch (e) {}
                     linha.classList.add('is-assinado');
                     linha.setAttribute('title', 'Assinado');
+                    const badge = linha.querySelector('.numero-atestado-linha');
+                    const numeroNovo = resultado.json.atestado.numero_formatado
+                        || (resultado.json.atestado.numero + '/' + resultado.json.atestado.ano);
+                    if (badge) {
+                        const numeroAntigo = badge.hidden ? '' : badge.textContent.trim().replace(/^Nº\s*/, '');
+                        badge.textContent = 'Nº ' + numeroNovo;
+                        badge.hidden = false;
+                        const badgeAnteriores = linha.querySelector('.numeros-anteriores-linha');
+                        if (badgeAnteriores && numeroAntigo !== '' && numeroAntigo !== numeroNovo) {
+                            const lista = (badgeAnteriores.dataset.numeros || '').split(',').filter(Boolean);
+                            lista.push(numeroAntigo);
+                            badgeAnteriores.dataset.numeros = lista.join(',');
+                            badgeAnteriores.textContent = (lista.length > 1 ? 'anteriores: Nº ' : 'anterior: Nº ')
+                                + lista.join(', ');
+                            badgeAnteriores.hidden = false;
+                        }
+                    }
                 }
             }).catch(function (err) {
                 alert(err.message || 'Não foi possível assinar o documento.');

@@ -31,6 +31,8 @@ class PasseLivreAtestadoRepository
             return null;
         }
 
+        $this->revincularOrfaos();
+
         $statement = $this->db->prepare(
             'SELECT ' . self::COLUNAS . '
              FROM passe_livre_atestados
@@ -54,6 +56,8 @@ class PasseLivreAtestadoRepository
             return [];
         }
 
+        $this->revincularOrfaos();
+
         $placeholders = [];
         $params = [];
         foreach ($ids as $i => $id) {
@@ -70,12 +74,81 @@ class PasseLivreAtestadoRepository
         $statement->execute($params);
 
         $mapa = [];
+        $idPorChave = [];
         foreach ($statement->fetchAll() as $row) {
             $item = $this->normalizar($row);
-            $mapa[(int)$item['passe_livre_aluno_curso_id']] = $item;
+            $item['anteriores'] = [];
+            $alunoCursoId = (int)$item['passe_livre_aluno_curso_id'];
+            $mapa[$alunoCursoId] = $item;
+            $idPorChave[$item['matricula'] . '|' . $item['periodo']] = $alunoCursoId;
+        }
+
+        foreach ($this->listarSubstituidos() as $antigo) {
+            $alunoCursoId = $idPorChave[$antigo['matricula'] . '|' . $antigo['periodo']] ?? null;
+            if ($alunoCursoId !== null) {
+                $mapa[$alunoCursoId]['anteriores'][] = [
+                    'numero_formatado' => $antigo['numero_formatado'],
+                    'assinado_em' => $antigo['assinado_em'],
+                ];
+            }
         }
 
         return $mapa;
+    }
+
+    /**
+     * Atestados desvinculados (substituídos por uma nova assinatura); o número
+     * antigo continua válido na conferência.
+     *
+     * @return list<array<string, mixed>>
+     */
+    private function listarSubstituidos(): array
+    {
+        $statement = $this->db->query(
+            "SELECT " . self::COLUNAS . "
+             FROM passe_livre_atestados
+             WHERE passe_livre_aluno_curso_id IS NULL AND matricula <> ''
+             ORDER BY ano, numero"
+        );
+
+        return array_map(fn(array $row): array => $this->normalizar($row), $statement->fetchAll());
+    }
+
+    /**
+     * O gerar_passe_livre.py recria as linhas do semestre com novos ids, e o
+     * ON DELETE SET NULL deixa os atestados sem vínculo. Religa pelo par
+     * matrícula/período, só o atestado mais recente de cada par e só se nenhum
+     * deles estiver vinculado (substituídos continuam desvinculados).
+     */
+    private function revincularOrfaos(): void
+    {
+        $this->db->exec(
+            "UPDATE OR IGNORE passe_livre_atestados
+             SET passe_livre_aluno_curso_id = (
+                 SELECT ac.id FROM passe_livre_aluno_curso ac
+                 WHERE ac.matricula = passe_livre_atestados.matricula
+                   AND ac.periodo = passe_livre_atestados.periodo
+                 ORDER BY ac.id LIMIT 1
+             )
+             WHERE passe_livre_aluno_curso_id IS NULL
+               AND matricula <> ''
+               AND id = (
+                   SELECT MAX(b.id) FROM passe_livre_atestados b
+                   WHERE b.matricula = passe_livre_atestados.matricula
+                     AND b.periodo = passe_livre_atestados.periodo
+               )
+               AND NOT EXISTS (
+                   SELECT 1 FROM passe_livre_atestados c
+                   WHERE c.matricula = passe_livre_atestados.matricula
+                     AND c.periodo = passe_livre_atestados.periodo
+                     AND c.passe_livre_aluno_curso_id IS NOT NULL
+               )
+               AND EXISTS (
+                   SELECT 1 FROM passe_livre_aluno_curso ac
+                   WHERE ac.matricula = passe_livre_atestados.matricula
+                     AND ac.periodo = passe_livre_atestados.periodo
+               )"
+        );
     }
 
     /**
@@ -101,7 +174,7 @@ class PasseLivreAtestadoRepository
     }
 
     /**
-     * Assina o documento: gera número sequencial único e congela data/frequências.
+     * Assina o documento: gera número sequencial único no ano e congela data/frequências.
      * Se já existir assinatura e $substituir for false, devolve a existente.
      * Se $substituir for true, desvincula a anterior (número antigo permanece
      * válido na conferência) e cria uma nova assinatura.
@@ -144,9 +217,9 @@ class PasseLivreAtestadoRepository
                 $detach->execute(['id' => $alunoCursoId]);
             }
 
-            $numero = $this->proximoNumero();
             $agora = new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo'));
             $ano = (int)$agora->format('Y');
+            $numero = $this->proximoNumero($ano);
             $assinadoEm = $agora->format('Y-m-d H:i:s');
             $dataDocumento = PasseLivreAtestadoPdf::dataExtensoEm($agora);
             $codigo = $this->gerarCodigoVerificacao();
@@ -235,11 +308,13 @@ class PasseLivreAtestadoRepository
         return $saida;
     }
 
-    private function proximoNumero(): int
+    /** A numeração recomeça em 1 a cada ano (o número é exibido como numero/ano). */
+    private function proximoNumero(int $ano): int
     {
-        $statement = $this->db->query(
-            'SELECT COALESCE(MAX(numero), 0) + 1 AS proximo FROM passe_livre_atestados'
+        $statement = $this->db->prepare(
+            'SELECT COALESCE(MAX(numero), 0) + 1 AS proximo FROM passe_livre_atestados WHERE ano = :ano'
         );
+        $statement->execute(['ano' => $ano]);
         $proximo = (int)$statement->fetchColumn();
 
         return max(1, $proximo);

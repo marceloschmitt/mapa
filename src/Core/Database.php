@@ -98,7 +98,7 @@ class Database
         self::ensureColumn('passe_livre_disciplina', 'data_trancamento', 'TEXT');
         self::ensureColumn('frequencia_disciplina', 'situacao', 'TEXT');
         self::ensureColumn('frequencia_disciplina', 'data_trancamento', 'TEXT');
-        self::migrarPasseLivreAtestadosNullable();
+        self::migrarPasseLivreAtestadosEstrutura();
         self::migrarDatasAulaCsvParaTabela();
         // Tabela descontinuada (carga horaria por disciplina): remove de bancos antigos.
         self::$connection->exec('DROP TABLE IF EXISTS disciplina_carga_horaria');
@@ -436,10 +436,11 @@ class Database
     }
 
     /**
-     * Permite desvincular atestado antigo ao assinar novamente
-     * (passe_livre_aluno_curso_id nullable + ON DELETE SET NULL).
+     * Recria passe_livre_atestados em bancos antigos:
+     * - passe_livre_aluno_curso_id nullable + ON DELETE SET NULL (desvincular ao assinar novamente);
+     * - numero único por ano (UNIQUE (ano, numero)), pois a numeração recomeça a cada ano.
      */
-    private static function migrarPasseLivreAtestadosNullable(): void
+    private static function migrarPasseLivreAtestadosEstrutura(): void
     {
         $row = self::$connection->query(
             "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = 'passe_livre_atestados'"
@@ -449,7 +450,9 @@ class Database
         }
 
         $ddl = (string)$row['sql'];
-        if (stripos($ddl, 'passe_livre_aluno_curso_id INTEGER NOT NULL') === false) {
+        $vinculoObrigatorio = stripos($ddl, 'passe_livre_aluno_curso_id INTEGER NOT NULL') !== false;
+        $numeroUnicoGeral = preg_match('/\bnumero\s+INTEGER\s+NOT\s+NULL\s+UNIQUE\b/i', $ddl) === 1;
+        if (!$vinculoObrigatorio && !$numeroUnicoGeral) {
             return;
         }
 
@@ -460,7 +463,7 @@ class Database
                 'CREATE TABLE passe_livre_atestados_new (
                     id INTEGER PRIMARY KEY AUTOINCREMENT,
                     passe_livre_aluno_curso_id INTEGER UNIQUE,
-                    numero INTEGER NOT NULL UNIQUE,
+                    numero INTEGER NOT NULL,
                     ano INTEGER NOT NULL,
                     data_documento TEXT NOT NULL,
                     assinado_em TEXT NOT NULL,
@@ -472,6 +475,7 @@ class Database
                     periodo TEXT NOT NULL DEFAULT \'\',
                     frequencia_geral REAL,
                     disciplinas_json TEXT NOT NULL DEFAULT \'[]\',
+                    UNIQUE (ano, numero),
                     FOREIGN KEY (passe_livre_aluno_curso_id)
                         REFERENCES passe_livre_aluno_curso(id) ON DELETE SET NULL,
                     FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
@@ -495,10 +499,6 @@ class Database
             self::$connection->exec(
                 'CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_codigo
                  ON passe_livre_atestados(codigo_verificacao)'
-            );
-            self::$connection->exec(
-                'CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_ano_numero
-                 ON passe_livre_atestados(ano, numero)'
             );
             self::$connection->exec('COMMIT');
         } catch (\Throwable $e) {
