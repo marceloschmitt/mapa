@@ -294,7 +294,7 @@ CREATE TABLE IF NOT EXISTS staff_alarme_emails (
 CREATE INDEX IF NOT EXISTS idx_staff_alarme_emails_destinatario_enviado
     ON staff_alarme_emails(destinatario, enviado_em);
 
--- Alunos com status TRANCADO / TRANC. AUTOMATICO na segunda consulta (fora de alarmes).
+-- Alunos com status TRANCADO / TRANC. AUTOMATICO no cadastro em massa (fora de alarmes).
 CREATE TABLE IF NOT EXISTS alunos_trancados (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     coleta_id INTEGER NOT NULL,
@@ -474,21 +474,4 @@ CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_codigo
 
 CREATE INDEX IF NOT EXISTS idx_passe_livre_atestados_ano_numero
     ON passe_livre_atestados(ano, numero);
-
--- Carga horaria oficial observada na API de alunos (frequencia).
--- Null e esperado para TCC, dissertacao, etc. (sem horario semanal).
--- Uma linha por disciplina + curso (mesmo codigo pode aparecer em cursos distintos).
-CREATE TABLE IF NOT EXISTS disciplina_carga_horaria (
-    id INTEGER PRIMARY KEY AUTOINCREMENT,
-    codigo_disciplina TEXT NOT NULL,
-    disciplina TEXT NOT NULL DEFAULT '',
-    nome_curso TEXT NOT NULL DEFAULT '',
-    carga_horaria INTEGER,
-    origem_periodo TEXT,
-    atualizado_em TEXT NOT NULL,
-    UNIQUE (codigo_disciplina, nome_curso)
-);
-
-CREATE INDEX IF NOT EXISTS idx_disciplina_carga_horaria_codigo
-    ON disciplina_carga_horaria(codigo_disciplina);
 

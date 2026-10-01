@@ -1,34 +1,42 @@
 #!/usr/bin/env python3
-"""Analisa resposta_alunos.json e gera tabela de frequencia por aluno.
+"""Gera tabela_frequencia.json a partir da consulta em massa.
 
-Le o arquivo gerado por consulta_alunos.py. Frequencia/controle: apenas cursos
-ATIVO ou FORMANDO. Trancamento: TRANCADO / TRANC. AUTOMATICO em status_discente
-(2ª consulta). Demais status sao ignorados.
+Le os arquivos gravados por consulta_alunos_massa.py:
+
+- resposta_alunos_massa_intervalo.json: um registro por vinculo (aluno x curso)
+  com status, totais, disciplinas e ausencias_especiais;
+- resposta_alunos_massa_cadastro.json: nome civil, nome social, e-mail e
+  turma de entrada, que o intervalo nao traz.
+
+Frequencia/controle: apenas vinculos ATIVO ou FORMANDO; demais status
+(inclusive trancados) sao ignorados. Vinculos sem curso (alunos especiais)
+tambem ficam de fora. Os trancados sao importados por importar_trancados.py.
 """
 
 from __future__ import annotations
 
 import json
+import math
 import sys
 from datetime import date, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
 from paths import (
-    JSON_ALUNOS_TRANCADOS,
-    JSON_RESPOSTA_ALUNOS,
+    JSON_RESPOSTA_ALUNOS_MASSA,
+    JSON_RESPOSTA_ALUNOS_MASSA_CADASTRO,
     JSON_TABELA_FREQUENCIA,
     garantir_diretorios,
 )
-from status_aluno import status_eh_controle, status_eh_trancado
+from status_aluno import status_eh_controle
 from ausencias_especiais import (
     aplicar_situacao_trancamento,
     mapear_trancamento_cancelamento,
 )
 
-ARQUIVO_ENTRADA = JSON_RESPOSTA_ALUNOS
+ARQUIVO_INTERVALO = JSON_RESPOSTA_ALUNOS_MASSA
+ARQUIVO_CADASTRO = JSON_RESPOSTA_ALUNOS_MASSA_CADASTRO
 ARQUIVO_SAIDA_JSON = JSON_TABELA_FREQUENCIA
-ARQUIVO_TRANCADOS_JSON = JSON_ALUNOS_TRANCADOS
 
 
 def parsear_data_br(texto: str) -> date | None:
@@ -44,12 +52,17 @@ def parsear_data_br(texto: str) -> date | None:
     return None
 
 
-def fim_matricula_atrasada(frequencias: dict[str, Any]) -> date | None:
+def data_br(texto: Any) -> str | None:
+    """AAAA-MM-DD (endpoint de intervalo) → DD-MM-AAAA (formato da tabela)."""
+    data = parsear_data_br(str(texto or ""))
+    return data.strftime("%d-%m-%Y") if data else None
+
+
+def fim_matricula_atrasada(ausencias_especiais: Any) -> date | None:
     """Ultimo dia do intervalo matricula_atrasada em ausencias_especiais, se houver."""
-    especiais = frequencias.get("ausencias_especiais")
-    if not isinstance(especiais, dict):
+    if not isinstance(ausencias_especiais, dict):
         return None
-    atrasada = especiais.get("matricula_atrasada")
+    atrasada = ausencias_especiais.get("matricula_atrasada")
     if not isinstance(atrasada, list) or not atrasada:
         return None
 
@@ -74,83 +87,59 @@ def fim_matricula_atrasada(frequencias: dict[str, Any]) -> date | None:
     return fim
 
 
-def data_inicio_contagem_aluno(frequencias: dict[str, Any]) -> str | None:
+def data_inicio_contagem_aluno(ausencias_especiais: Any) -> str | None:
     """Dia a partir do qual as aulas passam a contar para o aluno (AAAA-MM-DD).
 
     Matricula atrasada: dia seguinte ao fim do intervalo da API.
     Aluno normal: None (usa o primeiro dia de aula da disciplina na grade).
     """
-    fim_atraso = fim_matricula_atrasada(frequencias)
+    fim_atraso = fim_matricula_atrasada(ausencias_especiais)
     if fim_atraso is not None:
         return (fim_atraso + timedelta(days=1)).isoformat()
     return None
 
 
-def carregar_alunos(caminho: Path) -> list[dict[str, Any]]:
-    """Carrega a lista de alunos do arquivo de resposta.
-
-    Args:
-        caminho: Caminho do arquivo resposta_alunos.json.
-
-    Returns:
-        Lista de registros de alunos.
-
-    Raises:
-        FileNotFoundError: Quando o arquivo de entrada nao existe.
-        ValueError: Quando o conteudo nao e uma lista.
-    """
+def carregar_json(caminho: Path, tipo: type) -> Any:
+    """Carrega um JSON e confere o tipo da raiz (list ou dict)."""
     dados = json.loads(caminho.read_text(encoding="utf-8"))
-
-    if not isinstance(dados, list):
-        raise ValueError("Formato inesperado: esperava uma lista de alunos.")
-
+    if not isinstance(dados, tipo):
+        raise ValueError(f"{caminho.name}: formato inesperado (esperava {tipo.__name__}).")
     return dados
 
 
+def percentual_inteiro(valor: Any) -> Any:
+    """Arredonda para inteiro (meio para cima), como a consulta individual devolvia."""
+    if isinstance(valor, float):
+        return int(math.floor(valor + 0.5))
+    return valor
+
+
 def extrair_dias_falta(disciplina: dict[str, Any]) -> list[str]:
-    """Extrai as datas em que o aluno faltou na disciplina.
-
-    Args:
-        disciplina: Registro da disciplina em frequencias.disciplinas.
-
-    Returns:
-        Lista de datas no formato retornado pela API (ex.: 25/04/2025).
-    """
+    """Datas em que o aluno faltou na disciplina (ex.: 25/04/2025)."""
     dias = disciplina.get("ausencias", [])
     if not isinstance(dias, list):
         return []
     return [str(dia) for dia in dias if dia]
 
 
-def extrair_frequencia_geral(frequencias: dict[str, Any]) -> dict[str, Any] | None:
-    """Extrai os totais gerais de frequencia do curso.
-
-    Args:
-        frequencias: Objeto frequencias do curso na resposta da API.
-
-    Returns:
-        Dicionario com periodo e totais, ou None se nao houver dados.
-    """
-    total = frequencias.get("total")
+def extrair_frequencia_geral(vinculo: dict[str, Any]) -> dict[str, Any] | None:
+    """Totais de frequencia do curso, ou None se o vinculo nao tiver totais."""
+    total = vinculo.get("total")
     if not isinstance(total, dict):
         return None
-
-    info = frequencias.get("info", {})
-    if not isinstance(info, dict):
-        info = {}
 
     justificadas = total.get("frequencia_com_ausencias_justificadas", {})
     if not isinstance(justificadas, dict):
         justificadas = {}
 
     return {
-        "data_inicial": info.get("data_inicial"),
-        "data_final": info.get("data_final"),
+        "data_inicial": data_br(vinculo.get("frequencia_data_inicial")),
+        "data_final": data_br(vinculo.get("frequencia_data_final")),
         "carga_horaria_total": total.get("carga_horaria_total"),
         "horarios_totais": total.get("horarios_totais"),
         "ausencias_totais": total.get("ausencias_totais"),
         "presencas_totais": total.get("presencas_totais"),
-        "percentual_frequencia_total": total.get("percentual_frequencia_total"),
+        "percentual_frequencia_total": percentual_inteiro(total.get("percentual_frequencia_total")),
         "ausencias_justificadas_totais": justificadas.get("ausencias_justificadas_totais"),
         "percentual_com_ausencias_justificadas": justificadas.get(
             "percentual_frequencia_total"
@@ -158,24 +147,18 @@ def extrair_frequencia_geral(frequencias: dict[str, Any]) -> dict[str, Any] | No
     }
 
 
-def extrair_disciplinas(frequencias: dict[str, Any]) -> list[dict[str, Any]]:
-    """Extrai o detalhamento de frequencia por disciplina.
+def extrair_disciplinas(vinculo: dict[str, Any]) -> list[dict[str, Any]]:
+    """Frequencia por disciplina do vinculo.
 
-    Args:
-        frequencias: Objeto frequencias do curso na resposta da API.
-
-    Returns:
-        Lista de disciplinas com horarios, ausencias, presencas e dias de falta.
-        Disciplinas em ausencias_especiais.trancamento_cancelamento ficam com
-        situacao Trancada e percentual_frequencia None.
+    Disciplinas em ausencias_especiais.trancamento_cancelamento ficam com
+    situacao Trancada e percentual_frequencia None.
     """
-    disciplinas = frequencias.get("disciplinas", {})
-    if not isinstance(disciplinas, dict):
-        disciplinas = {}
+    disciplinas = vinculo.get("disciplinas") or []
+    if not isinstance(disciplinas, list):
+        disciplinas = []
 
     linhas: list[dict[str, Any]] = []
-
-    for codigo, disciplina in disciplinas.items():
+    for disciplina in disciplinas:
         if not isinstance(disciplina, dict):
             continue
 
@@ -184,7 +167,7 @@ def extrair_disciplinas(frequencias: dict[str, Any]) -> list[dict[str, Any]]:
             freq = {}
 
         linhas.append({
-            "codigo_disciplina": disciplina.get("cod_disciplina", codigo),
+            "codigo_disciplina": disciplina.get("cod_disciplina", ""),
             "disciplina": disciplina.get("nome", ""),
             "horarios": freq.get("horarios", 0),
             "ausencias": freq.get("ausencias", 0),
@@ -197,7 +180,7 @@ def extrair_disciplinas(frequencias: dict[str, Any]) -> list[dict[str, Any]]:
 
     linhas = aplicar_situacao_trancamento(
         linhas,
-        mapear_trancamento_cancelamento(frequencias.get("ausencias_especiais")),
+        mapear_trancamento_cancelamento(vinculo.get("ausencias_especiais")),
     )
     linhas.sort(
         key=lambda linha: (
@@ -208,194 +191,125 @@ def extrair_disciplinas(frequencias: dict[str, Any]) -> list[dict[str, Any]]:
     return linhas
 
 
-def extrair_registros_aluno(
-    aluno: dict[str, Any],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Extrai registros de frequencia e de trancamento de um aluno.
-
-    Args:
-        aluno: Registro individual de resposta_alunos.json.
-
-    Returns:
-        Tupla (registros_frequencia, registros_trancados).
-    """
-    if aluno.get("status") != 200:
-        return [], []
-
-    nome = str(aluno.get("nome", ""))
-    login = str(aluno.get("login", ""))
-    matricula = aluno.get("matricula", "")
-    dados = aluno.get("dados")
-
-    if not isinstance(dados, dict):
-        return [], []
-
-    registros: list[dict[str, Any]] = []
-    trancados: list[dict[str, Any]] = []
-
-    for perfil in dados.values():
-        if not isinstance(perfil, dict):
+def indexar_cursos(cadastro: dict[str, Any]) -> dict[tuple[str, str], dict[str, Any]]:
+    """Cursos do cadastro por (login, matricula)."""
+    cursos: dict[tuple[str, str], dict[str, Any]] = {}
+    for chave, aluno in cadastro.items():
+        if not isinstance(aluno, dict):
             continue
+        login = str(aluno.get("login") or chave).strip()
+        for curso in aluno.get("cursos") or []:
+            if isinstance(curso, dict):
+                cursos[(login, str(curso.get("matricula") or "").strip())] = curso
+    return cursos
 
-        email = perfil.get("email")
-        nome_social = str(perfil.get("nome_social") or "").strip()
-        nome_civil = str(
-            perfil.get("nome_civil")
-            or perfil.get("nome_completo")
-            or nome
-            or ""
-        ).strip()
 
-        for curso in perfil.get("cursos", []):
-            if not isinstance(curso, dict):
-                continue
-
-            status_discente = str(curso.get("status_discente") or "").strip()
-            matricula_curso = curso.get("matricula")
-            if matricula_curso in (None, ""):
-                matricula_curso = matricula
-            base = {
-                "nome": nome_civil or nome or login,
-                "nome_social": nome_social,
-                "login": login,
-                "matricula": matricula_curso,
-                "email": email,
-                "nome_curso": curso.get("nome_curso"),
-                "ano_semestre_ingresso": str(
-                    curso.get("ano_semestre_ingresso") or ""
-                ).strip() or None,
-                "turma_entrada": str(curso.get("turma_entrada") or "").strip() or None,
-                "status_discente": status_discente,
-            }
-
-            # Trancamento confirmado na 2ª consulta (status_discente).
-            if status_eh_trancado(status_discente):
-                trancados.append(base)
-                continue
-
-            # Controle: apenas ATIVO e FORMANDO.
-            if not status_eh_controle(status_discente):
-                continue
-
-            frequencias = curso.get("frequencias", {})
-            if not isinstance(frequencias, dict):
-                continue
-
-            frequencia_geral = extrair_frequencia_geral(frequencias)
-            disciplinas = extrair_disciplinas(frequencias)
-
-            if frequencia_geral is None and disciplinas == []:
-                continue
-
-            registros.append({
-                **base,
-                "frequencia_geral": frequencia_geral,
-                "disciplinas": disciplinas,
-                "data_inicio_aulas": data_inicio_contagem_aluno(frequencias),
-            })
-
-    return registros, trancados
+def _matricula(valor: Any) -> Any:
+    try:
+        return int(valor)
+    except (TypeError, ValueError):
+        return valor
 
 
 def montar_resultado(
-    alunos: list[dict[str, Any]],
-) -> tuple[list[dict[str, Any]], list[dict[str, Any]]]:
-    """Monta frequencia e lista de trancados a partir de todos os alunos.
-
-    Args:
-        alunos: Lista de registros de resposta_alunos.json.
-
-    Returns:
-        Tupla (frequencia ordenada, trancados ordenados).
-    """
+    vinculos: list[dict[str, Any]],
+    cadastro: dict[str, Any],
+) -> list[dict[str, Any]]:
+    """Tabela de frequencia (um registro por vinculo ATIVO/FORMANDO com curso)."""
+    cursos = indexar_cursos(cadastro)
     resultado: list[dict[str, Any]] = []
-    trancados: list[dict[str, Any]] = []
 
-    for aluno in alunos:
-        regs, trancs = extrair_registros_aluno(aluno)
-        resultado.extend(regs)
-        trancados.extend(trancs)
+    for vinculo in vinculos:
+        if not isinstance(vinculo, dict):
+            continue
+        status_discente = str(vinculo.get("status_discente") or "").strip()
+        if not status_eh_controle(status_discente):
+            continue
+
+        login = str(vinculo.get("login") or "").strip()
+        matricula = str(vinculo.get("matricula") or "").strip()
+        aluno = cadastro.get(login) or {}
+        curso = cursos.get((login, matricula), {})
+        nome_curso = curso.get("nome_curso") or vinculo.get("curso")
+        if not nome_curso:
+            continue
+
+        frequencia_geral = extrair_frequencia_geral(vinculo)
+        disciplinas = extrair_disciplinas(vinculo)
+        if frequencia_geral is None and disciplinas == []:
+            continue
+
+        resultado.append({
+            "nome": str(
+                aluno.get("nome_civil")
+                or aluno.get("nome_completo")
+                or vinculo.get("nome_completo")
+                or login
+            ).strip(),
+            "nome_social": str(aluno.get("nome_social") or "").strip(),
+            "login": login,
+            "matricula": _matricula(curso.get("matricula") or matricula),
+            "email": aluno.get("email"),
+            "nome_curso": nome_curso,
+            "ano_semestre_ingresso": str(
+                curso.get("ano_semestre_ingresso")
+                or vinculo.get("ano_semestre_ingresso")
+                or ""
+            ).strip() or None,
+            "turma_entrada": str(curso.get("turma_entrada") or "").strip() or None,
+            "status_discente": status_discente,
+            "frequencia_geral": frequencia_geral,
+            "disciplinas": disciplinas,
+            "data_inicio_aulas": data_inicio_contagem_aluno(vinculo.get("ausencias_especiais")),
+        })
 
     resultado.sort(key=lambda registro: registro["nome"])
-    trancados.sort(key=lambda registro: (
-        str(registro.get("nome") or ""),
-        str(registro.get("nome_curso") or ""),
-    ))
-    return resultado, trancados
+    return resultado
+
 
 def salvar_json(resultado: list[dict[str, Any]], caminho: Path) -> None:
-    """Salva o resultado em formato JSON indentado.
-
-    Args:
-        resultado: Registros de frequencia por aluno.
-        caminho: Arquivo de saida JSON.
-    """
+    """Salva o resultado em formato JSON indentado."""
     caminho.write_text(
         json.dumps(resultado, ensure_ascii=False, indent=2),
         encoding="utf-8",
     )
 
 
-def resumir(
-    alunos: list[dict[str, Any]],
-    resultado: list[dict[str, Any]],
-    trancados: list[dict[str, Any]],
-) -> str:
-    """Monta um resumo textual da analise.
-
-    Args:
-        alunos: Lista original de alunos.
-        resultado: Resultado gerado.
-        trancados: Registros com status de trancamento.
-
-    Returns:
-        Texto com totais e contagens uteis.
-    """
-    alunos_com_sucesso = sum(1 for aluno in alunos if aluno.get("status") == 200)
+def resumir(vinculos: list[dict[str, Any]], resultado: list[dict[str, Any]]) -> str:
+    """Resumo textual da analise."""
     alunos_com_frequencia = len({registro["login"] for registro in resultado})
     total_disciplinas = sum(len(registro.get("disciplinas", [])) for registro in resultado)
-    alunos_trancados = len({str(r.get("login") or "") for r in trancados})
-
     return (
-        f"Alunos no arquivo: {len(alunos)}\n"
-        f"Alunos com consulta OK: {alunos_com_sucesso}\n"
+        f"Vinculos no arquivo: {len(vinculos)}\n"
         f"Alunos com frequencia (ATIVO/FORMANDO): {alunos_com_frequencia}\n"
         f"Registros (aluno/curso): {len(resultado)}\n"
-        f"Linhas de disciplina: {total_disciplinas}\n"
-        f"Alunos trancados (excluidos): {alunos_trancados}\n"
-        f"Registros trancados: {len(trancados)}"
+        f"Linhas de disciplina: {total_disciplinas}"
     )
 
 
 def main() -> int:
-    """Ponto de entrada do script.
-
-    Carrega resposta_alunos.json, monta o resultado com frequencia geral e
-    por disciplina, salva tabela_frequencia.json e imprime resumo no terminal.
-
-    Returns:
-        0 em caso de sucesso, 1 em caso de erro.
-    """
+    """Ponto de entrada: le os arquivos da massa e grava tabela_frequencia.json."""
     try:
-        alunos = carregar_alunos(ARQUIVO_ENTRADA)
-    except FileNotFoundError:
-        print(f"Erro: arquivo nao encontrado: {ARQUIVO_ENTRADA}", file=sys.stderr)
-        print("Rode antes: python3 consulta_alunos.py", file=sys.stderr)
+        vinculos = carregar_json(ARQUIVO_INTERVALO, list)
+        cadastro = carregar_json(ARQUIVO_CADASTRO, dict)
+    except FileNotFoundError as error:
+        print(f"Erro: arquivo nao encontrado: {error.filename}", file=sys.stderr)
+        print("Rode antes: python3 consulta_alunos_massa.py", file=sys.stderr)
         return 1
     except (ValueError, json.JSONDecodeError) as error:
         print(f"Erro ao ler entrada: {error}", file=sys.stderr)
         return 1
 
-    resultado, trancados = montar_resultado(alunos)
+    resultado = montar_resultado(vinculos, cadastro)
     garantir_diretorios()
     salvar_json(resultado, ARQUIVO_SAIDA_JSON)
-    salvar_json(trancados, ARQUIVO_TRANCADOS_JSON)
 
-    print("Analise de frequencia por aluno")
-    print(resumir(alunos, resultado, trancados))
+    print("Analise de frequencia por aluno (consulta em massa)")
+    for caminho in (ARQUIVO_INTERVALO, ARQUIVO_CADASTRO):
+        consultado = datetime.fromtimestamp(caminho.stat().st_mtime).strftime("%d/%m/%Y %H:%M")
+        print(f"Entrada: {caminho.name} (consultado em {consultado})")
+    print(resumir(vinculos, resultado))
     print(f"JSON salvo em: {ARQUIVO_SAIDA_JSON}")
-    print(f"Trancados salvos em: {ARQUIVO_TRANCADOS_JSON}")
-
     return 0
 
 

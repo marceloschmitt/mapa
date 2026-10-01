@@ -21,8 +21,8 @@ from zoneinfo import ZoneInfo
 DIR_PYTHON = Path(__file__).resolve().parent
 
 PASSOS = (
+    "consulta_alunos_massa.py",
     "consulta_inicial.py",
-    "consulta_alunos.py",
     "analisar_frequencia.py",
     "sincronizar_passe_livre_semestre_atual.py",
     "importar_frequencia.py",

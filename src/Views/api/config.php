@@ -5,6 +5,8 @@ $clientId = (string)($config['client_id'] ?? '');
 $clientSecret = (string)($config['client_secret'] ?? '');
 $urlMatriculados = (string)($config['url_matriculados'] ?? '');
 $urlAlunos = (string)($config['url_alunos'] ?? '');
+$urlMassaCadastro = (string)($config['url_alunos_massa_cadastro'] ?? '');
+$urlMassaIntervalo = (string)($config['url_alunos_massa_intervalo'] ?? '');
 $verifySsl = !empty($config['verify_ssl']);
 $periodoLetivo = (string)($config['periodo_letivo'] ?? '');
 $dataInicial = (string)($config['frequencia_data_inicial'] ?? '');
@@ -151,7 +153,7 @@ if ($dataFinal === '') {
                 <div class="form-text">
                     Não inclua <code>periodo_letivo</code> aqui — use o campo Período letivo acima; o sistema acrescenta na execução.
                     Sem <code>tipo=extracao</code> a API devolve disciplinas e docentes (necessário para professores).
-                    Não filtre só <code>status=1</code>: o MAPA usa ATIVO e FORMANDO no controle e inclui trancados na 2ª consulta.
+                    Não filtre só <code>status=1</code>: o MAPA usa ATIVO e FORMANDO no controle e lê os trancados da consulta em massa.
                 </div>
             </div>
 
@@ -163,7 +165,33 @@ if ($dataFinal === '') {
                           rows="2"
                           required><?= htmlspecialchars($urlAlunos, ENT_QUOTES, 'UTF-8') ?></textarea>
                 <div class="form-text">
-                    Deve conter <code>{login}</code>. As datas do intervalo são acrescentadas pelo script.
+                    Consulta aluno por aluno, usada pelo Gerar passe livre. Deve conter <code>{login}</code>;
+                    o modo mensal e o período são acrescentados pelo script.
+                </div>
+            </div>
+
+            <div class="col-12">
+                <label for="api_url_alunos_massa_cadastro" class="form-label">URL alunos em massa — cadastro <span class="text-danger">*</span></label>
+                <textarea class="form-control font-monospace"
+                          id="api_url_alunos_massa_cadastro"
+                          name="api_url_alunos_massa_cadastro"
+                          rows="2"
+                          required><?= htmlspecialchars($urlMassaCadastro, ENT_QUOTES, 'UTF-8') ?></textarea>
+                <div class="form-text">
+                    Endereço completo do cadastro de todos os alunos (cursos, status, e-mail). Usada a cada coleta.
+                </div>
+            </div>
+
+            <div class="col-12">
+                <label for="api_url_alunos_massa_intervalo" class="form-label">URL alunos em massa — frequência por intervalo <span class="text-danger">*</span></label>
+                <textarea class="form-control font-monospace"
+                          id="api_url_alunos_massa_intervalo"
+                          name="api_url_alunos_massa_intervalo"
+                          rows="2"
+                          required><?= htmlspecialchars($urlMassaIntervalo, ENT_QUOTES, 'UTF-8') ?></textarea>
+                <div class="form-text">
+                    Endereço completo, com <code>{data_inicial}</code> e <code>{data_final}</code> onde as datas devem entrar.
+                    Na coleta, são trocadas pela Data inicial e Data final acima, no formato <code>AAAA-MM-DD</code>.
                 </div>
             </div>
 

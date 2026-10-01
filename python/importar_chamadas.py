@@ -1,5 +1,8 @@
 #!/usr/bin/env python3
-"""Importa datas de ultima aula ministrada (chamadas) a partir de resposta_alunos.json.
+"""Importa datas de ultima aula ministrada (chamadas) a partir de
+resposta_alunos_massa_intervalo.json.
+
+Alunos especiais (sem curso no intervalo) sao ignorados.
 
 Para cada disciplina/curso:
   - grava snapshot em `disciplina_ultima_aula` (coleta atual)
@@ -19,7 +22,7 @@ from pathlib import Path
 from typing import Any
 
 from db import conectar, fechar, row_to_dict
-from paths import JSON_RESPOSTA_ALUNOS
+from paths import JSON_RESPOSTA_ALUNOS_MASSA
 
 
 def normalizar_data_aula(valor: Any) -> str | None:
@@ -63,64 +66,55 @@ def upsert_curso(cursor: Any, nome_curso: str) -> int:
     return int(row["id"])
 
 
-def extrair_ultimas_aulas(alunos: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
+def extrair_ultimas_aulas(vinculos: list[dict[str, Any]]) -> dict[tuple[str, str], dict[str, Any]]:
     """Agrega a data mais recente de ultima_aula por (codigo, nome_curso).
 
     Disciplinas vistas apenas com null entram com data None.
     """
     agregado: dict[tuple[str, str], dict[str, Any]] = {}
 
-    for aluno in alunos:
-        if aluno.get("status") != 200:
+    for vinculo in vinculos:
+        if not isinstance(vinculo, dict):
             continue
 
-        dados = aluno.get("dados")
-        if not isinstance(dados, dict):
+        nome_curso = str(vinculo.get("curso") or "").strip()
+        if nome_curso == "":
             continue
 
-        for perfil in dados.values():
-            if not isinstance(perfil, dict):
+        disciplinas = vinculo.get("disciplinas")
+        if not isinstance(disciplinas, list):
+            continue
+
+        for disciplina in disciplinas:
+            if not isinstance(disciplina, dict):
                 continue
 
-            for curso in perfil.get("cursos", []):
-                if not isinstance(curso, dict):
-                    continue
+            codigo = str(disciplina.get("cod_disciplina") or "").strip()
+            if codigo == "":
+                continue
 
-                nome_curso = str(curso.get("nome_curso") or "").strip() or "Curso nao informado"
-                disciplinas = curso.get("disciplinas")
-                if not isinstance(disciplinas, list):
-                    continue
+            nome = str(disciplina.get("nome") or "").strip() or codigo
+            data = normalizar_data_aula(disciplina.get("ultima_aula_ministrada"))
+            chave = (codigo, nome_curso)
+            atual = agregado.get(chave)
 
-                for disciplina in disciplinas:
-                    if not isinstance(disciplina, dict):
-                        continue
+            if atual is None:
+                agregado[chave] = {
+                    "codigo_disciplina": codigo,
+                    "disciplina": nome,
+                    "nome_curso": nome_curso,
+                    "data_ultima_aula": data,
+                }
+                continue
 
-                    codigo = str(disciplina.get("codigo_disciplina") or "").strip()
-                    if codigo == "":
-                        continue
+            if nome and (not atual["disciplina"] or atual["disciplina"] == codigo):
+                atual["disciplina"] = nome
 
-                    nome = str(disciplina.get("nome_disciplina") or "").strip() or codigo
-                    data = normalizar_data_aula(disciplina.get("ultima_aula_ministrada"))
-                    chave = (codigo, nome_curso)
-                    atual = agregado.get(chave)
-
-                    if atual is None:
-                        agregado[chave] = {
-                            "codigo_disciplina": codigo,
-                            "disciplina": nome,
-                            "nome_curso": nome_curso,
-                            "data_ultima_aula": data,
-                        }
-                        continue
-
-                    if nome and (not atual["disciplina"] or atual["disciplina"] == codigo):
-                        atual["disciplina"] = nome
-
-                    data_atual = atual.get("data_ultima_aula")
-                    if data is None:
-                        continue
-                    if data_atual is None or data > data_atual:
-                        atual["data_ultima_aula"] = data
+            data_atual = atual.get("data_ultima_aula")
+            if data is None:
+                continue
+            if data_atual is None or data > data_atual:
+                atual["data_ultima_aula"] = data
 
     return agregado
 
@@ -134,9 +128,9 @@ def ultima_coleta_id(cursor: Any) -> int | None:
     return int(row_to_dict(row)["id"])
 
 
-def importar(alunos: list[dict[str, Any]], coleta_id: int) -> dict[str, int]:
+def importar(vinculos: list[dict[str, Any]], coleta_id: int) -> dict[str, int]:
     """Persiste snapshot e historico de chamadas para a coleta."""
-    agregado = extrair_ultimas_aulas(alunos)
+    agregado = extrair_ultimas_aulas(vinculos)
     conn = conectar()
     cursor = conn.cursor()
 
@@ -208,9 +202,9 @@ def main() -> int:
     parser.add_argument("--coleta-id", type=int, default=None, help="ID da coleta (padrao: ultima)")
     args = parser.parse_args()
 
-    caminho = Path(JSON_RESPOSTA_ALUNOS)
+    caminho = Path(JSON_RESPOSTA_ALUNOS_MASSA)
     try:
-        alunos = json.loads(caminho.read_text(encoding="utf-8"))
+        vinculos = json.loads(caminho.read_text(encoding="utf-8"))
     except FileNotFoundError:
         print(f"Erro: arquivo nao encontrado: {caminho}", file=sys.stderr)
         return 1
@@ -218,8 +212,8 @@ def main() -> int:
         print(f"Erro ao ler JSON: {error}", file=sys.stderr)
         return 1
 
-    if not isinstance(alunos, list):
-        print("Erro: resposta_alunos.json deve ser uma lista.", file=sys.stderr)
+    if not isinstance(vinculos, list):
+        print(f"Erro: {caminho.name} deve ser uma lista.", file=sys.stderr)
         return 1
 
     try:
@@ -233,7 +227,7 @@ def main() -> int:
             )
             return 1
 
-        resumo = importar(alunos, coleta_id)
+        resumo = importar(vinculos, coleta_id)
     except Exception as error:  # noqa: BLE001
         print(f"Erro na importacao: {error}", file=sys.stderr)
         fechar()

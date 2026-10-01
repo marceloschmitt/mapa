@@ -9,6 +9,7 @@ $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
 $cursosDisponiveis = $cursosDisponiveis ?? [];
 $execucao = $execucao ?? null;
 $mostrarBadgeCurso = $semSeletorCurso;
+$podeGerarPerdaVaga = !empty($podeGerarPerdaVaga);
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
@@ -59,24 +60,40 @@ $mostrarBadgeCurso = $semSeletorCurso;
             </div>
         <?php endif; ?>
     </div>
-    <?php if (!$semSeletorCurso && $cursosDisponiveis !== []): ?>
-        <form method="get" action="<?= htmlspecialchars(url('/perda-vaga'), ENT_QUOTES, 'UTF-8') ?>" class="d-flex align-items-center gap-2">
-            <label for="curso" class="form-label mb-0 text-nowrap">Curso</label>
-            <select class="form-select" id="curso" name="curso" style="min-width: 260px;"
-                    onchange="this.form.submit()">
-                <option value="todos" <?= $cursoSelecionado === 'todos' ? 'selected' : '' ?>>
-                    <?= htmlspecialchars($rotuloGeral ?? 'Todos os cursos', ENT_QUOTES, 'UTF-8') ?>
-                </option>
-                <?php foreach ($cursosDisponiveis as $curso): ?>
-                    <option value="<?= (int)$curso['id'] ?>"
-                        <?= $cursoSelecionado === (string)$curso['id'] ? 'selected' : '' ?>>
-                        <?= htmlspecialchars((string)$curso['nome_curso'], ENT_QUOTES, 'UTF-8') ?>
+    <div class="d-flex flex-column align-items-stretch align-items-md-end gap-2">
+        <?php if ($podeGerarPerdaVaga): ?>
+            <div class="text-md-end">
+                <form method="post" action="<?= htmlspecialchars(url('/perda-vaga/gerar'), ENT_QUOTES, 'UTF-8') ?>">
+                    <button type="submit" class="btn btn-primary">Gerar análise</button>
+                </form>
+                <p class="small text-secondary mb-0 mt-1" style="max-width: 280px;">
+                    Recalcula com as matrículas dos dois semestres anteriores, atualizadas a cada coleta.
+                </p>
+            </div>
+        <?php endif; ?>
+        <?php if (!$semSeletorCurso && $cursosDisponiveis !== []): ?>
+            <form method="get" action="<?= htmlspecialchars(url('/perda-vaga'), ENT_QUOTES, 'UTF-8') ?>" class="d-flex align-items-center gap-2">
+                <label for="curso" class="form-label mb-0 text-nowrap">Curso</label>
+                <select class="form-select" id="curso" name="curso" style="min-width: 260px;"
+                        onchange="this.form.submit()">
+                    <option value="todos" <?= $cursoSelecionado === 'todos' ? 'selected' : '' ?>>
+                        <?= htmlspecialchars($rotuloGeral ?? 'Todos os cursos', ENT_QUOTES, 'UTF-8') ?>
                     </option>
-                <?php endforeach; ?>
-            </select>
-        </form>
-    <?php endif; ?>
+                    <?php foreach ($cursosDisponiveis as $curso): ?>
+                        <option value="<?= (int)$curso['id'] ?>"
+                            <?= $cursoSelecionado === (string)$curso['id'] ? 'selected' : '' ?>>
+                            <?= htmlspecialchars((string)$curso['nome_curso'], ENT_QUOTES, 'UTF-8') ?>
+                        </option>
+                    <?php endforeach; ?>
+                </select>
+            </form>
+        <?php endif; ?>
+    </div>
 </div>
+
+<?php if (!empty($sucesso)): ?>
+    <div class="alert alert-success"><?= htmlspecialchars($sucesso, ENT_QUOTES, 'UTF-8') ?></div>
+<?php endif; ?>
 
 <?php if (!empty($erro)): ?>
     <div class="alert alert-danger"><?= htmlspecialchars($erro, ENT_QUOTES, 'UTF-8') ?></div>

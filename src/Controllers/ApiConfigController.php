@@ -34,6 +34,8 @@ class ApiConfigController extends Controller
         $clientSecret = (string)($_POST['api_client_secret'] ?? '');
         $urlMatriculados = trim((string)($_POST['api_url_matriculados'] ?? ''));
         $urlAlunos = trim((string)($_POST['api_url_alunos'] ?? ''));
+        $urlMassaCadastro = trim((string)($_POST['api_url_alunos_massa_cadastro'] ?? ''));
+        $urlMassaIntervalo = trim((string)($_POST['api_url_alunos_massa_intervalo'] ?? ''));
         $verifySsl = isset($_POST['api_verify_ssl']);
         $periodoLetivo = trim((string)($_POST['api_periodo_letivo'] ?? ''));
         $dataInicial = trim((string)($_POST['frequencia_data_inicial'] ?? ''));
@@ -62,6 +64,23 @@ class ApiConfigController extends Controller
 
         if (strpos($urlAlunos, '{login}') === false) {
             Session::flash('erro', 'A URL de alunos deve conter o marcador {login}.');
+            $this->redirect('/configuracoes/api');
+        }
+
+        if ($urlMassaCadastro === '') {
+            Session::flash('erro', 'Informe a URL do cadastro em massa.');
+            $this->redirect('/configuracoes/api');
+        }
+
+        if ($urlMassaIntervalo === '') {
+            Session::flash('erro', 'Informe a URL do intervalo em massa.');
+            $this->redirect('/configuracoes/api');
+        }
+
+        if (strpos($urlMassaIntervalo, '{data_inicial}') === false
+            || strpos($urlMassaIntervalo, '{data_final}') === false
+        ) {
+            Session::flash('erro', 'A URL do intervalo em massa deve conter {data_inicial} e {data_final}.');
             $this->redirect('/configuracoes/api');
         }
 
@@ -100,6 +119,8 @@ class ApiConfigController extends Controller
             'client_id' => $clientId,
             'url_matriculados' => $urlMatriculados,
             'url_alunos' => $urlAlunos,
+            'url_alunos_massa_cadastro' => $urlMassaCadastro,
+            'url_alunos_massa_intervalo' => $urlMassaIntervalo,
             'verify_ssl' => $verifySsl,
             'periodo_letivo' => $periodoLetivo,
             'frequencia_data_inicial' => $dataInicial,

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Manipulacao de periodo letivo no formato AAAA/S.
 
-Funcoes puras, sem I/O. Os scripts manuais (gerar_passe_livre, gerar_perda_vaga,
-gerar_carga_horaria) ainda mantem copias proprias destas regras.
+Funcoes puras, sem I/O. Os scripts manuais (gerar_passe_livre, gerar_perda_vaga)
+ainda mantem copias proprias destas regras.
 """
 
 from __future__ import annotations

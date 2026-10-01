@@ -22,11 +22,9 @@ ARQUIVO_USERS_CSV = DIR_DATA / "Users.csv"
 
 # Cache da coleta SIGAA (unico JSON intermediario alem da tabela analisada)
 JSON_RESPOSTA_MATRICULAS = DIR_JSON / "resposta_matriculas.json"
-JSON_RESPOSTA_ALUNOS = DIR_JSON / "resposta_alunos.json"
-JSON_ERROS_ALUNOS = DIR_JSON / "erros_alunos.json"
+JSON_RESPOSTA_ALUNOS_MASSA = DIR_JSON / "resposta_alunos_massa_intervalo.json"
+JSON_RESPOSTA_ALUNOS_MASSA_CADASTRO = DIR_JSON / "resposta_alunos_massa_cadastro.json"
 JSON_TABELA_FREQUENCIA = DIR_JSON / "tabela_frequencia.json"
-JSON_ALUNOS_TRANCADOS = DIR_JSON / "alunos_trancados.json"
-
 
 def garantir_diretorios() -> None:
     """Cria data/json se nao existir."""

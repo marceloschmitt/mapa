@@ -1,8 +1,10 @@
 #!/usr/bin/env python3
-"""Importa alunos_trancados.json para o SQLite (ultima coleta).
+"""Importa os alunos trancados para o SQLite (ultima coleta).
 
-Alunos com status TRANCADO / TRANC. AUTOMATICO nao entram em frequencia
-nem alarmes; ficam nesta tabela para consulta no portal.
+Le resposta_alunos_massa_cadastro.json (consulta_alunos_massa.py) e seleciona
+os cursos com status_discente TRANCADO / TRANC. AUTOMATICO. Esses alunos nao
+entram em frequencia nem alarmes; ficam nesta tabela para consulta no portal.
+Se o arquivo ainda nao existir, nada e gravado.
 
 Uso:
     python3 importar_trancados.py
@@ -12,23 +14,51 @@ from __future__ import annotations
 
 import json
 import sys
+from datetime import datetime
 from pathlib import Path
 from typing import Any
 
 from db import conectar, fechar, row_to_dict
-from paths import JSON_ALUNOS_TRANCADOS
+from paths import JSON_RESPOSTA_ALUNOS_MASSA_CADASTRO
+from status_aluno import status_eh_trancado
 
-ARQUIVO_ENTRADA = JSON_ALUNOS_TRANCADOS
+ARQUIVO_ENTRADA = JSON_RESPOSTA_ALUNOS_MASSA_CADASTRO
+
+
+def _texto(valor: Any) -> str | None:
+    texto = str(valor or "").strip()
+    return texto or None
 
 
 def carregar_trancados(caminho: Path) -> list[dict[str, Any]]:
-    """Carrega alunos_trancados.json."""
-    if not caminho.is_file():
-        return []
-    dados = json.loads(caminho.read_text(encoding="utf-8"))
-    if not isinstance(dados, list):
-        raise ValueError("Formato inesperado: esperava uma lista.")
-    return dados
+    """Um registro por curso trancado do cadastro (mapa login → aluno)."""
+    cadastro = json.loads(caminho.read_text(encoding="utf-8"))
+    if not isinstance(cadastro, dict):
+        raise ValueError("Formato inesperado: esperava mapa login → aluno.")
+
+    trancados: list[dict[str, Any]] = []
+    for chave, aluno in cadastro.items():
+        if not isinstance(aluno, dict):
+            continue
+        login = _texto(aluno.get("login")) or str(chave).strip()
+        for curso in aluno.get("cursos") or []:
+            if not isinstance(curso, dict):
+                continue
+            status = _texto(curso.get("status_discente")) or ""
+            if not status_eh_trancado(status):
+                continue
+            trancados.append({
+                "nome": _texto(aluno.get("nome_civil")) or _texto(aluno.get("nome_completo")) or login,
+                "nome_social": _texto(aluno.get("nome_social")),
+                "login": login,
+                "matricula": _texto(curso.get("matricula")) or "",
+                "email": _texto(aluno.get("email")),
+                "nome_curso": _texto(curso.get("nome_curso")) or "",
+                "ano_semestre_ingresso": _texto(curso.get("ano_semestre_ingresso")),
+                "turma_entrada": _texto(curso.get("turma_entrada")),
+                "status_discente": status,
+            })
+    return trancados
 
 
 def ultima_coleta_id(cursor: Any) -> int | None:
@@ -154,8 +184,12 @@ def importar(registros: list[dict[str, Any]], coleta_id: int) -> int:
 
 def main() -> int:
     """Ponto de entrada."""
+    entrada = ARQUIVO_ENTRADA
+    if not entrada.is_file():
+        print(f"Aviso: {entrada.name} ausente (rode consulta_alunos_massa.py); trancados nao importados.")
+        return 0
     try:
-        registros = carregar_trancados(ARQUIVO_ENTRADA)
+        registros = carregar_trancados(entrada)
     except (ValueError, json.JSONDecodeError) as error:
         print(f"Erro ao ler entrada: {error}", file=sys.stderr)
         return 1
@@ -179,7 +213,9 @@ def main() -> int:
     finally:
         fechar()
 
+    gerado = datetime.fromtimestamp(entrada.stat().st_mtime).strftime("%d/%m/%Y %H:%M")
     print("Importacao de trancados")
+    print(f"Arquivo: {entrada.name} (consultado em {gerado})")
     print(f"Coleta ID: {coleta_id}")
     print(f"Registros: {total}")
     return 0

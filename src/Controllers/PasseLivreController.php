@@ -362,55 +362,6 @@ class PasseLivreController extends Controller
         return $base . $sep . 'c=' . rawurlencode($codigo);
     }
 
-    private function resolverPython3(): string
-    {
-        foreach (['/usr/bin/python3', '/usr/local/bin/python3'] as $caminho) {
-            if (is_executable($caminho)) {
-                return $caminho;
-            }
-        }
-
-        return 'python3';
-    }
-
-    private function dispararEmSegundoPlano(string $comando): bool
-    {
-        if ($this->funcaoPhpDesabilitada('popen')) {
-            return false;
-        }
-
-        if (PHP_OS_FAMILY === 'Windows') {
-            $handle = @popen('start /B ' . $comando, 'r');
-            if (!is_resource($handle)) {
-                return false;
-            }
-            pclose($handle);
-
-            return true;
-        }
-
-        // Subshell em background: PHP não espera o Python terminar (exec() com & bloqueia).
-        $handle = @popen('(' . $comando . ') > /dev/null 2>&1 &', 'r');
-        if (!is_resource($handle)) {
-            return false;
-        }
-        pclose($handle);
-
-        return true;
-    }
-
-    private function funcaoPhpDesabilitada(string $funcao): bool
-    {
-        $desabilitadas = ini_get('disable_functions');
-        if (!is_string($desabilitadas) || trim($desabilitadas) === '') {
-            return false;
-        }
-
-        $lista = array_map('trim', explode(',', strtolower($desabilitadas)));
-
-        return in_array(strtolower($funcao), $lista, true);
-    }
-
     /**
      * Escopo do relatório: filtro opcional de curso na UI.
      * Não usa cursos do coordenador nem disciplinas do professor.

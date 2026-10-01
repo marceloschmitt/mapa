@@ -151,65 +151,9 @@ def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
     _ensure_column(conn, "frequencia_disciplina", "situacao", "TEXT")
     _ensure_column(conn, "frequencia_disciplina", "data_trancamento", "TEXT")
     _migrar_datas_aula_csv(conn)
-    _migrar_disciplina_carga_horaria_curso(conn)
+    # Tabela descontinuada (carga horaria por disciplina): remove de bancos antigos.
+    conn.execute("DROP TABLE IF EXISTS disciplina_carga_horaria")
     conn.commit()
-
-
-def _migrar_disciplina_carga_horaria_curso(conn: sqlite3.Connection) -> None:
-    """Add nome_curso e UNIQUE(codigo, curso) se a tabela ainda for so por codigo."""
-    row = conn.execute(
-        "SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'disciplina_carga_horaria'"
-    ).fetchone()
-    if row is None:
-        return
-    cols = {str(r[1]) for r in conn.execute("PRAGMA table_info(disciplina_carga_horaria)")}
-    if "nome_curso" not in cols:
-        conn.execute("PRAGMA foreign_keys = OFF")
-        try:
-            conn.execute(
-                """
-                CREATE TABLE disciplina_carga_horaria_new (
-                    id INTEGER PRIMARY KEY AUTOINCREMENT,
-                    codigo_disciplina TEXT NOT NULL,
-                    disciplina TEXT NOT NULL DEFAULT '',
-                    nome_curso TEXT NOT NULL DEFAULT '',
-                    carga_horaria INTEGER,
-                    origem_periodo TEXT,
-                    atualizado_em TEXT NOT NULL,
-                    UNIQUE (codigo_disciplina, nome_curso)
-                )
-                """
-            )
-            conn.execute(
-                """
-                INSERT INTO disciplina_carga_horaria_new (
-                    id, codigo_disciplina, disciplina, nome_curso,
-                    carga_horaria, origem_periodo, atualizado_em
-                )
-                SELECT id, codigo_disciplina, disciplina, '',
-                       carga_horaria, origem_periodo, atualizado_em
-                FROM disciplina_carga_horaria
-                """
-            )
-            conn.execute("DROP TABLE disciplina_carga_horaria")
-            conn.execute(
-                "ALTER TABLE disciplina_carga_horaria_new RENAME TO disciplina_carga_horaria"
-            )
-            conn.execute(
-                """
-                CREATE INDEX IF NOT EXISTS idx_disciplina_carga_horaria_codigo
-                    ON disciplina_carga_horaria(codigo_disciplina)
-                """
-            )
-        finally:
-            conn.execute("PRAGMA foreign_keys = ON")
-
-    conn.execute(
-        """
-        CREATE INDEX IF NOT EXISTS idx_disciplina_carga_horaria_curso
-            ON disciplina_carga_horaria(nome_curso)
-        """
-    )
 
 
 def fechar() -> None:

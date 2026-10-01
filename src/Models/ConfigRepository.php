@@ -19,6 +19,8 @@ class ConfigRepository
     public const API_CLIENT_SECRET = 'api_client_secret';
     public const API_URL_MATRICULADOS = 'api_url_matriculados';
     public const API_URL_ALUNOS = 'api_url_alunos';
+    public const API_URL_ALUNOS_MASSA_CADASTRO = 'api_url_alunos_massa_cadastro';
+    public const API_URL_ALUNOS_MASSA_INTERVALO = 'api_url_alunos_massa_intervalo';
     public const API_VERIFY_SSL = 'api_verify_ssl';
     public const API_PERIODO_LETIVO = 'api_periodo_letivo';
     public const FREQUENCIA_DATA_INICIAL = 'frequencia_data_inicial';
@@ -177,6 +179,8 @@ class ConfigRepository
      *   client_secret: string,
      *   url_matriculados: string,
      *   url_alunos: string,
+     *   url_alunos_massa_cadastro: string,
+     *   url_alunos_massa_intervalo: string,
      *   verify_ssl: bool,
      *   periodo_letivo: string,
      *   frequencia_data_inicial: string,
@@ -200,6 +204,8 @@ class ConfigRepository
             'client_secret' => $this->get(self::API_CLIENT_SECRET),
             'url_matriculados' => $urlMatriculados,
             'url_alunos' => $this->get(self::API_URL_ALUNOS),
+            'url_alunos_massa_cadastro' => $this->get(self::API_URL_ALUNOS_MASSA_CADASTRO),
+            'url_alunos_massa_intervalo' => $this->get(self::API_URL_ALUNOS_MASSA_INTERVALO),
             'verify_ssl' => in_array(
                 strtolower($this->get(self::API_VERIFY_SSL, 'false')),
                 ['1', 'true', 'yes', 'on'],
@@ -218,6 +224,8 @@ class ConfigRepository
      *   client_id: string,
      *   url_matriculados: string,
      *   url_alunos: string,
+     *   url_alunos_massa_cadastro: string,
+     *   url_alunos_massa_intervalo: string,
      *   verify_ssl: bool,
      *   periodo_letivo: string,
      *   frequencia_data_inicial: string,
@@ -235,6 +243,16 @@ class ConfigRepository
         $this->set(self::API_CLIENT_ID, $dados['client_id'], 'Client ID OAuth da API SIGAA');
         $this->set(self::API_URL_MATRICULADOS, $urlMatriculados, 'URL da consulta de matriculados (sem periodo_letivo)');
         $this->set(self::API_URL_ALUNOS, $dados['url_alunos'], 'URL da consulta de alunos (use {login})');
+        $this->set(
+            self::API_URL_ALUNOS_MASSA_CADASTRO,
+            $dados['url_alunos_massa_cadastro'],
+            'URL do cadastro de alunos em massa'
+        );
+        $this->set(
+            self::API_URL_ALUNOS_MASSA_INTERVALO,
+            $dados['url_alunos_massa_intervalo'],
+            'URL da frequência em massa por intervalo (use {data_inicial} e {data_final})'
+        );
         $this->set(
             self::API_VERIFY_SSL,
             !empty($dados['verify_ssl']) ? 'true' : 'false',

@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
 """Sincroniza o semestre atual (coleta) em passe_livre_*.
 
-Le tabela_frequencia.json (saida de analisar_frequencia.py, a partir de
-resposta_alunos.json) e grava/atualiza o periodo de api_periodo_letivo
+Le tabela_frequencia.json (saida de analisar_frequencia.py, a partir da
+consulta em massa) e grava/atualiza o periodo de api_periodo_letivo
 nas tabelas passe_livre_aluno_curso / passe_livre_disciplina.
 
 Assim o relatorio de frequencia anual ve o semestre corrente sem depender

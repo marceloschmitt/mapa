@@ -5,6 +5,7 @@ namespace Mapa\Controllers;
 
 use Mapa\Core\Auth;
 use Mapa\Core\Controller;
+use Mapa\Core\Session;
 use Mapa\Models\AnalyticsRepository;
 
 class PerdaVagaController extends Controller
@@ -67,6 +68,14 @@ class PerdaVagaController extends Controller
             }
         }
 
+        $podeGerar = Auth::isAdmin();
+        $erro = Session::flash('erro');
+        if ($erro === null && $execucao === null) {
+            $erro = $podeGerar
+                ? 'Nenhuma análise de perda de vaga gerada. Use o botão “Gerar análise”.'
+                : 'Nenhuma análise de perda de vaga gerada. Solicite a um administrador.';
+        }
+
         $this->render('perda_vaga/index', [
             'execucao' => $execucao,
             'porCurso' => array_values($porCurso),
@@ -80,11 +89,71 @@ class PerdaVagaController extends Controller
             'rotuloGeral' => 'Todos os cursos',
             'semSeletorCurso' => $semSeletorCurso,
             'avisoCoordenador' => $escopo['aviso'],
-            'erro' => $execucao === null
-                ? 'Nenhuma análise de perda de vaga gerada. Execute: python3 python/gerar_perda_vaga.py'
-                : null,
+            'erro' => $erro,
+            'sucesso' => Session::flash('sucesso'),
+            'podeGerarPerdaVaga' => $podeGerar,
             'isAdmin' => Auth::isAdmin(),
         ]);
+    }
+
+    public function gerar(): void
+    {
+        $this->requireAuth();
+        if (!Auth::isAdmin()) {
+            http_response_code(403);
+            Session::flash('erro', 'Acesso restrito a administradores.');
+            $this->redirect('/perda-vaga');
+        }
+
+        $root = dirname(__DIR__, 2);
+        $script = $root . '/python/gerar_perda_vaga.py';
+        if (!is_file($script)) {
+            Session::flash('erro', 'Script python/gerar_perda_vaga.py não encontrado.');
+            $this->redirect('/perda-vaga');
+        }
+
+        $dataDir = $root . '/data';
+        if (!is_dir($dataDir)) {
+            @mkdir($dataDir, 0775, true);
+        }
+        $log = $dataDir . '/perda_vaga.log';
+        $python = $this->resolverPython3();
+        $cabecalho = sprintf("[%s] Geração solicitada via web (python: %s).\n", date('Y-m-d H:i:s'), $python);
+        if (@file_put_contents($log, $cabecalho, FILE_APPEND | LOCK_EX) === false) {
+            Session::flash(
+                'erro',
+                'Não foi possível gravar em data/perda_vaga.log. Verifique permissões da pasta data/.'
+            );
+            $this->redirect('/perda-vaga');
+        }
+
+        if (!$this->dispararEmSegundoPlano(sprintf(
+            'cd %s && nohup %s %s >> %s 2>&1 < /dev/null',
+            escapeshellarg($root),
+            escapeshellarg($python),
+            escapeshellarg($script),
+            escapeshellarg($log)
+        ))) {
+            @file_put_contents(
+                $log,
+                sprintf("[%s] ERRO: não foi possível iniciar o processo em segundo plano.\n", date('Y-m-d H:i:s')),
+                FILE_APPEND | LOCK_EX
+            );
+            Session::flash(
+                'erro',
+                'Não foi possível iniciar a geração. Verifique se popen/proc_open estão habilitados no PHP.'
+            );
+            $this->redirect('/perda-vaga');
+        }
+
+        Session::flash(
+            'sucesso',
+            'Análise de perda de vaga iniciada. Acompanhe em data/perda_vaga.log e atualize a página em alguns instantes.'
+        );
+        if (session_status() === PHP_SESSION_ACTIVE) {
+            session_write_close();
+        }
+        $this->redirect('/perda-vaga');
     }
 
     /**

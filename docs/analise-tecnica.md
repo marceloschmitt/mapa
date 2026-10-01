@@ -33,7 +33,7 @@ Graus de criticidade:
 Em produção, ficam publicamente baixáveis:
 - `/.env` → senha SMTP, bind LDAP, `DB_PATH`
 - `/data/mapa.db` → **banco inteiro**: dados pessoais de todos os alunos, hashes de senha, e a tabela `configuracoes` com `api_client_secret` e `ldap_bind_password`
-- `/data/json/resposta_alunos.json`, `/data/*.log`, `/config/schema.sql`
+- `/data/json/resposta_alunos_massa_cadastro.json` (e demais JSON da coleta), `/data/*.log`, `/config/schema.sql`
 - `/.git/` → código-fonte e histórico completos
 
 Impacto: vazamento total de base de dados pessoais (incidente de LGPD com dever de notificação) + credenciais da API institucional.
@@ -50,7 +50,7 @@ Impacto: vazamento total de base de dados pessoais (incidente de LGPD com dever 
 ```
 
 ### C2. Scripts de e-mail em massa acessíveis pela web, sem autenticação
-`scripts/enviar_emails_alarmes_alunos.php`, `enviar_emails_alarmes_staff.php`, `enviar_emails_chamadas.php` e `enviar_emails_alarmes.php` não têm guarda de SAPI nem autenticação, e estão dentro do DocumentRoot.
+`scripts/enviar_emails_alarmes_alunos.php`, `enviar_emails_alarmes_staff.php` e `enviar_emails_chamadas.php` não têm guarda de SAPI nem autenticação, e estão dentro do DocumentRoot.
 
 `GET https://<host>/scripts/enviar_emails_alarmes_alunos.php` — de qualquer pessoa na internet — dispara o envio em massa de e-mails a alunos em nome da instituição (em produção `EMAIL_SEND=true`, conforme `INSTALL.md`). Repetível à vontade: abuso reputacional, blacklist do SMTP institucional e, mesmo com envio desligado, **poluição da tabela `alarme_emails`**, que suprime os avisos legítimos pela janela de deduplicação.
 
@@ -206,7 +206,7 @@ Não há `tests/`, `composer.json`, `requirements.txt`, nem configuração de CI
 **Correção:** resolver o binário com `shutil.which('php')` (ou configurá-lo), tratar a ausência com mensagem clara, e passar `timeout` a cada passo.
 
 ### M7. Código morto: ~800 linhas do fluxo de API antigo em PHP
-`ApiModel`, `AlunosModel`, `MatriculadosModel`, `ConfigModel`, `Models/Aluno`, `Core/Debug` não são instanciados por nenhum controller — são resquícios de quando o PHP fazia as consultas à API (`ConfigModel` ainda lê um `API_TOKEN` que não existe mais). `scripts/enviar_emails_alarmes.php` é o legado de `enviar_emails_alarmes_alunos.php` + `_staff.php` (o próprio `Database.php:255` marca a chave como "legado").
+`ApiModel`, `AlunosModel`, `MatriculadosModel`, `ConfigModel`, `Models/Aluno`, `Core/Debug` não são instanciados por nenhum controller — são resquícios de quando o PHP fazia as consultas à API (`ConfigModel` ainda lê um `API_TOKEN` que não existe mais). (`scripts/enviar_emails_alarmes.php`, legado de `enviar_emails_alarmes_alunos.php` + `_staff.php`, foi removido em 01/10/2026.)
 
 **Correção:** remover. Código morto que fala com API e e-mail é superfície de ataque (ver C2) e confunde quem lê.
 
@@ -234,9 +234,9 @@ Existe um `python/data/mapa.db` rastreado no Git (hoje com 0 byte). O `.gitignor
 
 ## BAIXO
 
-- **B1.** `montar_url_alunos` (`python/consulta_alunos.py:105-118`) interpola o login na query string sem `urllib.parse.quote` — login com caractere reservado corrompe a requisição.
+- **B1.** ~~`montar_url_alunos` (`python/consulta_alunos.py:105-118`) interpola o login na query string sem `urllib.parse.quote`.~~ Script removido em 01/10/2026.
 - **B2.** `ssl._create_unverified_context()` usa API privada do módulo `ssl`; o público é `ssl.create_default_context()` com flags explícitas.
-- **B3.** `CONCORRENCIA = 50` fixo no código (`python/consulta_alunos.py:50`): 50 requisições simultâneas contra o SIGAA sem backoff. Deveria ser configurável e mais conservador por padrão.
+- **B3.** `CONCORRENCIA = 50` fixo no código (`python/gerar_passe_livre.py`; antes também em `consulta_alunos.py`, removido): 50 requisições simultâneas contra o SIGAA sem backoff. Deveria ser configurável e mais conservador por padrão.
 - **B4.** `SmtpMailer` manda `EHLO mapa.local` fixo (`src/Lib/SmtpMailer.php:77`), não define `Message-ID`, não abre o socket com contexto SSL explícito (sem `peer_name`), e não limita a linha a 998 caracteres com `Content-Transfer-Encoding: 8bit` — tudo isso pesa na entregabilidade.
 - **B5.** `/logout` é `GET` (`src/routes.php:30`): logout forçado por CSRF. Incômodo, não grave.
 - **B6.** Duplicação entre `PasseLivreController` e `FrequenciaAnualController`: `filtroNome()`, `cursoSelecionado()`, `resolverEscopo()` e `semestreSelecionado()` praticamente idênticos. Candidatos a um trait ou classe base.

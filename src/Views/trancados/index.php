@@ -25,7 +25,7 @@ $mostrarBadgeCurso = $semSeletorCurso;
         <p class="text-secondary mb-2">
             Alunos com status
             <strong>TRANCADO</strong> ou <strong>TRANC. AUTOMÁTICO</strong>
-            na segunda consulta SIGAA — fora de alarmes e e-mails automáticos
+            na consulta em massa ao SIGAA — fora de alarmes e e-mails automáticos
             <?php if ($coleta !== null): ?>
                 (<?= htmlspecialchars(View::rotuloColeta($coleta), ENT_QUOTES, 'UTF-8') ?>).
             <?php else: ?>

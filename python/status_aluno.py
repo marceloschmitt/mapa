@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Status de discente usados na coleta MAPA.
 
-A 1ª consulta (matriculados) pode trazer vários status. A 2ª consulta e o
+A 1ª consulta (matriculados) pode trazer vários status. A consulta em massa e o
 controle de frequência/trancamento usam as regras abaixo.
 """
 
@@ -27,13 +27,13 @@ def normalizar_status(status: str) -> str:
     )
 
 
-# Controle de frequência / alarmes / e-mails (via status_discente da 2ª consulta).
+# Controle de frequência / alarmes / e-mails (via status_discente da consulta em massa).
 STATUS_CONTROLE = frozenset({
     "ATIVO",
     "FORMANDO",
 })
 
-# Trancamento (confirmado na 2ª consulta).
+# Trancamento (status_discente do cadastro em massa).
 STATUS_TRANCADOS = frozenset({
     "TRANC. AUTOMATICO",
     "TRANCADO",

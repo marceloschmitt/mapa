@@ -3,7 +3,7 @@
 
 Usa alunos ATIVO/FORMANDO do semestre atual (resposta_matriculas.json ou BD)
 e consulta a frequencia mensal (frequencia_periodo) de cada semestre anterior.
-Grava em passe_livre_* e salva cache JSON (resposta_alunos_AAAA_S_mensal.json).
+Grava em passe_livre_* (sem cache JSON).
 
 Disciplinas em ausencias_especiais.trancamento_cancelamento ficam com
 situacao Trancada; o percentual total do curso permanece o da API.
@@ -23,7 +23,6 @@ import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from pathlib import Path
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -40,15 +39,29 @@ from ausencias_especiais import (
     aplicar_situacao_trancamento,
     mapear_trancamento_cancelamento,
 )
-from consulta_alunos import eh_erro_http_temporario, eh_erro_temporario
 from db import conectar, fechar, row_to_dict
-from paths import DIR_JSON, JSON_RESPOSTA_MATRICULAS, garantir_diretorios
+from paths import JSON_RESPOSTA_MATRICULAS
 from status_aluno import status_eh_controle
 
 CONCORRENCIA = 50
 TIMEOUT_SEGUNDOS = 120
 TENTATIVAS = 3
 FREQUENCIA_GLOBAL = "FREQUÊNCIA GLOBAL"
+
+
+def eh_erro_http_temporario(status: int) -> bool:
+    """Indica se o codigo HTTP pode ser resolvido com nova tentativa."""
+    return status >= 500
+
+
+def eh_erro_temporario(erro: str) -> bool:
+    """Indica se o erro pode ser resolvido com nova tentativa."""
+    texto = erro.lower()
+    return (
+        "tempo limite" in texto
+        or "timed out" in texto
+        or "falha de conexao" in texto
+    )
 
 
 def semestre_anterior(periodo: str) -> str:
@@ -290,7 +303,7 @@ def consultar_um_aluno(
     timeout: int,
     tentativas: int,
 ) -> dict[str, Any]:
-    """Consulta um aluno (modo mensal) com retries como consulta_alunos.py."""
+    """Consulta um aluno (modo mensal) com novas tentativas em erro temporario."""
     login = aluno["login"]
     url = montar_url_alunos_mensal(base_url, login, periodo)
     ultimo_erro = ""
@@ -416,19 +429,17 @@ def consultar_alunos_periodo(
     timeout: int = TIMEOUT_SEGUNDOS,
     tentativas: int = TENTATIVAS,
     ao_aluno: Any | None = None,
-) -> tuple[int, list[dict[str, Any]]]:
+) -> int:
     """Consulta frequencia mensal em paralelo; grava no BD a cada aluno.
 
     Returns:
-        Tupla (total gravado via ao_aluno, respostas brutas no formato
-        resposta_alunos*_mensal.json para cache).
+        Total de registros gravados via ao_aluno.
     """
     base = url_alunos(config)
     gravados = 0
     erros = 0
     feitos = 0
     total = len(logins)
-    resultados: list[dict[str, Any]] = []
     inicio = time.perf_counter()
     print(
         f"Consultando frequencia mensal de {total} aluno(s) "
@@ -456,7 +467,6 @@ def consultar_alunos_periodo(
         }
         for future in as_completed(futures):
             item = future.result()
-            resultados.append(item)
             feitos += 1
             if item.get("status") != 200:
                 erros += 1
@@ -482,24 +492,7 @@ def consultar_alunos_periodo(
                     flush=True,
                 )
 
-    resultados.sort(key=lambda r: str(r.get("login") or ""))
-    return gravados, resultados
-
-
-def caminho_cache_mensal(periodo: str) -> Path:
-    """Caminho do cache JSON mensal (resposta_alunos_AAAA_S_mensal.json)."""
-    return DIR_JSON / f"resposta_alunos_{periodo.replace('/', '_')}_mensal.json"
-
-
-def salvar_cache_mensal(periodo: str, resultados: list[dict[str, Any]]) -> Path:
-    """Grava o cache bruto da consulta mensal."""
-    garantir_diretorios()
-    caminho = caminho_cache_mensal(periodo)
-    caminho.write_text(
-        json.dumps(resultados, ensure_ascii=False, indent=2),
-        encoding="utf-8",
-    )
-    return caminho
+    return gravados
 
 
 def upsert_aluno(cursor: Any, registro: dict[str, Any]) -> int:
@@ -808,7 +801,7 @@ def main(argv: list[str] | None = None) -> int:
                     gerado_em=gerado_em,
                 )
 
-            total_periodo, brutos = consultar_alunos_periodo(
+            total_periodo = consultar_alunos_periodo(
                 logins,
                 config=config,
                 token=token,
@@ -819,8 +812,6 @@ def main(argv: list[str] | None = None) -> int:
                 ao_aluno=ao_aluno,
             )
             total_geral += total_periodo
-            cache = salvar_cache_mensal(periodo, brutos)
-            print(f"Cache mensal: {cache}")
         total = total_geral
     except (
         FileNotFoundError,

@@ -36,25 +36,6 @@ class AlarmeEmailService
     }
 
     /**
-     * Executa envio aos alunos e avisos ao staff (fluxos independentes).
-     *
-     * @return array{enviados: int, avisos_staff: int, ignorados: int, falhas: int, mensagens: list<string>}
-     */
-    public function processar(?int $coletaId = null): array
-    {
-        $alunos = $this->processarAlunos($coletaId);
-        $staff = $this->processarStaff();
-
-        return [
-            'enviados' => $alunos['enviados'],
-            'avisos_staff' => $staff['enviados'],
-            'ignorados' => $alunos['ignorados'] + $staff['ignorados'],
-            'falhas' => $alunos['falhas'] + $staff['falhas'],
-            'mensagens' => array_merge($alunos['mensagens'], $staff['mensagens']),
-        ];
-    }
-
-    /**
      * E-mails de acolhimento aos alunos com alarme critico aberto.
      *
      * @return array{enviados: int, ignorados: int, falhas: int, mensagens: list<string>}

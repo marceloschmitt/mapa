@@ -146,9 +146,6 @@ $authLocal = ($usuario['auth_type'] ?? 'local') === 'local';
                             <li>
                                 <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/feriados'), ENT_QUOTES, 'UTF-8') ?>">Feriados</a>
                             </li>
-                            <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/carga-horaria'), ENT_QUOTES, 'UTF-8') ?>">Carga horária</a>
-                            </li>
                         </ul>
                     </li>
                 <?php endif; ?>

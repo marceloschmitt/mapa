@@ -18,6 +18,8 @@ CHAVES_API = (
     "api_client_secret",
     "api_url_matriculados",
     "api_url_alunos",
+    "api_url_alunos_massa_cadastro",
+    "api_url_alunos_massa_intervalo",
     "api_verify_ssl",
     "api_periodo_letivo",
     "frequencia_data_inicial",
