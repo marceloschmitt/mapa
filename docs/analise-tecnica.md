@@ -216,7 +216,7 @@ Não há `tests/`, `composer.json`, `requirements.txt`, nem configuração de CI
 **Correção:** trocar os dois índices por compostos com `coleta_id` à frente, conferindo com `EXPLAIN QUERY PLAN` nas consultas do dashboard.
 
 ### M9. Corrida na numeração do atestado
-`PasseLivreAtestadoRepository::proximoNumero()` (`src/Models/PasseLivreAtestadoRepository.php:238-246`) faz `MAX(numero)+1` e depois insere, com `numero` UNIQUE. Duas assinaturas simultâneas → violação de unicidade → o segundo signatário recebe "Não foi possível assinar o documento" (sem log, por A8) em um documento com valor legal.
+`PasseLivreAtestadoRepository::proximoNumero()` (`src/Models/PasseLivreAtestadoRepository.php`) faz `MAX(numero)+1` do ano corrente (a numeração recomeça a cada ano desde 01/10/2026) e depois insere, com `(ano, numero)` UNIQUE. Duas assinaturas simultâneas → violação de unicidade → o segundo signatário recebe "Não foi possível assinar o documento" (sem log, por A8) em um documento com valor legal.
 
 **Correção:** sequência dedicada (tabela contador com `UPDATE ... RETURNING`) ou retry no conflito de unicidade; a transação já existe, falta só a atomicidade da numeração.
 
