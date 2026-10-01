@@ -56,6 +56,29 @@ Frequência/alarmes continuam usando só **ATIVO** e **FORMANDO**
 
 ---
 
+## Documentação da API (SIGAA / IFRS)
+
+Ambos exigem login institucional do IFRS.
+
+- Swagger (Alunos SIGAA): <https://dev8e.ifrs.edu.br/api/documentation#/Alunos%20SIGAA/644b7a2e4fc838f06acbbe10acc83b5b>
+- Wiki da DTI (OpenProject): <https://openproject.ifrs.edu.br/projects/documentacoes-dti/wiki/api-de-servicos>
+
+Comportamentos observados no endpoint `alunos` (set/2026):
+
+- `tipo_frequencia=intervalo` usa `frequencia_data_inicial` / `frequencia_data_final`
+  (formato `DD-MM-AAAA`) e traz `total.percentual_frequencia_total` e
+  `total.frequencia_com_ausencias_justificadas` (percentual sem as justificadas).
+- `tipo_frequencia=mensal` só devolve frequência com `frequencia_periodo=AAAA/S`;
+  sem ele, `frequencias` vem `null`.
+- Cursos integrados (`nivel`/`curso_nivel` = `N`, anuais, ingresso `AAAA/0`):
+  no modo mensal `frequencias` vem sempre `null` (testado `2026/1`, `2026/2`,
+  `2026/0`, `2026`, sem período). No modo intervalo funcionam normalmente.
+  O EJA integrado vem com nível `T` e funciona no mensal.
+- Ausências abonadas não contam como falta (fora dos totais); justificadas contam
+  em `percentual_frequencia_total` e na FREQUÊNCIA GLOBAL do modo mensal.
+
+---
+
 ## Programas do pipeline
 
 | # | Programa | O que faz | Lê | Gera |
