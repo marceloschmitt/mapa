@@ -90,7 +90,7 @@ class CursoCoordenacaoRepository
     {
         $statement = $this->pdo->prepare(
             'INSERT INTO curso_coordenacao (curso_id, email_coordenacao, atualizado_em)
-             VALUES (:curso_id, :email_coordenacao, datetime(\'now\'))
+             VALUES (:curso_id, :email_coordenacao, datetime(\'now\', \'localtime\'))
              ON CONFLICT(curso_id) DO UPDATE SET
                 email_coordenacao = excluded.email_coordenacao,
                 atualizado_em = excluded.atualizado_em'

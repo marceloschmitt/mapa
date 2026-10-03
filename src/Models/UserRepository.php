@@ -97,10 +97,10 @@ class UserRepository
         $statement = $this->db->prepare(
             'INSERT INTO usuarios (
                 username, nome, email, cpf, senha_hash, auth_type, perfil, ativo,
-                pode_assinar_passe_livre
+                pode_assinar_passe_livre, criado_em
              ) VALUES (
                 :username, :nome, :email, :cpf, :senha_hash, :auth_type, :perfil, :ativo,
-                :pode_assinar_passe_livre
+                :pode_assinar_passe_livre, datetime(\'now\', \'localtime\')
              )'
         );
         $statement->execute([

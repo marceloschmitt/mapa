@@ -32,6 +32,8 @@ class AccessLogRepository
         '/passe-livre/conferencia' => 'Passe livre — conferência',
         '/chamadas' => 'Chamadas',
         '/chamadas/exportar-atrasadas-1-semestre' => 'Chamadas — exportar',
+        '/efeito-contatos' => 'Efeito dos contatos',
+        '/efeito-contatos/gerar' => 'Efeito dos contatos — gerar',
         '/usuarios' => 'Usuários',
         '/usuarios/novo' => 'Usuários — novo',
         '/usuarios/editar' => 'Usuários — editar',
@@ -74,7 +76,7 @@ class AccessLogRepository
                     metodo, rota, rota_rotulo, ip, user_agent, criado_em
                  ) VALUES (
                     :usuario_id, :username, :nome, :perfil, :tipo,
-                    :metodo, :rota, :rota_rotulo, :ip, :user_agent, datetime(\'now\')
+                    :metodo, :rota, :rota_rotulo, :ip, :user_agent, datetime(\'now\', \'localtime\')
                  )'
             );
             $statement->execute([
@@ -136,7 +138,7 @@ class AccessLogRepository
         $params = [];
         $desde = null;
         if ($dias !== null && $dias > 0) {
-            $filtro = " AND datetime(criado_em) >= datetime('now', :offset)";
+            $filtro = " AND datetime(criado_em) >= datetime('now', 'localtime', :offset)";
             $params['offset'] = '-' . $dias . ' days';
             $desde = (new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo')))
                 ->modify('-' . $dias . ' days')
@@ -296,7 +298,7 @@ class AccessLogRepository
         $filtro = '';
         $params = [];
         if ($dias !== null && $dias > 0) {
-            $filtro = " WHERE datetime(enviado_em) >= datetime('now', :offset)";
+            $filtro = " WHERE datetime(enviado_em) >= datetime('now', 'localtime', :offset)";
             $params['offset'] = '-' . $dias . ' days';
         }
 

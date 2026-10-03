@@ -90,7 +90,7 @@ class FeriadoRepository
         try {
             $statement = $this->db->prepare(
                 'INSERT INTO feriados (data, descricao, criado_em)
-                 VALUES (:data, :descricao, datetime(\'now\'))'
+                 VALUES (:data, :descricao, datetime(\'now\', \'localtime\'))'
             );
             $statement->execute([
                 'data' => $dataIso,

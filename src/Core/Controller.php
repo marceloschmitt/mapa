@@ -96,6 +96,48 @@ abstract class Controller
         return 'python3';
     }
 
+    /**
+     * Inicia python/<script> em segundo plano, com a saída acrescentada a data/<log>.
+     * Retorna a mensagem de erro, ou null se o processo foi disparado.
+     */
+    protected function iniciarScriptPython(string $script, string $log): ?string
+    {
+        $root = dirname(__DIR__, 2);
+        $caminhoScript = $root . '/python/' . $script;
+        if (!is_file($caminhoScript)) {
+            return 'Script python/' . $script . ' não encontrado.';
+        }
+
+        $dataDir = $root . '/data';
+        if (!is_dir($dataDir)) {
+            @mkdir($dataDir, 0775, true);
+        }
+        $caminhoLog = $dataDir . '/' . $log;
+        $python = $this->resolverPython3();
+        $cabecalho = sprintf("[%s] Geração solicitada via web (python: %s).\n", date('Y-m-d H:i:s'), $python);
+        if (@file_put_contents($caminhoLog, $cabecalho, FILE_APPEND | LOCK_EX) === false) {
+            return 'Não foi possível gravar em data/' . $log . '. Verifique permissões da pasta data/.';
+        }
+
+        if (!$this->dispararEmSegundoPlano(sprintf(
+            'cd %s && nohup %s %s >> %s 2>&1 < /dev/null',
+            escapeshellarg($root),
+            escapeshellarg($python),
+            escapeshellarg($caminhoScript),
+            escapeshellarg($caminhoLog)
+        ))) {
+            @file_put_contents(
+                $caminhoLog,
+                sprintf("[%s] ERRO: não foi possível iniciar o processo em segundo plano.\n", date('Y-m-d H:i:s')),
+                FILE_APPEND | LOCK_EX
+            );
+
+            return 'Não foi possível iniciar a geração. Verifique se popen/proc_open estão habilitados no PHP.';
+        }
+
+        return null;
+    }
+
     protected function dispararEmSegundoPlano(string $comando): bool
     {
         if ($this->funcaoPhpDesabilitada('popen')) {

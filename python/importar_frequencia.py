@@ -113,9 +113,9 @@ def criar_coleta(cursor: Any, total_alunos: int) -> int:
     cursor.execute(
         """
         INSERT INTO coletas (
-            data_inicial, data_final, data_referencia,
+            executada_em, data_inicial, data_final, data_referencia,
             total_alunos, origem
-        ) VALUES (?, ?, ?, ?, ?)
+        ) VALUES (datetime('now', 'localtime'), ?, ?, ?, ?, ?)
         """,
         (
             parsear_data_sql(frequencia_data_inicial()),

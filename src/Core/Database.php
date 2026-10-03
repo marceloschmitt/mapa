@@ -132,11 +132,11 @@ class Database
         );
         $upsert = self::$connection->prepare(
             'INSERT INTO configuracoes (chave, valor, descricao, atualizado_em)
-             VALUES (:chave, :valor, :descricao, datetime(\'now\'))
+             VALUES (:chave, :valor, :descricao, datetime(\'now\', \'localtime\'))
              ON CONFLICT(chave) DO UPDATE SET
                 valor = excluded.valor,
                 descricao = COALESCE(excluded.descricao, configuracoes.descricao),
-                atualizado_em = datetime(\'now\')
+                atualizado_em = datetime(\'now\', \'localtime\')
              WHERE TRIM(configuracoes.valor) = \'\''
         );
 
@@ -219,11 +219,11 @@ class Database
         );
         $upsert = self::$connection->prepare(
             'INSERT INTO configuracoes (chave, valor, descricao, atualizado_em)
-             VALUES (:chave, :valor, :descricao, datetime(\'now\'))
+             VALUES (:chave, :valor, :descricao, datetime(\'now\', \'localtime\'))
              ON CONFLICT(chave) DO UPDATE SET
                 valor = excluded.valor,
                 descricao = COALESCE(excluded.descricao, configuracoes.descricao),
-                atualizado_em = datetime(\'now\')
+                atualizado_em = datetime(\'now\', \'localtime\')
              WHERE TRIM(configuracoes.valor) = \'\''
         );
 
@@ -282,7 +282,7 @@ class Database
         );
         $insert = self::$connection->prepare(
             'INSERT INTO configuracoes (chave, valor, descricao, atualizado_em)
-             VALUES (:chave, :valor, :descricao, datetime(\'now\'))'
+             VALUES (:chave, :valor, :descricao, datetime(\'now\', \'localtime\'))'
         );
 
         foreach ($defaults as $chave => $meta) {
@@ -329,7 +329,7 @@ class Database
                 severidade TEXT NOT NULL DEFAULT 'alto' CHECK (severidade IN ('alto', 'critico')),
                 mensagem TEXT NOT NULL,
                 detalhe_json TEXT,
-                gerado_em TEXT NOT NULL DEFAULT (datetime('now')),
+                gerado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
                 visualizado INTEGER NOT NULL DEFAULT 0,
                 visualizado_em TEXT,
                 visualizado_por INTEGER,
@@ -547,7 +547,7 @@ class Database
                 auth_type TEXT NOT NULL DEFAULT 'local' CHECK (auth_type IN ('local', 'ldap')),
                 perfil TEXT NOT NULL CHECK (perfil IN ('administrador', 'coordenador_curso', 'geral', 'professor')),
                 ativo INTEGER NOT NULL DEFAULT 1,
-                criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+                criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
             )"
         );
 
@@ -585,8 +585,8 @@ class Database
 
         // Admin inicial sem senha: a primeira visita pede definição em /setup.
         $statement = self::$connection->prepare(
-            'INSERT INTO usuarios (username, nome, email, senha_hash, auth_type, perfil, ativo)
-             VALUES (:username, :nome, NULL, NULL, :auth_type, :perfil, 1)'
+            'INSERT INTO usuarios (username, nome, email, senha_hash, auth_type, perfil, ativo, criado_em)
+             VALUES (:username, :nome, NULL, NULL, :auth_type, :perfil, 1, datetime(\'now\', \'localtime\'))'
         );
         $statement->execute([
             'username' => 'admin',

@@ -1458,7 +1458,7 @@ class AnalyticsRepository
         $statement = $this->db->prepare(
             'UPDATE alarmes
              SET visualizado = 1,
-                 visualizado_em = datetime(\'now\'),
+                 visualizado_em = datetime(\'now\', \'localtime\'),
                  visualizado_por = :usuario_id,
                  contato_tipo = :contato_tipo
              WHERE id = :id
@@ -1501,7 +1501,7 @@ class AnalyticsRepository
 
         $sql = 'UPDATE alarmes
                 SET visualizado = 1,
-                    visualizado_em = datetime(\'now\'),
+                    visualizado_em = datetime(\'now\', \'localtime\'),
                     visualizado_por = :usuario_id,
                     contato_tipo = :contato_tipo
                 WHERE coleta_id = :coleta_id

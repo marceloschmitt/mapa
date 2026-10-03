@@ -266,7 +266,7 @@ def cancelar_avisos_staff_alunos_ausentes(cursor: Any, coleta_id: int) -> int:
     cursor.execute(
         """
         UPDATE alarme_emails
-        SET staff_avisado_em = datetime('now')
+        SET staff_avisado_em = datetime('now', 'localtime')
         WHERE staff_avisado_em IS NULL
           AND (
               NOT EXISTS (
@@ -321,15 +321,15 @@ def inserir_alarme(
         """
         INSERT INTO alarmes (
             coleta_id, aluno_id, curso_id, codigo_disciplina, disciplina,
-            tipo, severidade, mensagem, detalhe_json
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            tipo, severidade, mensagem, detalhe_json, gerado_em
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
         ON CONFLICT(coleta_id, aluno_id, curso_id, codigo_disciplina, tipo)
         DO UPDATE SET
             severidade = excluded.severidade,
             mensagem = excluded.mensagem,
             detalhe_json = excluded.detalhe_json,
             disciplina = COALESCE(excluded.disciplina, alarmes.disciplina),
-            gerado_em = datetime('now'),
+            gerado_em = datetime('now', 'localtime'),
             visualizado = alarmes.visualizado,
             visualizado_em = alarmes.visualizado_em,
             visualizado_por = alarmes.visualizado_por,

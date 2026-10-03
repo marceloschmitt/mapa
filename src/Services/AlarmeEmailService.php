@@ -157,7 +157,7 @@ class AlarmeEmailService
 
         $statement = $this->pdo->prepare(
             'UPDATE alarme_emails
-             SET staff_avisado_em = datetime(\'now\')
+             SET staff_avisado_em = datetime(\'now\', \'localtime\')
              WHERE staff_avisado_em IS NULL
                AND (
                    NOT EXISTS (
@@ -935,7 +935,7 @@ class AlarmeEmailService
 
         $statement = $this->pdo->prepare(
             'UPDATE alarme_emails
-             SET staff_avisado_em = datetime(\'now\')
+             SET staff_avisado_em = datetime(\'now\', \'localtime\')
              WHERE id IN (' . implode(', ', $placeholders) . ')
                AND staff_avisado_em IS NULL'
         );
@@ -963,7 +963,7 @@ class AlarmeEmailService
 
         $statement = $this->pdo->prepare(
             'UPDATE alarme_emails
-             SET staff_piloto_avisado_em = datetime(\'now\')
+             SET staff_piloto_avisado_em = datetime(\'now\', \'localtime\')
              WHERE id IN (' . implode(', ', $placeholders) . ')
                AND staff_piloto_avisado_em IS NULL'
         );
@@ -1393,7 +1393,7 @@ class AlarmeEmailService
         $statement = $this->pdo->query(
             "SELECT destinatario, papel
              FROM staff_alarme_emails
-             WHERE datetime(enviado_em) >= datetime('now', '-{$dias} days')"
+             WHERE datetime(enviado_em) >= datetime('now', 'localtime', '-{$dias} days')"
         );
 
         $chaves = [];
@@ -1417,7 +1417,7 @@ class AlarmeEmailService
             'INSERT INTO staff_alarme_emails (
                 destinatario, papel, total_alunos, enviado_em
              ) VALUES (
-                :destinatario, :papel, :total_alunos, datetime(\'now\')
+                :destinatario, :papel, :total_alunos, datetime(\'now\', \'localtime\')
              )'
         );
         $statement->execute([
@@ -1597,7 +1597,7 @@ class AlarmeEmailService
         $statement = $this->pdo->query(
             "SELECT aluno_id, destinatario, enviado_em
              FROM alarme_emails
-             WHERE datetime(enviado_em) >= datetime('now', '-{$dias} days')
+             WHERE datetime(enviado_em) >= datetime('now', 'localtime', '-{$dias} days')
              ORDER BY datetime(enviado_em) DESC"
         );
 
@@ -1634,7 +1634,7 @@ class AlarmeEmailService
             'INSERT INTO alarme_emails (
                 coleta_id, aluno_id, curso_id, destinatario, alarme_ids, enviado_em
              ) VALUES (
-                :coleta_id, :aluno_id, :curso_id, :destinatario, :alarme_ids, datetime(\'now\')
+                :coleta_id, :aluno_id, :curso_id, :destinatario, :alarme_ids, datetime(\'now\', \'localtime\')
              )
              ON CONFLICT(coleta_id, aluno_id, curso_id) DO UPDATE SET
                 destinatario = excluded.destinatario,
@@ -1673,7 +1673,7 @@ class AlarmeEmailService
         $statement = $this->pdo->prepare(
             'UPDATE alarmes
              SET visualizado = 1,
-                 visualizado_em = datetime(\'now\'),
+                 visualizado_em = datetime(\'now\', \'localtime\'),
                  visualizado_por = :usuario_id,
                  contato_tipo = :contato_tipo
              WHERE id IN (' . implode(', ', $placeholders) . ')

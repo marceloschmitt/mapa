@@ -11,12 +11,12 @@ CREATE TABLE IF NOT EXISTS usuarios (
     perfil TEXT NOT NULL CHECK (perfil IN ('administrador', 'coordenador_curso', 'geral', 'professor')),
     ativo INTEGER NOT NULL DEFAULT 1,
     pode_assinar_passe_livre INTEGER NOT NULL DEFAULT 0,
-    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+    criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS coletas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    executada_em TEXT NOT NULL DEFAULT (datetime('now')),
+    executada_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     data_inicial TEXT,
     data_final TEXT,
     data_referencia TEXT,
@@ -66,7 +66,7 @@ CREATE TABLE IF NOT EXISTS usuario_cursos (
 CREATE TABLE IF NOT EXISTS curso_coordenacao (
     curso_id INTEGER PRIMARY KEY,
     email_coordenacao TEXT NOT NULL DEFAULT '',
-    atualizado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE
 );
 
@@ -217,7 +217,7 @@ CREATE TABLE IF NOT EXISTS alarmes (
     severidade TEXT NOT NULL DEFAULT 'alto' CHECK (severidade IN ('alto', 'critico')),
     mensagem TEXT NOT NULL,
     detalhe_json TEXT,
-    gerado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    gerado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     visualizado INTEGER NOT NULL DEFAULT 0,
     visualizado_em TEXT,
     visualizado_por INTEGER,
@@ -241,7 +241,7 @@ CREATE TABLE IF NOT EXISTS configuracoes (
     chave TEXT PRIMARY KEY,
     valor TEXT NOT NULL DEFAULT '',
     descricao TEXT,
-    atualizado_em TEXT NOT NULL DEFAULT (datetime('now'))
+    atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 -- Historico de e-mails automaticos por chamada em atraso.
@@ -252,7 +252,7 @@ CREATE TABLE IF NOT EXISTS chamada_emails (
     curso_id INTEGER NOT NULL,
     data_esperada TEXT NOT NULL,
     destinatarios TEXT NOT NULL,
-    enviado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    enviado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     coleta_id INTEGER,
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
     FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE SET NULL,
@@ -270,7 +270,7 @@ CREATE TABLE IF NOT EXISTS alarme_emails (
     curso_id INTEGER NOT NULL,
     destinatario TEXT NOT NULL,
     alarme_ids TEXT NOT NULL,
-    enviado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    enviado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     staff_avisado_em TEXT,
     staff_piloto_avisado_em TEXT,
     FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE CASCADE,
@@ -291,7 +291,7 @@ CREATE TABLE IF NOT EXISTS staff_alarme_emails (
     destinatario TEXT NOT NULL,
     papel TEXT NOT NULL DEFAULT '',
     total_alunos INTEGER NOT NULL DEFAULT 0,
-    enviado_em TEXT NOT NULL DEFAULT (datetime('now'))
+    enviado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_staff_alarme_emails_destinatario_enviado
@@ -331,7 +331,7 @@ CREATE TABLE IF NOT EXISTS perda_vaga_execucoes (
     semestre_a TEXT NOT NULL,
     semestre_b TEXT NOT NULL,
     total_candidatos INTEGER NOT NULL DEFAULT 0,
-    executado_em TEXT NOT NULL DEFAULT (datetime('now'))
+    executado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE TABLE IF NOT EXISTS perda_vaga_candidatos (
@@ -372,6 +372,38 @@ CREATE TABLE IF NOT EXISTS perda_vaga_reprovacoes (
 CREATE INDEX IF NOT EXISTS idx_perda_vaga_reprovacoes_candidato
     ON perda_vaga_reprovacoes(candidato_id);
 
+-- Efeito dos contatos (manual, python/gerar_efeito_contatos.py): taxa de faltas
+-- nos dias antes e depois do primeiro contato de cada canal com o aluno.
+-- canal 'sem_contato' = alunos com alarme nunca contatados (data = primeiro alarme).
+CREATE TABLE IF NOT EXISTS efeito_contatos_execucoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    coleta_id INTEGER,
+    data_inicio TEXT NOT NULL DEFAULT '',
+    data_corte TEXT NOT NULL DEFAULT '',
+    janela_dias INTEGER NOT NULL DEFAULT 14,
+    min_aulas INTEGER NOT NULL DEFAULT 3,
+    total_eventos INTEGER NOT NULL DEFAULT 0,
+    executado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE TABLE IF NOT EXISTS efeito_contatos_eventos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    execucao_id INTEGER NOT NULL,
+    aluno_id INTEGER NOT NULL,
+    curso_id INTEGER NOT NULL,
+    canal TEXT NOT NULL,
+    primeiro_contato INTEGER NOT NULL DEFAULT 0,
+    data_evento TEXT NOT NULL,
+    aulas_antes INTEGER NOT NULL DEFAULT 0,
+    faltas_antes INTEGER NOT NULL DEFAULT 0,
+    aulas_depois INTEGER NOT NULL DEFAULT 0,
+    faltas_depois INTEGER NOT NULL DEFAULT 0,
+    FOREIGN KEY (execucao_id) REFERENCES efeito_contatos_execucoes(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_efeito_contatos_eventos_execucao
+    ON efeito_contatos_eventos(execucao_id, canal);
+
 -- Passe livre: percentual de frequencia do semestre anterior (carga manual).
 -- Um aluno em dois cursos aparece em duas linhas.
 CREATE TABLE IF NOT EXISTS passe_livre_aluno_curso (
@@ -379,7 +411,7 @@ CREATE TABLE IF NOT EXISTS passe_livre_aluno_curso (
     periodo TEXT NOT NULL,
     data_inicial TEXT NOT NULL DEFAULT '',
     data_final TEXT NOT NULL DEFAULT '',
-    gerado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    gerado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     aluno_id INTEGER,
     curso_id INTEGER,
     login TEXT NOT NULL,
@@ -426,7 +458,7 @@ CREATE TABLE IF NOT EXISTS acessos_log (
     rota_rotulo TEXT NOT NULL DEFAULT '',
     ip TEXT NOT NULL DEFAULT '',
     user_agent TEXT NOT NULL DEFAULT '',
-    criado_em TEXT NOT NULL DEFAULT (datetime('now')),
+    criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     FOREIGN KEY (usuario_id) REFERENCES usuarios(id) ON DELETE SET NULL
 );
 
@@ -446,7 +478,7 @@ CREATE INDEX IF NOT EXISTS idx_acessos_log_rota_criado
 CREATE TABLE IF NOT EXISTS feriados (
     data TEXT PRIMARY KEY,
     descricao TEXT NOT NULL DEFAULT '',
-    criado_em TEXT NOT NULL DEFAULT (datetime('now'))
+    criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
 CREATE INDEX IF NOT EXISTS idx_feriados_data

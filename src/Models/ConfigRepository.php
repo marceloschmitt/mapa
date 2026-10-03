@@ -104,11 +104,11 @@ class ConfigRepository
     {
         $statement = $this->pdo->prepare(
             'INSERT INTO configuracoes (chave, valor, descricao, atualizado_em)
-             VALUES (:chave, :valor, :descricao, datetime(\'now\'))
+             VALUES (:chave, :valor, :descricao, datetime(\'now\', \'localtime\'))
              ON CONFLICT(chave) DO UPDATE SET
                 valor = excluded.valor,
                 descricao = COALESCE(excluded.descricao, configuracoes.descricao),
-                atualizado_em = datetime(\'now\')'
+                atualizado_em = datetime(\'now\', \'localtime\')'
         );
         $statement->execute([
             'chave' => $chave,

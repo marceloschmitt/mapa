@@ -267,8 +267,8 @@ def gravar_candidatos(
     cursor.execute(
         """
         INSERT INTO perda_vaga_execucoes (
-            periodo_atual, semestre_a, semestre_b, total_candidatos
-        ) VALUES (?, ?, ?, ?)
+            periodo_atual, semestre_a, semestre_b, total_candidatos, executado_em
+        ) VALUES (?, ?, ?, ?, datetime('now', 'localtime'))
         """,
         (periodo_atual, semestre_a, semestre_b, len(candidatos)),
     )

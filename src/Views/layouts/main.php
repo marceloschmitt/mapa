@@ -47,6 +47,7 @@ $itensAcompanhamento = [
     ['/ingressantes', 'bi-person-plus', 'Ingressantes', true],
     ['/chamadas', 'bi-clipboard-check', 'Últimas chamadas', !empty($podeVerChamadas)],
     ['/frequencia-anual', 'bi-calendar3', 'Frequência corrente', !empty($podeVerFrequenciaAnual)],
+    ['/efeito-contatos', 'bi-graph-down-arrow', 'Efeito dos contatos', !empty($podeVerChamadas)],
 ];
 $itensSituacao = [
     ['/trancados', 'bi-pause-circle', 'Alunos trancados', true],

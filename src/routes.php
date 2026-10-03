@@ -8,6 +8,7 @@ use Mapa\Controllers\ApiConfigController;
 use Mapa\Controllers\AuthController;
 use Mapa\Controllers\ChamadasController;
 use Mapa\Controllers\CoordenacaoConfigController;
+use Mapa\Controllers\EfeitoContatosController;
 use Mapa\Controllers\EmailConfigController;
 use Mapa\Controllers\EstatisticasUsoController;
 use Mapa\Controllers\FeriadoController;
@@ -49,6 +50,8 @@ return static function (Router $router): void {
     $router->get('/frequencia-anual', [FrequenciaAnualController::class, 'index']);
     $router->get('/chamadas', [ChamadasController::class, 'index']);
     $router->get('/chamadas/exportar-atrasadas-1-semestre', [ChamadasController::class, 'exportarAtrasadasPrimeiroSemestre']);
+    $router->get('/efeito-contatos', [EfeitoContatosController::class, 'index']);
+    $router->post('/efeito-contatos/gerar', [EfeitoContatosController::class, 'gerar']);
 
     $router->get('/usuarios', [UserController::class, 'index']);
     $router->get('/estatisticas-uso', [EstatisticasUsoController::class, 'index']);

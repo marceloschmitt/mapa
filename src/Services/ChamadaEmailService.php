@@ -213,7 +213,7 @@ class ChamadaEmailService
                 destinatarios, enviado_em, coleta_id
              ) VALUES (
                 :codigo, :disciplina, :curso_id, :data_esperada,
-                :destinatarios, datetime(\'now\'), :coleta_id
+                :destinatarios, datetime(\'now\', \'localtime\'), :coleta_id
              )
              ON CONFLICT(codigo_disciplina, curso_id, data_esperada) DO UPDATE SET
                 disciplina = excluded.disciplina,
