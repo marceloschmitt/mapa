@@ -20,7 +20,7 @@ from config_consultas import (
     frequencia_data_final,
     frequencia_data_inicial,
 )
-from db import conectar, fechar, parsear_data_sql, row_to_dict
+from db import conectar, fechar, nome_disciplina_conhecido, parsear_data_sql, row_to_dict
 
 from paths import JSON_TABELA_FREQUENCIA
 
@@ -199,6 +199,8 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
                 continue
 
             nome_disc = str(disciplina.get("disciplina", "")).strip()
+            if nome_disc == "":
+                nome_disc = nome_disciplina_conhecido(cursor, codigo, curso_id)
             situacao = str(disciplina.get("situacao") or "").strip() or None
             data_trancamento = (
                 str(disciplina.get("data_trancamento") or "").strip() or None

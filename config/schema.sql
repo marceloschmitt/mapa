@@ -232,6 +232,9 @@ CREATE TABLE IF NOT EXISTS alarmes (
 CREATE INDEX IF NOT EXISTS idx_faltas_data ON faltas_dia(data_falta);
 CREATE INDEX IF NOT EXISTS idx_freq_percentual ON frequencia_disciplina(percentual_frequencia);
 CREATE INDEX IF NOT EXISTS idx_alarmes_visualizado ON alarmes(visualizado);
+-- Sem ele, "coleta_id = ? AND visualizado = 0" usa o índice acima e percorre
+-- os alarmes abertos de todas as coletas antigas.
+CREATE INDEX IF NOT EXISTS idx_alarmes_coleta_visualizado ON alarmes(coleta_id, visualizado);
 
 -- Configuracoes do sistema (ex.: LDAP). Valores sensiveis ficam no banco, nao no .env.
 CREATE TABLE IF NOT EXISTS configuracoes (

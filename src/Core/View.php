@@ -51,7 +51,12 @@ class View
 
         ob_start();
         require 'src/Views/' . $view . '.php';
-        $content = ob_get_clean();
+        $content = (string)ob_get_clean();
+        // Indentação do template chega a 1/4 do HTML nas listas grandes; o navegador
+        // já colapsa esses espaços. Onde espaço é conteúdo (textarea/pre), o HTML fica intacto.
+        if (stripos($content, '<textarea') === false && stripos($content, '<pre') === false) {
+            $content = (string)preg_replace(['/^[ \t]+/m', '/[ \t]{2,}/'], ['', ' '], $content);
+        }
 
         require 'src/Views/' . $layout . '.php';
     }

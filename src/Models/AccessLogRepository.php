@@ -12,7 +12,7 @@ class AccessLogRepository
 {
     /** @var array<string, string> */
     public const ROTULOS_ROTA = [
-        '/' => 'Relatórios (início)',
+        '/' => 'Início (relatório geral)',
         '/login' => 'Login',
         '/logout' => 'Logout',
         '/setup' => 'Configuração inicial',

@@ -222,6 +222,22 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
         </div>
     </div>
 <?php else: ?>
+    <?php
+    // Os menus de ação ficam vazios e são preenchidos ao abrir, a partir dos <template> abaixo;
+    // o formulário é montado no clique. Com formulários em cada menu, a lista de todos os
+    // cursos passava de 60 MB de HTML e estourava a memória do PHP.
+    $itensContatoHtml = '';
+    foreach ($rotulosContato as $valor => $rotulo) {
+        $itensContatoHtml .= '<li><button type="button" class="dropdown-item js-acao-alarme" data-acao="contato" data-contato="'
+            . htmlspecialchars($valor, ENT_QUOTES, 'UTF-8') . '">'
+            . htmlspecialchars($rotulo, ENT_QUOTES, 'UTF-8') . '</button></li>';
+    }
+    $itemEmailHtml = '<li><button type="button" class="dropdown-item js-acao-alarme" data-acao="email">Enviar e-mail</button></li>'
+        . '<li><hr class="dropdown-divider"></li>';
+    ?>
+    <template id="tpl-menu-alarme-email"><?= $itemEmailHtml . $itensContatoHtml ?></template>
+    <template id="tpl-menu-alarme"><?= $itensContatoHtml ?></template>
+    <?php ob_start(); ?>
     <div class="d-flex flex-column gap-4 lista-alarmes-alunos">
             <?php foreach ($alarmesPorAluno as $grupo): ?>
                 <?php
@@ -233,7 +249,9 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                 $turmaEntrada = trim((string)($aluno['turma_entrada'] ?? ''));
                 $abertos = (int)($grupo['abertos'] ?? 0);
                 ?>
-                <article class="card border-0 shadow-sm aluno-alarme-card">
+                <article class="card border-0 shadow-sm aluno-alarme-card"
+                         data-aluno-id="<?= (int)$aluno['id'] ?>"
+                         data-curso-id="<?= (int)$aluno['curso_id'] ?>">
                     <div class="card-header bg-white border-0 pb-0 pt-3 px-3">
                     <div class="d-flex justify-content-between align-items-start gap-2">
                         <div>
@@ -279,38 +297,7 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                                             aria-expanded="false">
                                         Ação geral
                                     </button>
-                                    <ul class="dropdown-menu dropdown-menu-end">
-                                        <li>
-                                            <form method="post"
-                                                  action="<?= htmlspecialchars(url('/alarmes/enviar-email'), ENT_QUOTES, 'UTF-8') ?>"
-                                                  onsubmit="return confirm('Enviar o e-mail ao aluno agora?');">
-                                                <input type="hidden" name="coleta_id" value="<?= $coletaId ?>">
-                                                <input type="hidden" name="aluno_id" value="<?= (int)$aluno['id'] ?>">
-                                                <input type="hidden" name="curso_id" value="<?= (int)$aluno['curso_id'] ?>">
-                                                <input type="hidden" name="abertos" value="<?= $filtroAbertos ?>">
-                                                <input type="hidden" name="curso" value="<?= htmlspecialchars($cursoSelecionado, ENT_QUOTES, 'UTF-8') ?>">
-                                                <button type="submit" class="dropdown-item">
-                                                    Enviar e-mail
-                                                </button>
-                                            </form>
-                                        </li>
-                                        <li><hr class="dropdown-divider"></li>
-                                        <?php foreach ($rotulosContato as $valor => $rotulo): ?>
-                                            <li>
-                                                <form method="post" action="<?= htmlspecialchars(url('/alarmes/visualizar'), ENT_QUOTES, 'UTF-8') ?>">
-                                                    <input type="hidden" name="coleta_id" value="<?= $coletaId ?>">
-                                                    <input type="hidden" name="aluno_id" value="<?= (int)$aluno['id'] ?>">
-                                                    <input type="hidden" name="curso_id" value="<?= (int)$aluno['curso_id'] ?>">
-                                                    <input type="hidden" name="contato_tipo" value="<?= htmlspecialchars($valor, ENT_QUOTES, 'UTF-8') ?>">
-                                                    <input type="hidden" name="abertos" value="<?= $filtroAbertos ?>">
-                                                    <input type="hidden" name="curso" value="<?= htmlspecialchars($cursoSelecionado, ENT_QUOTES, 'UTF-8') ?>">
-                                                    <button type="submit" class="dropdown-item">
-                                                        <?= htmlspecialchars($rotulo, ENT_QUOTES, 'UTF-8') ?>
-                                                    </button>
-                                                </form>
-                                            </li>
-                                        <?php endforeach; ?>
-                                    </ul>
+                                    <ul class="dropdown-menu dropdown-menu-end" data-menu="tpl-menu-alarme-email"></ul>
                                 </div>
                             <?php endif; ?>
                         </div>
@@ -464,7 +451,9 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                                                             <?php if ($outraDisciplina): ?>
                                                                 <span class="small text-secondary">—</span>
                                                             <?php else: ?>
-                                                            <div class="dropdown">
+                                                            <div class="dropdown"
+                                                                 data-alarme-id="<?= (int)$alarme['id'] ?>"
+                                                                 data-disciplina="<?= htmlspecialchars($codigoDisc, ENT_QUOTES, 'UTF-8') ?>">
                                                                 <button class="btn btn-sm btn-outline-success dropdown-toggle py-0 px-2"
                                                                         type="button"
                                                                         data-bs-toggle="dropdown"
@@ -472,39 +461,8 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                                                                         aria-expanded="false">
                                                                     Ação
                                                                 </button>
-                                                                <ul class="dropdown-menu dropdown-menu-end">
-                                                                    <?php if (!$todosVisualizados): ?>
-                                                                        <li>
-                                                                            <form method="post"
-                                                                                  action="<?= htmlspecialchars(url('/alarmes/enviar-email'), ENT_QUOTES, 'UTF-8') ?>"
-                                                                                  onsubmit="return confirm('Enviar o e-mail desta disciplina ao aluno agora?');">
-                                                                                <input type="hidden" name="coleta_id" value="<?= $coletaId ?>">
-                                                                                <input type="hidden" name="aluno_id" value="<?= (int)$aluno['id'] ?>">
-                                                                                <input type="hidden" name="curso_id" value="<?= (int)$aluno['curso_id'] ?>">
-                                                                                <input type="hidden" name="codigo_disciplina" value="<?= htmlspecialchars($codigoDisc, ENT_QUOTES, 'UTF-8') ?>">
-                                                                                <input type="hidden" name="abertos" value="<?= $filtroAbertos ?>">
-                                                                                <input type="hidden" name="curso" value="<?= htmlspecialchars($cursoSelecionado, ENT_QUOTES, 'UTF-8') ?>">
-                                                                                <button type="submit" class="dropdown-item">
-                                                                                    Enviar e-mail
-                                                                                </button>
-                                                                            </form>
-                                                                        </li>
-                                                                        <li><hr class="dropdown-divider"></li>
-                                                                    <?php endif; ?>
-                                                                    <?php foreach ($rotulosContato as $valor => $rotulo): ?>
-                                                                        <li>
-                                                                            <form method="post" action="<?= htmlspecialchars(url('/alarmes/visualizar'), ENT_QUOTES, 'UTF-8') ?>">
-                                                                                <input type="hidden" name="alarme_id" value="<?= (int)$alarme['id'] ?>">
-                                                                                <input type="hidden" name="contato_tipo" value="<?= htmlspecialchars($valor, ENT_QUOTES, 'UTF-8') ?>">
-                                                                                <input type="hidden" name="abertos" value="<?= $filtroAbertos ?>">
-                                                                                <input type="hidden" name="curso" value="<?= htmlspecialchars($cursoSelecionado, ENT_QUOTES, 'UTF-8') ?>">
-                                                                                <button type="submit" class="dropdown-item">
-                                                                                    <?= htmlspecialchars($rotulo, ENT_QUOTES, 'UTF-8') ?>
-                                                                                </button>
-                                                                            </form>
-                                                                        </li>
-                                                                    <?php endforeach; ?>
-                                                                </ul>
+                                                                <ul class="dropdown-menu dropdown-menu-end"
+                                                                    data-menu="<?= $todosVisualizados ? 'tpl-menu-alarme' : 'tpl-menu-alarme-email' ?>"></ul>
                                                             </div>
                                                             <?php endif; ?>
                                                         <?php else: ?>
@@ -539,12 +497,95 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                 </article>
             <?php endforeach; ?>
     </div>
+    <?= preg_replace('/^[ \t]+/m', '', (string)ob_get_clean()) ?>
 
         <?php if ($exibidos < $totalAlarmes): ?>
             <div class="text-secondary small text-center mt-3">
                 Mostrando <?= $exibidos ?> de <?= $totalAlarmes ?> alarmes.
             </div>
         <?php endif; ?>
+
+    <script>
+    (function () {
+        const config = <?= json_encode([
+            'urlEmail' => url('/alarmes/enviar-email'),
+            'urlVisualizar' => url('/alarmes/visualizar'),
+            'coletaId' => (int)$coletaId,
+            'abertos' => (string)$filtroAbertos,
+            'curso' => (string)$cursoSelecionado,
+        ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
+
+        function enviar(url, campos) {
+            const form = document.createElement('form');
+            form.method = 'post';
+            form.action = url;
+            Object.keys(campos).forEach(function (nome) {
+                const input = document.createElement('input');
+                input.type = 'hidden';
+                input.name = nome;
+                input.value = String(campos[nome]);
+                form.appendChild(input);
+            });
+            document.body.appendChild(form);
+            form.submit();
+        }
+
+        document.addEventListener('show.bs.dropdown', function (evento) {
+            const menu = evento.target.parentElement
+                ? evento.target.parentElement.querySelector('.dropdown-menu[data-menu]')
+                : null;
+            if (!menu || menu.children.length > 0) {
+                return;
+            }
+            const modelo = document.getElementById(menu.dataset.menu);
+            if (modelo) {
+                menu.appendChild(modelo.content.cloneNode(true));
+            }
+        });
+
+        document.addEventListener('click', function (evento) {
+            const botao = evento.target.closest('.js-acao-alarme');
+            if (!botao) {
+                return;
+            }
+            const cartao = botao.closest('[data-aluno-id]');
+            if (!cartao) {
+                return;
+            }
+            // Dentro da linha de uma disciplina, a ação vale só para aquele alarme/disciplina.
+            const alarme = botao.closest('[data-alarme-id]');
+            const campos = { abertos: config.abertos, curso: config.curso };
+            const doAluno = {
+                coleta_id: config.coletaId,
+                aluno_id: cartao.dataset.alunoId,
+                curso_id: cartao.dataset.cursoId
+            };
+
+            if (botao.dataset.acao === 'email') {
+                const pergunta = alarme
+                    ? 'Enviar o e-mail desta disciplina ao aluno agora?'
+                    : 'Enviar o e-mail ao aluno agora?';
+                if (!confirm(pergunta)) {
+                    return;
+                }
+                Object.assign(campos, doAluno);
+                if (alarme) {
+                    campos.codigo_disciplina = alarme.dataset.disciplina || '';
+                }
+                enviar(config.urlEmail, campos);
+                return;
+            }
+
+            campos.contato_tipo = botao.dataset.contato || '';
+            if (alarme) {
+                campos.alarme_id = alarme.dataset.alarmeId;
+            } else {
+                Object.assign(campos, doAluno);
+            }
+            enviar(config.urlVisualizar, campos);
+        });
+    })();
+    </script>
 <?php endif; ?>
 
 <style>

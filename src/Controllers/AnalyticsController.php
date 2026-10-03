@@ -69,7 +69,8 @@ class AnalyticsController extends Controller
                 'porDiaSemana' => ['labels' => [], 'values' => []],
                 'porMes' => ['labels' => [], 'values' => [], 'semanas' => []],
                 'disciplinasCriticas' => [],
-                'erro' => 'Nenhuma coleta importada. Rode python3 importar_frequencia.py',
+                'erro' => Session::flash('erro') ?? 'Nenhuma coleta importada. Rode python3 importar_frequencia.py',
+                'sucesso' => Session::flash('sucesso'),
             ]));
             return;
         }
@@ -84,6 +85,7 @@ class AnalyticsController extends Controller
                 'resumo' => [
                     'total_disciplinas' => 0,
                     'media_frequencia' => 0.0,
+                    'total_alunos' => 0,
                     'abaixo_limite' => 0,
                     'total_alarmes' => 0,
                     'nao_visualizados' => 0,
@@ -125,6 +127,11 @@ class AnalyticsController extends Controller
             ));
             $resumo['total_disciplinas'] = count($disciplinasCriticas);
             $resumo['abaixo_limite'] = $repo->contarAlunosAbaixoLimite(
+                $coletaId,
+                null,
+                $codigosProfessor
+            );
+            $resumo['total_alunos'] = $repo->contarAlunosMatriculados(
                 $coletaId,
                 null,
                 $codigosProfessor

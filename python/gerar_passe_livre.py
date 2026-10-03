@@ -39,7 +39,7 @@ from ausencias_especiais import (
     aplicar_situacao_trancamento,
     mapear_trancamento_cancelamento,
 )
-from db import conectar, fechar, row_to_dict
+from db import conectar, fechar, nome_disciplina_conhecido, row_to_dict
 from paths import JSON_RESPOSTA_MATRICULAS
 from status_aluno import status_eh_controle
 
@@ -624,6 +624,10 @@ def inserir_registros(
                 pct = None
             else:
                 data_trancamento = None
+            codigo = str(disc.get("codigo_disciplina") or "")
+            nome_disc = str(disc.get("disciplina") or "").strip()
+            if nome_disc == "":
+                nome_disc = nome_disciplina_conhecido(cursor, codigo, curso_id)
             cursor.execute(
                 """
                 INSERT INTO passe_livre_disciplina (
@@ -633,8 +637,8 @@ def inserir_registros(
                 """,
                 (
                     aluno_curso_id,
-                    str(disc.get("codigo_disciplina") or ""),
-                    str(disc.get("disciplina") or ""),
+                    codigo,
+                    nome_disc,
                     float(pct) if pct is not None else None,
                     situacao,
                     data_trancamento,

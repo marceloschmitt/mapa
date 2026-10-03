@@ -1,6 +1,6 @@
 <div class="text-center mb-4">
     <img
-        src="/logo.png"
+        src="<?= htmlspecialchars(asset('assets/img/logo-mapa.png'), ENT_QUOTES, 'UTF-8') ?>"
         alt="<?= htmlspecialchars($app['short_name'] . ' — ' . $app['full_name'], ENT_QUOTES, 'UTF-8') ?>"
         class="logo-mapa mb-3"
     >

@@ -22,4 +22,11 @@ if (!function_exists('url')) {
     }
 }
 
+if (!function_exists('asset')) {
+    function asset(string $path): string
+    {
+        return Mapa\Core\Url::asset($path);
+    }
+}
+
 Mapa\Core\Session::start();

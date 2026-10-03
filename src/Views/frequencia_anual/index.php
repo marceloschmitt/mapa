@@ -136,7 +136,8 @@ $fmtPct = static function ($valor): string {
                             <th class="text-end">Frequência*</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="corpoPasseLivre">
+                        <?php $dadosLinhas = []; ?>
                         <?php foreach ($linhas as $i => $linha): ?>
                             <?php
                             $nomeSocial = trim((string)($linha['nome_social'] ?? ''));
@@ -154,28 +155,23 @@ $fmtPct = static function ($valor): string {
                                 'frequencia' => $linha['frequencia'],
                                 'disciplinas' => array_map(
                                     static function (array $d): array {
-                                        return [
+                                        return array_filter([
                                             'codigo' => (string)($d['codigo_disciplina'] ?? ''),
                                             'nome' => (string)($d['disciplina'] ?? ''),
                                             'frequencia' => $d['frequencia'],
                                             'situacao' => (string)($d['situacao'] ?? ''),
                                             'data_trancamento' => (string)($d['data_trancamento'] ?? ''),
-                                        ];
+                                        ], static fn($v): bool => $v !== '' && $v !== null);
                                     },
                                     $disciplinas
                                 ),
                             ];
-                            $json = htmlspecialchars(
-                                (string)json_encode($payload, JSON_UNESCAPED_UNICODE),
-                                ENT_QUOTES,
-                                'UTF-8'
-                            );
+                            $dadosLinhas[(int)$linha['id']] = $payload;
                             ?>
                             <tr class="linha-passe-livre"
                                 tabindex="0"
                                 role="button"
-                                data-id="<?= (int)$linha['id'] ?>"
-                                data-passe-livre="<?= $json ?>">
+                                data-id="<?= (int)$linha['id'] ?>">
                                 <td class="text-end text-secondary pe-1"><?= $i + 1 ?></td>
                                 <td class="fw-semibold"><?= htmlspecialchars($nome, ENT_QUOTES, 'UTF-8') ?></td>
                                 <td><?= htmlspecialchars((string)($linha['matricula'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
@@ -193,6 +189,11 @@ $fmtPct = static function ($valor): string {
             </p>
         </div>
     </div>
+
+    <script type="application/json" id="dadosPasseLivre"><?= json_encode(
+        (object)$dadosLinhas,
+        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
+    ) ?></script>
 
     <div class="modal fade" id="modalPasseLivre" tabindex="-1"
          aria-labelledby="modalPasseLivreTitulo" aria-hidden="true">
@@ -335,30 +336,23 @@ $fmtPct = static function ($valor): string {
             bootstrap.Modal.getOrCreateInstance(modalEl).show();
         }
 
-        function lerDados(linha) {
-            try {
-                return JSON.parse(linha.getAttribute('data-passe-livre') || '{}');
-            } catch (e) {
-                return null;
+        const dadosPorId = JSON.parse(document.getElementById('dadosPasseLivre').textContent || '{}');
+        const corpo = document.getElementById('corpoPasseLivre');
+
+        function abrirDaLinha(ev) {
+            const linha = ev.target.closest('.linha-passe-livre');
+            const dados = linha ? dadosPorId[linha.dataset.id] : null;
+            if (dados) {
+                abrir(dados);
             }
         }
 
-        document.querySelectorAll('.linha-passe-livre').forEach(function (linha) {
-            linha.addEventListener('click', function () {
-                const dados = lerDados(linha);
-                if (dados) {
-                    abrir(dados);
-                }
-            });
-            linha.addEventListener('keydown', function (ev) {
-                if (ev.key === 'Enter' || ev.key === ' ') {
-                    ev.preventDefault();
-                    const dados = lerDados(linha);
-                    if (dados) {
-                        abrir(dados);
-                    }
-                }
-            });
+        corpo.addEventListener('click', abrirDaLinha);
+        corpo.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+                ev.preventDefault();
+                abrirDaLinha(ev);
+            }
         });
     });
     </script>

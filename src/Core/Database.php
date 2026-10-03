@@ -360,6 +360,9 @@ class Database
         self::$connection->exec(
             'CREATE INDEX IF NOT EXISTS idx_alarmes_visualizado ON alarmes(visualizado)'
         );
+        self::$connection->exec(
+            'CREATE INDEX IF NOT EXISTS idx_alarmes_coleta_visualizado ON alarmes(coleta_id, visualizado)'
+        );
         self::$connection->exec('COMMIT');
         self::$connection->exec('PRAGMA foreign_keys = ON');
     }

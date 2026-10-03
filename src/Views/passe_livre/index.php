@@ -17,9 +17,7 @@ $mostrarBadgeCurso = $semSeletorCurso;
 $podeGerarPasseLivre = !empty($podeGerarPasseLivre);
 $podeAssinarPasseLivre = !empty($podeAssinarPasseLivre);
 
-$scriptDir = dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/index.php'));
-$assetBase = ($scriptDir === '/' || $scriptDir === '\\' || $scriptDir === '.') ? '' : $scriptDir;
-$brasaoUrl = $assetBase . '/assets/img/brasao.jpeg';
+$brasaoUrl = asset('assets/img/brasao.jpeg');
 
 /**
  * @param mixed $valor
@@ -45,7 +43,7 @@ $dataExtenso = static function (): string {
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-    <div>
+    <div class="flex-grow-1" style="flex-basis: 0; min-width: 280px;">
         <h1 class="h4 mb-1">Passe livre</h1>
         <?php if ($mostrarBadgeCurso): ?>
             <p class="mb-1">
@@ -55,15 +53,15 @@ $dataExtenso = static function (): string {
             </p>
         <?php endif; ?>
         <p class="text-secondary mb-2">
-            Percentual de frequência dos alunos ATIVO/FORMANDO do semestre atual,
-            consultado nos três semestres anteriores
             <?php if (is_array($meta)): ?>
-                (exibindo <?= htmlspecialchars((string)$meta['periodo'], ENT_QUOTES, 'UTF-8') ?>;
-                <?= htmlspecialchars((string)$meta['data_inicial'], ENT_QUOTES, 'UTF-8') ?>
+                Frequência dos alunos ativos e formandos em
+                <?= htmlspecialchars((string)$meta['periodo'], ENT_QUOTES, 'UTF-8') ?>
+                (<?= htmlspecialchars((string)$meta['data_inicial'], ENT_QUOTES, 'UTF-8') ?>
                 a <?= htmlspecialchars((string)$meta['data_final'], ENT_QUOTES, 'UTF-8') ?>).
                 Clique na linha para ver as disciplinas.
             <?php else: ?>
-                . Selecione o semestre quando houver dados gerados.
+                Frequência dos alunos ativos e formandos nos três semestres anteriores.
+                Selecione o semestre quando houver dados gerados.
             <?php endif; ?>
         </p>
         <?php if (is_array($meta)): ?>
@@ -77,18 +75,18 @@ $dataExtenso = static function (): string {
             </div>
         <?php endif; ?>
     </div>
-    <div class="d-flex flex-column align-items-stretch align-items-md-end gap-2">
-        <?php if ($podeGerarPasseLivre): ?>
-            <div class="text-md-end">
-                <form method="post" action="<?= htmlspecialchars(url('/passe-livre/gerar'), ENT_QUOTES, 'UTF-8') ?>">
-                    <button type="submit" class="btn btn-primary">Gerar passe livre</button>
-                </form>
-                <p class="small text-secondary mb-0 mt-1" style="max-width: 280px;">
-                    Gera os 3 semestres anteriores ao atual. Execute no início do semestre, uma vez.
-                </p>
-            </div>
-        <?php endif; ?>
-        <?php if ($periodosDisponiveis !== []): ?>
+    <?php if ($podeGerarPasseLivre): ?>
+        <div class="text-md-end">
+            <form method="post" action="<?= htmlspecialchars(url('/passe-livre/gerar'), ENT_QUOTES, 'UTF-8') ?>">
+                <button type="submit" class="btn btn-primary">Gerar passe livre</button>
+            </form>
+            <p class="small text-secondary mb-0 mt-1" style="max-width: 280px;">
+                Gera os 3 semestres anteriores ao atual. Execute no início do semestre, uma vez.
+            </p>
+        </div>
+    <?php endif; ?>
+    <?php if ($periodosDisponiveis !== []): ?>
+        <div class="w-100">
             <form id="form-passe-livre-filtro" method="get"
                   action="<?= htmlspecialchars(url('/passe-livre'), ENT_QUOTES, 'UTF-8') ?>"
                   class="d-flex flex-wrap align-items-end gap-2">
@@ -167,8 +165,8 @@ $dataExtenso = static function (): string {
                 });
             })();
             </script>
-        <?php endif; ?>
-    </div>
+        </div>
+    <?php endif; ?>
 </div>
 
 <?php if (!empty($sucesso)): ?>
@@ -213,7 +211,8 @@ $dataExtenso = static function (): string {
                             <th class="text-end">Frequência*</th>
                         </tr>
                     </thead>
-                    <tbody>
+                    <tbody id="corpoPasseLivre">
+                        <?php $dadosLinhas = []; ?>
                         <?php foreach ($linhas as $i => $linha): ?>
                             <?php
                             $nomeSocial = trim((string)($linha['nome_social'] ?? ''));
@@ -232,13 +231,13 @@ $dataExtenso = static function (): string {
                                 'frequencia' => $linha['frequencia'],
                                 'disciplinas' => array_map(
                                     static function (array $d): array {
-                                        return [
+                                        return array_filter([
                                             'codigo' => (string)($d['codigo_disciplina'] ?? ''),
                                             'nome' => (string)($d['disciplina'] ?? ''),
                                             'frequencia' => $d['frequencia'],
                                             'situacao' => (string)($d['situacao'] ?? ''),
                                             'data_trancamento' => (string)($d['data_trancamento'] ?? ''),
-                                        ];
+                                        ], static fn($v): bool => $v !== '' && $v !== null);
                                     },
                                     $disciplinas
                                 ),
@@ -263,17 +262,12 @@ $dataExtenso = static function (): string {
                             $numerosAnteriores = is_array($atestado)
                                 ? array_column($atestado['anteriores'] ?? [], 'numero_formatado')
                                 : [];
-                            $json = htmlspecialchars(
-                                (string)json_encode($payload, JSON_UNESCAPED_UNICODE),
-                                ENT_QUOTES,
-                                'UTF-8'
-                            );
+                            $dadosLinhas[(int)$linha['id']] = $payload;
                             ?>
                             <tr class="linha-passe-livre<?= is_array($atestado) ? ' is-assinado' : '' ?>"
                                 tabindex="0"
                                 role="button"
                                 data-id="<?= (int)$linha['id'] ?>"
-                                data-passe-livre="<?= $json ?>"
                                 <?php if (is_array($atestado)): ?>title="Assinado"<?php endif; ?>>
                                 <td class="text-end text-secondary pe-1"><?= $i + 1 ?></td>
                                 <td class="fw-semibold">
@@ -303,6 +297,11 @@ $dataExtenso = static function (): string {
             </p>
         </div>
     </div>
+
+    <script type="application/json" id="dadosPasseLivre"><?= json_encode(
+        (object)$dadosLinhas,
+        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
+    ) ?></script>
 
     <div class="modal fade" id="modalPasseLivre" tabindex="-1"
          aria-labelledby="modalPasseLivreTitulo" aria-hidden="true">
@@ -466,6 +465,7 @@ $dataExtenso = static function (): string {
         const pdfBase = <?= json_encode(url('/passe-livre/pdf'), JSON_UNESCAPED_UNICODE) ?>;
         const assinarUrl = <?= json_encode(url('/passe-livre/assinar'), JSON_UNESCAPED_UNICODE) ?>;
         const dataHoje = <?= json_encode($dataExtenso(), JSON_UNESCAPED_UNICODE) ?>;
+        const dadosPorId = JSON.parse(document.getElementById('dadosPasseLivre').textContent || '{}');
         let dadosAtuais = null;
 
         function fmtPct(valor) {
@@ -647,12 +647,10 @@ $dataExtenso = static function (): string {
                 const linha = document.querySelector(
                     '.linha-passe-livre[data-id="' + String(dadosAtuais.id) + '"]'
                 );
+                if (dadosPorId[dadosAtuais.id]) {
+                    dadosPorId[dadosAtuais.id].atestado = resultado.json.atestado;
+                }
                 if (linha) {
-                    try {
-                        const atual = JSON.parse(linha.getAttribute('data-passe-livre') || '{}');
-                        atual.atestado = resultado.json.atestado;
-                        linha.setAttribute('data-passe-livre', JSON.stringify(atual));
-                    } catch (e) {}
                     linha.classList.add('is-assinado');
                     linha.setAttribute('title', 'Assinado');
                     const badge = linha.querySelector('.numero-atestado-linha');
@@ -681,30 +679,22 @@ $dataExtenso = static function (): string {
             });
         }
 
-        function lerDados(linha) {
-            try {
-                return JSON.parse(linha.getAttribute('data-passe-livre') || '{}');
-            } catch (e) {
-                return null;
+        const corpoTabela = document.getElementById('corpoPasseLivre');
+
+        function abrirDaLinha(ev) {
+            const linha = ev.target.closest('.linha-passe-livre');
+            const dados = linha ? dadosPorId[linha.dataset.id] : null;
+            if (dados) {
+                abrir(dados);
             }
         }
 
-        document.querySelectorAll('.linha-passe-livre').forEach(function (linha) {
-            linha.addEventListener('click', function () {
-                const dados = lerDados(linha);
-                if (dados) {
-                    abrir(dados);
-                }
-            });
-            linha.addEventListener('keydown', function (ev) {
-                if (ev.key === 'Enter' || ev.key === ' ') {
-                    ev.preventDefault();
-                    const dados = lerDados(linha);
-                    if (dados) {
-                        abrir(dados);
-                    }
-                }
-            });
+        corpoTabela.addEventListener('click', abrirDaLinha);
+        corpoTabela.addEventListener('keydown', function (ev) {
+            if (ev.key === 'Enter' || ev.key === ' ') {
+                ev.preventDefault();
+                abrirDaLinha(ev);
+            }
         });
     });
     </script>

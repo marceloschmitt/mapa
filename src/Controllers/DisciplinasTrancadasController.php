@@ -55,6 +55,7 @@ class DisciplinasTrancadasController extends Controller
                         'email' => (string)($linha['email'] ?? ''),
                         'nome_curso' => $nomeCurso,
                     ],
+                    'todas_trancadas' => !empty($linha['todas_trancadas']),
                     'disciplinas' => [],
                 ];
             }
@@ -72,6 +73,10 @@ class DisciplinasTrancadasController extends Controller
             'totalAlunos' => count($alunosUnicos),
             'totalCursos' => count($cursosUnicos),
             'totalRegistros' => count($linhas),
+            'totalTodasTrancadas' => count(array_filter(
+                $porAluno,
+                static fn(array $grupo): bool => $grupo['todas_trancadas']
+            )),
             'cursosDisponiveis' => $cursosDisponiveis,
             'cursoSelecionado' => $cursoSelecionado,
             'cursoExibido' => $escopo['cursoExibido'],

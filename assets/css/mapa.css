@@ -1,0 +1,224 @@
+:root {
+    --mapa-marinho: #13294b;
+    --mapa-marinho-2: #2c4a7a;
+    --mapa-verde: #43a047;
+    --mapa-laranja: #f28c28;
+    --mapa-azul: #2f80ed;
+    --mapa-vermelho: #d64545;
+    --mapa-fundo: #f5f7fb;
+    --mapa-borda: #e3e8f0;
+    --mapa-raio: 14px;
+    --bs-body-font-family: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --bs-primary: #2c4a7a;
+    --bs-primary-rgb: 44, 74, 122;
+    --bs-link-color: #2c4a7a;
+    --bs-link-color-rgb: 44, 74, 122;
+    --bs-link-hover-color: #13294b;
+    --bs-link-hover-color-rgb: 19, 41, 75;
+}
+
+.btn-primary {
+    --bs-btn-bg: var(--mapa-marinho-2);
+    --bs-btn-border-color: var(--mapa-marinho-2);
+    --bs-btn-hover-bg: var(--mapa-marinho);
+    --bs-btn-hover-border-color: var(--mapa-marinho);
+    --bs-btn-active-bg: var(--mapa-marinho);
+    --bs-btn-active-border-color: var(--mapa-marinho);
+    --bs-btn-disabled-bg: var(--mapa-marinho-2);
+    --bs-btn-disabled-border-color: var(--mapa-marinho-2);
+}
+.btn-outline-primary {
+    --bs-btn-color: var(--mapa-marinho-2);
+    --bs-btn-border-color: var(--mapa-marinho-2);
+    --bs-btn-hover-bg: var(--mapa-marinho-2);
+    --bs-btn-hover-border-color: var(--mapa-marinho-2);
+    --bs-btn-active-bg: var(--mapa-marinho);
+    --bs-btn-active-border-color: var(--mapa-marinho);
+}
+
+body {
+    background: var(--mapa-fundo);
+    color: #1f2a3c;
+}
+
+/* Barra superior */
+.topo-mapa {
+    background: #fff;
+    border-bottom: 1px solid var(--mapa-borda);
+    box-shadow: 0 1px 2px rgba(19, 41, 75, 0.04);
+}
+.topo-mapa .navbar-brand {
+    display: flex;
+    align-items: center;
+    gap: 0.55rem;
+    color: var(--mapa-marinho);
+    font-weight: 800;
+    letter-spacing: 0.06em;
+    font-size: 1.2rem;
+}
+.topo-mapa .navbar-brand img {
+    width: 44px;
+    height: 44px;
+}
+.topo-mapa .navbar-brand .marca-a { color: var(--mapa-verde); }
+.topo-mapa .marca-texto {
+    display: flex;
+    flex-direction: column;
+    line-height: 1;
+}
+.topo-mapa .marca-sigla { font-size: 1.3rem; }
+/* Duas linhas, como no logo completo; a largura limita o espaço tomado do menu. */
+.topo-mapa .marca-nome {
+    max-width: 11.5rem;
+    margin-top: 0.2rem;
+    font-size: 0.56rem;
+    font-weight: 600;
+    letter-spacing: 0.04em;
+    line-height: 1.25;
+    text-transform: uppercase;
+    white-space: normal;
+    color: #3b4a63;
+}
+.topo-mapa .nav-link {
+    color: #3b4a63;
+    font-weight: 500;
+    white-space: nowrap;
+    padding: 0.9rem 0.75rem;
+    border-bottom: 3px solid transparent;
+}
+.topo-mapa .nav-link:hover,
+.topo-mapa .nav-link:focus { color: var(--mapa-marinho); }
+.topo-mapa .nav-link.active {
+    color: var(--mapa-marinho);
+    font-weight: 600;
+    border-bottom-color: var(--mapa-verde);
+}
+.topo-mapa .dropdown-menu {
+    min-width: 15rem;
+    border: 1px solid var(--mapa-borda);
+    border-radius: 12px;
+    box-shadow: 0 10px 30px rgba(19, 41, 75, 0.12);
+    padding: 0.4rem;
+}
+.topo-mapa .dropdown-item {
+    border-radius: 8px;
+    padding: 0.45rem 0.7rem;
+    color: #1f2a3c;
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+}
+.topo-mapa .dropdown-item i { color: var(--mapa-marinho-2); width: 1.1rem; text-align: center; }
+.topo-mapa .dropdown-item.active,
+.topo-mapa .dropdown-item:active {
+    background: #eaf4ea;
+    color: var(--mapa-marinho);
+    font-weight: 600;
+}
+.topo-mapa .dropdown-header {
+    font-size: 0.7rem;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+}
+.avatar-iniciais {
+    width: 34px;
+    height: 34px;
+    border-radius: 50%;
+    background: var(--mapa-marinho);
+    color: #fff;
+    font-size: 0.8rem;
+    font-weight: 700;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    flex-shrink: 0;
+}
+.topo-mapa .conta-link {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+}
+@media (max-width: 1199.98px) {
+    .topo-mapa .nav-link { padding: 0.55rem 0.25rem; border-bottom: 0; }
+    .topo-mapa .nav-link.active { border-left: 3px solid var(--mapa-verde); padding-left: 0.6rem; }
+}
+
+/* Cartões */
+.card {
+    border-radius: var(--mapa-raio);
+}
+.card.shadow-sm {
+    box-shadow: 0 1px 3px rgba(19, 41, 75, 0.06), 0 1px 2px rgba(19, 41, 75, 0.04) !important;
+}
+
+/* Tela inicial */
+.inicio-saudacao {
+    font-weight: 700;
+    color: var(--mapa-marinho);
+}
+.selo-coleta {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.45rem;
+    padding: 0.3rem 0.75rem;
+    border-radius: 999px;
+    font-size: 0.82rem;
+    background: #eaf4ea;
+    color: #25632a;
+}
+.selo-coleta .ponto {
+    width: 8px;
+    height: 8px;
+    border-radius: 50%;
+    background: var(--mapa-verde);
+}
+.selo-coleta.desatualizada {
+    background: #fff1e3;
+    color: #8a4b0f;
+}
+.selo-coleta.desatualizada .ponto { background: var(--mapa-laranja); }
+
+.indicador {
+    display: flex;
+    align-items: center;
+    gap: 0.9rem;
+    color: inherit;
+    text-decoration: none;
+    height: 100%;
+}
+a.indicador-card { transition: transform 0.12s ease, box-shadow 0.12s ease; }
+a.indicador-card:hover {
+    transform: translateY(-2px);
+    box-shadow: 0 8px 20px rgba(19, 41, 75, 0.1) !important;
+}
+.indicador-icone {
+    width: 46px;
+    height: 46px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 1.35rem;
+    flex-shrink: 0;
+}
+.indicador-icone.azul { background: #e8f1fd; color: var(--mapa-azul); }
+.indicador-icone.vermelho { background: #fdecec; color: var(--mapa-vermelho); }
+.indicador-icone.laranja { background: #fff1e3; color: var(--mapa-laranja); }
+.indicador-icone.verde { background: #eaf4ea; color: var(--mapa-verde); }
+.indicador-valor {
+    font-size: 1.6rem;
+    font-weight: 700;
+    line-height: 1.1;
+    color: var(--mapa-marinho);
+}
+.indicador-rotulo {
+    font-size: 0.82rem;
+    color: #5b6880;
+    line-height: 1.25;
+}
+.indicador-detalhe {
+    margin-top: 0.2rem;
+    font-size: 0.78rem;
+    font-weight: 600;
+    color: var(--mapa-vermelho);
+}

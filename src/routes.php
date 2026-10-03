@@ -7,7 +7,6 @@ use Mapa\Controllers\AnalyticsController;
 use Mapa\Controllers\ApiConfigController;
 use Mapa\Controllers\AuthController;
 use Mapa\Controllers\ChamadasController;
-use Mapa\Controllers\DashboardController;
 use Mapa\Controllers\CoordenacaoConfigController;
 use Mapa\Controllers\EmailConfigController;
 use Mapa\Controllers\EstatisticasUsoController;
@@ -23,7 +22,7 @@ use Mapa\Controllers\UserController;
 use Mapa\Core\Router;
 
 return static function (Router $router): void {
-    $router->get('/', [DashboardController::class, 'index']);
+    $router->get('/', [AnalyticsController::class, 'index']);
 
     $router->get('/login', [AuthController::class, 'loginForm']);
     $router->post('/login', [AuthController::class, 'login']);

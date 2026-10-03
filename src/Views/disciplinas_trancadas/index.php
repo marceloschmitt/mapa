@@ -6,6 +6,7 @@ $porAluno = $porAluno ?? [];
 $totalAlunos = (int)($totalAlunos ?? 0);
 $totalCursos = (int)($totalCursos ?? 0);
 $totalRegistros = (int)($totalRegistros ?? 0);
+$totalTodasTrancadas = (int)($totalTodasTrancadas ?? 0);
 $semSeletorCurso = !empty($semSeletorCurso);
 $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
 $cursosDisponiveis = $cursosDisponiveis ?? [];
@@ -41,6 +42,11 @@ $mostrarBadgeCurso = $semSeletorCurso;
                 <span class="badge text-bg-secondary">
                     <?= $totalRegistros ?> disciplina<?= $totalRegistros === 1 ? '' : 's' ?>
                 </span>
+                <?php if ($totalTodasTrancadas > 0): ?>
+                    <span class="badge text-bg-danger">
+                        <?= $totalTodasTrancadas ?> trancou<?= $totalTodasTrancadas === 1 ? '' : 'aram' ?> todas
+                    </span>
+                <?php endif; ?>
             </div>
         <?php endif; ?>
     </div>
@@ -73,6 +79,22 @@ $mostrarBadgeCurso = $semSeletorCurso;
     <div class="alert alert-warning"><?= htmlspecialchars($avisoCoordenador, ENT_QUOTES, 'UTF-8') ?></div>
 <?php endif; ?>
 
+<?php if ($totalTodasTrancadas > 0): ?>
+    <div class="alert alert-danger d-flex align-items-start gap-2">
+        <i class="bi bi-exclamation-triangle-fill mt-1"></i>
+        <div>
+            <strong>
+                <?= $totalTodasTrancadas ?>
+                aluno<?= $totalTodasTrancadas === 1 ? '' : 's' ?>
+                trancou<?= $totalTodasTrancadas === 1 ? '' : 'aram' ?> todas as disciplinas sem trancar o curso.
+            </strong>
+            Continua<?= $totalTodasTrancadas === 1 ? '' : 'm' ?> matriculado<?= $totalTodasTrancadas === 1 ? '' : 's' ?>,
+            mas sem nenhuma disciplina em andamento — risco de evasão. Aparece<?= $totalTodasTrancadas === 1 ? '' : 'm' ?>
+            primeiro na lista, em vermelho.
+        </div>
+    </div>
+<?php endif; ?>
+
 <?php if ($coleta !== null && empty($erro) && empty($avisoCoordenador) && $porAluno === []): ?>
     <div class="card border-0 shadow-sm">
         <div class="card-body text-secondary">
@@ -91,9 +113,10 @@ $mostrarBadgeCurso = $semSeletorCurso;
             $emailAluno = trim((string)($aluno['email'] ?? ''));
             $disciplinas = $grupo['disciplinas'] ?? [];
             $nDisc = count($disciplinas);
+            $todasTrancadas = !empty($grupo['todas_trancadas']);
             ?>
-            <article class="card border-0 shadow-sm">
-                <div class="card-header bg-white border-0 pb-0 pt-3 px-3">
+            <article class="card border-0 shadow-sm<?= $todasTrancadas ? ' border-start border-4 border-danger' : '' ?>">
+                <div class="card-header <?= $todasTrancadas ? 'bg-danger-subtle' : 'bg-white' ?> border-0 pb-0 pt-3 px-3">
                     <div class="d-flex justify-content-between align-items-start gap-2">
                         <div>
                             <div class="fw-semibold fs-6">
@@ -110,10 +133,18 @@ $mostrarBadgeCurso = $semSeletorCurso;
                                 <?= htmlspecialchars((string)($aluno['nome_curso'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
                             </div>
                         </div>
-                        <span class="badge text-bg-light text-dark border">
-                            <?= $nDisc ?>
-                            disciplina<?= $nDisc === 1 ? '' : 's' ?>
-                        </span>
+                        <div class="d-flex flex-wrap gap-2 justify-content-end">
+                            <?php if ($todasTrancadas): ?>
+                                <span class="badge text-bg-danger"
+                                      title="Trancou todas as disciplinas da coleta, mas não trancou o curso">
+                                    <i class="bi bi-exclamation-triangle-fill"></i> Trancou todas as disciplinas
+                                </span>
+                            <?php endif; ?>
+                            <span class="badge text-bg-light text-dark border">
+                                <?= $nDisc ?>
+                                disciplina<?= $nDisc === 1 ? '' : 's' ?>
+                            </span>
+                        </div>
                     </div>
                 </div>
                 <div class="card-body pt-3 px-3 pb-3">

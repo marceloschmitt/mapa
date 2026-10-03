@@ -173,7 +173,7 @@ $assinarPasseLivreMarcado = $editando
                     </label>
                 </div>
                 <div class="form-text">
-                    Libera o botão Assinar na tela de passe livre (número, data e link de conferência).
+                    Libera o menu Passe livre e o botão Assinar (número, data e link de conferência). Administradores veem o menu mesmo sem esta marcação.
                 </div>
             </div>
 

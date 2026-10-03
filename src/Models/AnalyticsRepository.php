@@ -57,6 +57,7 @@ class AnalyticsRepository
             return [
                 'total_disciplinas' => 0,
                 'media_frequencia' => 0.0,
+                'total_alunos' => 0,
                 'abaixo_limite' => 0,
                 'total_alarmes' => 0,
                 'nao_visualizados' => 0,
@@ -70,6 +71,7 @@ class AnalyticsRepository
             'SELECT
                 COUNT(*) AS total_disciplinas,
                 ROUND(AVG(percentual_frequencia), 1) AS media_frequencia,
+                COUNT(DISTINCT aluno_id) AS total_alunos,
                 COUNT(DISTINCT CASE WHEN percentual_frequencia < :limite_frequencia THEN aluno_id END)
                     AS abaixo_limite
              FROM frequencia_disciplina
@@ -105,6 +107,7 @@ class AnalyticsRepository
         return [
             'total_disciplinas' => (int)($freqRow['total_disciplinas'] ?? 0),
             'media_frequencia' => (float)($freqRow['media_frequencia'] ?? 0),
+            'total_alunos' => (int)($freqRow['total_alunos'] ?? 0),
             'abaixo_limite' => (int)($freqRow['abaixo_limite'] ?? 0),
             'total_alarmes' => (int)($alarmeRow['total_alarmes'] ?? 0),
             'nao_visualizados' => (int)($alarmeRow['nao_visualizados'] ?? 0),
@@ -125,6 +128,34 @@ class AnalyticsRepository
         ?array $cursoIds = null,
         ?array $codigosDisciplina = null
     ): int {
+        return $this->contarAlunos($coletaId, $cursoIds, $codigosDisciplina, true);
+    }
+
+    /**
+     * Alunos distintos com disciplina na coleta, mesmo que todas trancadas
+     * (quem trancou o curso não vem na coleta de frequência).
+     *
+     * @param list<int>|null $cursoIds
+     * @param list<string>|null $codigosDisciplina
+     */
+    public function contarAlunosMatriculados(
+        int $coletaId,
+        ?array $cursoIds = null,
+        ?array $codigosDisciplina = null
+    ): int {
+        return $this->contarAlunos($coletaId, $cursoIds, $codigosDisciplina, false);
+    }
+
+    /**
+     * @param list<int>|null $cursoIds
+     * @param list<string>|null $codigosDisciplina
+     */
+    private function contarAlunos(
+        int $coletaId,
+        ?array $cursoIds,
+        ?array $codigosDisciplina,
+        bool $apenasAbaixoLimite
+    ): int {
         if (($cursoIds !== null && $cursoIds === [])
             || ($codigosDisciplina !== null && $codigosDisciplina === [])
         ) {
@@ -133,9 +164,11 @@ class AnalyticsRepository
 
         $sql = 'SELECT COUNT(DISTINCT aluno_id) AS total
                 FROM frequencia_disciplina
-                WHERE coleta_id = :coleta_id
-                  AND percentual_frequencia IS NOT NULL
+                WHERE coleta_id = :coleta_id';
+        if ($apenasAbaixoLimite) {
+            $sql .= ' AND percentual_frequencia IS NOT NULL
                   AND percentual_frequencia < :limite_frequencia';
+        }
         [$sql, $cursoParams] = $this->appendCursoFilter($sql, $cursoIds, 'curso_id');
         [$sql, $discParams] = $this->appendCodigoDisciplinaFilter(
             $sql,
@@ -145,7 +178,9 @@ class AnalyticsRepository
 
         $statement = $this->db->prepare($sql);
         $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
-        $statement->bindValue('limite_frequencia', $this->limiteFrequencia());
+        if ($apenasAbaixoLimite) {
+            $statement->bindValue('limite_frequencia', $this->limiteFrequencia());
+        }
         $this->bindNamedParams($statement, $cursoParams);
         $this->bindNamedParams($statement, $discParams);
         $statement->execute();
@@ -1688,6 +1723,8 @@ class AnalyticsRepository
 
     /**
      * Disciplinas trancadas/canceladas na coleta (ausencias_especiais).
+     * todas_trancadas = 1 quando o aluno não tem nenhuma disciplina ativa no curso
+     * e não trancou o curso; esses vêm primeiro.
      *
      * @param list<int>|null $cursoIds
      * @param list<string>|null $codigosDisciplina
@@ -1698,10 +1735,23 @@ class AnalyticsRepository
         ?array $cursoIds = null,
         ?array $codigosDisciplina = null
     ): array {
-        $sql = 'SELECT fd.aluno_id, fd.curso_id, fd.codigo_disciplina, fd.disciplina,
+        $sql = 'SELECT fd.aluno_id, fd.curso_id, fd.codigo_disciplina,
+                       ' . $this->sqlNomeDisciplina('fd.disciplina', 'fd.codigo_disciplina', 'fd.curso_id') . ' AS disciplina,
                        fd.situacao, fd.data_trancamento,
                        a.login, a.matricula, a.nome, a.nome_social, a.email,
-                       c.nome_curso
+                       c.nome_curso,
+                       NOT EXISTS (
+                           SELECT 1 FROM frequencia_disciplina ativa
+                           WHERE ativa.coleta_id = fd.coleta_id
+                             AND ativa.aluno_id = fd.aluno_id
+                             AND ativa.curso_id = fd.curso_id
+                             AND (ativa.situacao IS NULL OR TRIM(ativa.situacao) = \'\')
+                       ) AND NOT EXISTS (
+                           SELECT 1 FROM alunos_trancados t
+                           WHERE t.coleta_id = fd.coleta_id
+                             AND t.aluno_id = fd.aluno_id
+                             AND t.curso_id = fd.curso_id
+                       ) AS todas_trancadas
                 FROM frequencia_disciplina fd
                 INNER JOIN alunos a ON a.id = fd.aluno_id
                 INNER JOIN cursos c ON c.id = fd.curso_id
@@ -1736,7 +1786,8 @@ class AnalyticsRepository
             $sql .= ' AND fd.codigo_disciplina IN (' . implode(', ', $placeholders) . ')';
         }
 
-        $sql .= ' ORDER BY c.nome_curso ASC, a.nome ASC, fd.disciplina ASC, fd.codigo_disciplina ASC';
+        $sql .= ' ORDER BY todas_trancadas DESC, c.nome_curso ASC, a.nome ASC,
+                  disciplina ASC, fd.codigo_disciplina ASC';
 
         $statement = $this->db->prepare($sql);
         $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
@@ -1744,6 +1795,23 @@ class AnalyticsRepository
         $statement->execute();
 
         return $statement->fetchAll();
+    }
+
+    /**
+     * Nome da disciplina com fallback na grade pelo código (preferindo o mesmo curso):
+     * trancamentos vindos só de ausencias_especiais chegam sem nome da API.
+     */
+    private function sqlNomeDisciplina(string $colunaNome, string $colunaCodigo, string $colunaCurso): string
+    {
+        return 'COALESCE(
+                    NULLIF(TRIM(' . $colunaNome . '), \'\'),
+                    (SELECT g.disciplina FROM disciplina_grade g
+                     WHERE g.codigo_disciplina = ' . $colunaCodigo . '
+                       AND TRIM(g.disciplina) != \'\'
+                     ORDER BY g.curso_id = ' . $colunaCurso . ' DESC
+                     LIMIT 1),
+                    \'\'
+                )';
     }
 
     /**
@@ -2040,9 +2108,11 @@ class AnalyticsRepository
             $params[$key] = (int)$id;
         }
 
-        $sql = 'SELECT pd.aluno_curso_id, pd.codigo_disciplina, pd.disciplina,
+        $sql = 'SELECT pd.aluno_curso_id, pd.codigo_disciplina,
+                       ' . $this->sqlNomeDisciplina('pd.disciplina', 'pd.codigo_disciplina', 'ac.curso_id') . ' AS disciplina,
                        pd.frequencia, pd.situacao, pd.data_trancamento
                 FROM passe_livre_disciplina pd
+                INNER JOIN passe_livre_aluno_curso ac ON ac.id = pd.aluno_curso_id
                 WHERE pd.aluno_curso_id IN (' . implode(', ', $placeholders) . ')';
 
         $statement = $this->db->prepare($sql);

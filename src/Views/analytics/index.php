@@ -13,24 +13,71 @@ $mostrarFaltas = !$isProfessor;
 $alarmeConfig = $alarmeConfig ?? [];
 $limiteFrequencia = (float)($alarmeConfig['frequencia_limite'] ?? 75);
 $rotuloLimite = View::rotuloLimite($limiteFrequencia);
+
+$fusoHorario = new DateTimeZone('America/Sao_Paulo');
+$agora = new DateTimeImmutable('now', $fusoHorario);
+$hora = (int)$agora->format('G');
+$saudacao = $hora < 12 ? 'Bom dia' : ($hora < 18 ? 'Boa tarde' : 'Boa noite');
+$primeiroNome = (preg_split('/\s+/', trim((string)($usuario['nome'] ?? '')), -1, PREG_SPLIT_NO_EMPTY) ?: [''])[0];
+
+$perfilRotulo = \Mapa\Core\Auth::ROTULOS_PERFIL[$usuario['perfil'] ?? ''] ?? '';
+$escopoRotulo = (string)($cursoExibido ?? '');
+if (!$semSeletorCurso) {
+    $escopoRotulo = $rotuloGeral ?? 'Todos os cursos';
+    foreach ($cursosDisponiveis ?? [] as $cursoOpcao) {
+        if ((string)($cursoSelecionado ?? '') === (string)$cursoOpcao['id']) {
+            $escopoRotulo = (string)$cursoOpcao['nome_curso'];
+        }
+    }
+}
+
+$formatarData = static function (?string $valor): string {
+    $valor = trim((string)$valor);
+    $ts = $valor !== '' ? strtotime($valor) : false;
+
+    return $ts !== false ? date('d/m/Y', $ts) : $valor;
+};
+$coletaDesatualizada = false;
+$coletaQuando = '';
+if ($coleta !== null) {
+    $tsColeta = strtotime((string)($coleta['executada_em'] ?? ''));
+    if ($tsColeta !== false) {
+        $coletaQuando = date('d/m/Y', $tsColeta) . ' às ' . date('H:i', $tsColeta);
+        $coletaDesatualizada = (time() - $tsColeta) > 2 * 86400;
+    }
+}
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
-    <div>
-        <h1 class="h3 mb-1">Relatório geral</h1>
-        <?php if ($semSeletorCurso && !empty($cursoExibido)): ?>
-            <p class="mb-1">
-                <span class="badge text-bg-primary text-wrap text-start fw-normal" style="font-size: 0.85rem;">
-                    <?= htmlspecialchars((string)$cursoExibido, ENT_QUOTES, 'UTF-8') ?>
-                </span>
-            </p>
-        <?php endif; ?>
-        <p class="text-secondary mb-0">
-            Frequência, evolução de faltas e sinais de risco de evasão (SQLite).
+    <div class="w-100">
+        <h1 class="h3 mb-1 inicio-saudacao">
+            <?= htmlspecialchars($saudacao . ($primeiroNome !== '' ? ', ' . $primeiroNome : ''), ENT_QUOTES, 'UTF-8') ?>
+        </h1>
+        <p class="text-secondary mb-2">
+            Visão geral da frequência
+            <?php if ($escopoRotulo !== ''): ?>
+                — <span class="fw-semibold text-body"><?= htmlspecialchars($escopoRotulo, ENT_QUOTES, 'UTF-8') ?></span>
+            <?php endif; ?>
+            <?php if ($perfilRotulo !== ''): ?>
+                <span class="ms-1 small">(<?= htmlspecialchars($perfilRotulo, ENT_QUOTES, 'UTF-8') ?>)</span>
+            <?php endif; ?>
         </p>
+        <?php if ($coleta !== null): ?>
+            <span class="selo-coleta<?= $coletaDesatualizada ? ' desatualizada' : '' ?>"
+                  title="<?= $coletaDesatualizada ? 'A última coleta tem mais de 2 dias.' : 'Dados da última coleta.' ?>">
+                <span class="ponto"></span>
+                <span>
+                    <?= $coletaDesatualizada ? 'Coleta desatualizada' : 'Última coleta' ?>:
+                    <?= htmlspecialchars($coletaQuando, ENT_QUOTES, 'UTF-8') ?>
+                    · período <?= htmlspecialchars($formatarData($coleta['data_inicial'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
+                    a <?= htmlspecialchars($formatarData($coleta['data_final'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
+                </span>
+            </span>
+        <?php endif; ?>
     </div>
     <?php if (!$semSeletorCurso && !empty($cursosDisponiveis)): ?>
-        <form method="get" action="<?= htmlspecialchars(url('/analytics'), ENT_QUOTES, 'UTF-8') ?>" class="d-flex align-items-center gap-2">
+        <form method="get" action="<?= htmlspecialchars(url('/'), ENT_QUOTES, 'UTF-8') ?>"
+              class="d-flex align-items-center gap-2">
             <label for="curso" class="form-label mb-0 text-nowrap">Curso</label>
             <select class="form-select" id="curso" name="curso" style="min-width: 260px;"
                     onchange="this.form.submit()">
@@ -61,47 +108,74 @@ $rotuloLimite = View::rotuloLimite($limiteFrequencia);
 <?php endif; ?>
 
 <?php if ($coleta !== null): ?>
+    <?php
+    $numero = static fn(int $valor): string => number_format($valor, 0, ',', '.');
+    $totalAlunos = (int)($resumo['total_alunos'] ?? 0);
+    $detalheAbaixo = $totalAlunos > 0
+        ? number_format((int)$resumo['abaixo_limite'] * 100 / $totalAlunos, 1, ',', '.')
+            . '% dos ' . $numero($totalAlunos) . ' alunos matriculados'
+        : null;
+    $indicadores = [
+        [
+            'icone' => 'bi-graph-up',
+            'cor' => 'azul',
+            'valor' => View::rotuloLimite($resumo['media_frequencia']) . '%',
+            'rotulo' => 'Frequência média',
+            'link' => null,
+        ],
+        [
+            'icone' => 'bi-person-exclamation',
+            'cor' => 'vermelho',
+            'valor' => $numero((int)$resumo['abaixo_limite']),
+            'rotulo' => 'Alunos abaixo de ' . $rotuloLimite . '% em alguma disciplina',
+            'detalhe' => $detalheAbaixo,
+            'link' => null,
+        ],
+        [
+            'icone' => 'bi-bell',
+            'cor' => 'laranja',
+            'valor' => $numero((int)$resumo['nao_visualizados']),
+            'rotulo' => 'Alarmes abertos',
+            'link' => url('/alarmes'),
+        ],
+        [
+            'icone' => 'bi-journal-text',
+            'cor' => 'verde',
+            'valor' => $numero(count($disciplinasCriticas)),
+            'rotulo' => 'Disciplinas com alunos abaixo de ' . $rotuloLimite . '%',
+            'link' => '#disciplinas-criticas',
+        ],
+    ];
+    ?>
     <div class="row g-3 mb-4">
-        <div class="col-md-3">
-            <div class="card border-0 shadow-sm h-100">
-                <div class="card-body">
-                    <div class="text-secondary small">Média de frequência</div>
-                    <div class="fs-3 fw-bold text-primary"><?= htmlspecialchars((string)$resumo['media_frequencia'], ENT_QUOTES, 'UTF-8') ?>%</div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card border-0 shadow-sm h-100">
-                <div class="card-body">
-                    <div class="text-secondary small">
-                        Alunos com frequência menor do que
-                        <?= htmlspecialchars($rotuloLimite, ENT_QUOTES, 'UTF-8') ?>% em alguma disciplina
+        <?php foreach ($indicadores as $ind): ?>
+            <div class="col-sm-6 col-lg-3">
+                <?php if ($ind['link'] !== null): ?>
+                    <a href="<?= htmlspecialchars($ind['link'], ENT_QUOTES, 'UTF-8') ?>"
+                       class="card border-0 shadow-sm h-100 text-decoration-none indicador-card">
+                <?php else: ?>
+                    <div class="card border-0 shadow-sm h-100">
+                <?php endif; ?>
+                    <div class="card-body indicador">
+                        <div class="indicador-icone <?= $ind['cor'] ?>"><i class="bi <?= $ind['icone'] ?>"></i></div>
+                        <div>
+                            <div class="indicador-valor"><?= htmlspecialchars($ind['valor'], ENT_QUOTES, 'UTF-8') ?></div>
+                            <div class="indicador-rotulo">
+                                <?= htmlspecialchars($ind['rotulo'], ENT_QUOTES, 'UTF-8') ?>
+                                <?php if ($ind['link'] !== null): ?><i class="bi bi-arrow-right-short"></i><?php endif; ?>
+                            </div>
+                            <?php if (!empty($ind['detalhe'])): ?>
+                                <div class="indicador-detalhe"><?= htmlspecialchars($ind['detalhe'], ENT_QUOTES, 'UTF-8') ?></div>
+                            <?php endif; ?>
+                        </div>
                     </div>
-                    <div class="fs-3 fw-bold text-danger"><?= (int)$resumo['abaixo_limite'] ?></div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card border-0 shadow-sm h-100">
-                <div class="card-body">
-                    <div class="text-secondary small">Alarmes abertos</div>
-                    <div class="fs-3 fw-bold"><?= (int)$resumo['nao_visualizados'] ?></div>
-                </div>
-            </div>
-        </div>
-        <div class="col-md-3">
-            <div class="card border-0 shadow-sm h-100">
-                <div class="card-body">
-                    <div class="text-secondary small"><?= htmlspecialchars(View::rotuloColeta($coleta), ENT_QUOTES, 'UTF-8') ?></div>
-                    <div class="small mt-1">
-                        Período:
-                        <?= htmlspecialchars((string)$coleta['data_inicial'], ENT_QUOTES, 'UTF-8') ?>
-                        a
-                        <?= htmlspecialchars((string)$coleta['data_final'], ENT_QUOTES, 'UTF-8') ?>
+                <?php if ($ind['link'] !== null): ?>
+                    </a>
+                <?php else: ?>
                     </div>
-                </div>
+                <?php endif; ?>
             </div>
-        </div>
+        <?php endforeach; ?>
     </div>
 
     <div class="row g-3 mb-4">
@@ -145,7 +219,7 @@ $rotuloLimite = View::rotuloLimite($limiteFrequencia);
         <?php endif; ?>
     </div>
 
-    <div class="card border-0 shadow-sm mb-4">
+    <div class="card border-0 shadow-sm mb-4" id="disciplinas-criticas">
         <div class="card-body">
             <h2 class="h6 mb-3">
                 Disciplinas críticas (mais alunos abaixo de <?= htmlspecialchars($rotuloLimite, ENT_QUOTES, 'UTF-8') ?>%)

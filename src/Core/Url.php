@@ -26,6 +26,18 @@ class Url
     }
 
     /**
+     * Caminho de arquivo estático (imagens, CSS) relativo à pasta do index.php.
+     * Ex.: assets/img/logo-mapa.png -> /assets/img/logo-mapa.png
+     */
+    public static function asset(string $path): string
+    {
+        $scriptDir = str_replace('\\', '/', dirname((string)($_SERVER['SCRIPT_NAME'] ?? '/index.php')));
+        $base = ($scriptDir === '/' || $scriptDir === '.') ? '' : rtrim($scriptDir, '/');
+
+        return $base . '/' . ltrim($path, '/');
+    }
+
+    /**
      * Base pública do portal a partir do pedido HTTP atual (CLI retorna null).
      * Ex.: https://mapa.exemplo.edu.br ou http://localhost:8080/mapa
      */

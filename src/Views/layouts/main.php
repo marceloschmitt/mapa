@@ -4,48 +4,10 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title><?= htmlspecialchars($app['short_name'] . ' - ' . $app['full_name'], ENT_QUOTES, 'UTF-8') ?></title>
+    <link rel="icon" type="image/png" href="<?= htmlspecialchars(asset('assets/img/logo-icone.png'), ENT_QUOTES, 'UTF-8') ?>">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.3/dist/css/bootstrap.min.css" rel="stylesheet">
-    <style>
-        body { background: #f0f4f8; }
-        .navbar-mapa {
-            background: linear-gradient(135deg, #1a365d, #2c5282);
-            min-height: 3.25rem;
-        }
-        .navbar-mapa .navbar-brand,
-        .navbar-mapa .nav-link,
-        .navbar-mapa .navbar-text { color: #fff !important; }
-        .navbar-mapa .nav-link {
-            white-space: nowrap;
-            padding-top: 0.45rem;
-            padding-bottom: 0.45rem;
-        }
-        .navbar-mapa .nav-link.active {
-            font-weight: 600;
-            text-decoration: underline;
-            text-underline-offset: 0.35rem;
-        }
-        .navbar-mapa .navbar-nav { align-items: center; }
-        .navbar-mapa .dropdown-menu { min-width: 12rem; }
-        .navbar-mapa .dropdown-item { color: #1a365d; }
-        .navbar-mapa .perfil-badge {
-            font-size: 0.65rem;
-            text-transform: uppercase;
-            letter-spacing: 0.04em;
-            vertical-align: middle;
-        }
-        .report-icon {
-            width: 48px;
-            height: 48px;
-            border-radius: 10px;
-            background: #ebf4ff;
-            color: #1a365d;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            font-weight: 700;
-            font-size: 0.85rem;
-        }
-    </style>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css" rel="stylesheet">
+    <link href="<?= htmlspecialchars(asset('assets/css/mapa.css') . '?v=' . (string)@filemtime('assets/css/mapa.css'), ENT_QUOTES, 'UTF-8') ?>" rel="stylesheet">
 </head>
 <body>
 <?php
@@ -53,128 +15,169 @@ $nomeUsuario = trim((string)($usuario['nome'] ?? ''));
 $perfilUsuario = \Mapa\Core\Auth::ROTULOS_PERFIL[$usuario['perfil'] ?? '']
     ?? (string)($usuario['perfil'] ?? '');
 $authLocal = ($usuario['auth_type'] ?? 'local') === 'local';
+
+$partesNome = preg_split('/\s+/', $nomeUsuario, -1, PREG_SPLIT_NO_EMPTY) ?: [];
+$iniciais = '';
+if ($partesNome !== []) {
+    $iniciais = mb_substr($partesNome[0], 0, 1);
+    if (count($partesNome) > 1) {
+        $iniciais .= mb_substr($partesNome[count($partesNome) - 1], 0, 1);
+    }
+}
+$iniciais = $iniciais !== '' ? mb_strtoupper($iniciais) : '?';
+
+$caminhoAtual = (string)parse_url((string)($_SERVER['REQUEST_URI'] ?? '/'), PHP_URL_PATH);
+$caminhoAtual = preg_replace('#^.*?/index\.php#', '', $caminhoAtual) ?? '';
+$caminhoAtual = '/' . trim($caminhoAtual, '/');
+
+$noCaminho = static function (string ...$prefixos) use ($caminhoAtual): bool {
+    foreach ($prefixos as $prefixo) {
+        if ($caminhoAtual === $prefixo || str_starts_with($caminhoAtual, rtrim($prefixo, '/') . '/')) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
+$e = static fn(string $texto): string => htmlspecialchars($texto, ENT_QUOTES, 'UTF-8');
+
+$itensAcompanhamento = [
+    ['/alarmes', 'bi-bell', 'Alarmes', true],
+    ['/ingressantes', 'bi-person-plus', 'Ingressantes', true],
+    ['/chamadas', 'bi-clipboard-check', 'Últimas chamadas', !empty($podeVerChamadas)],
+    ['/frequencia-anual', 'bi-calendar3', 'Frequência corrente', !empty($podeVerFrequenciaAnual)],
+];
+$itensSituacao = [
+    ['/trancados', 'bi-pause-circle', 'Alunos trancados', true],
+    ['/disciplinas-trancadas', 'bi-journal-x', 'Disciplinas trancadas', true],
+    ['/perda-vaga', 'bi-exclamation-triangle', 'Perda de vaga', true],
+];
+$itensAdmin = [
+    ['/usuarios', 'bi-people', 'Usuários', true],
+    ['/estatisticas-uso', 'bi-bar-chart', 'Estatísticas de uso', true],
+    ['divisor', '', 'Integrações', true],
+    ['/configuracoes/api', 'bi-plug', 'API', true],
+    ['/configuracoes/ldap', 'bi-diagram-3', 'LDAP', true],
+    ['/configuracoes/email', 'bi-envelope', 'E-mail', true],
+    ['divisor', '', 'Regras', true],
+    ['/configuracoes/coordenacao', 'bi-mortarboard', 'Coordenação', true],
+    ['/configuracoes/alarmes', 'bi-sliders', 'Alarmes', true],
+    ['/configuracoes/feriados', 'bi-calendar-event', 'Feriados', true],
+];
+
+$grupoAtivo = static function (array $itens) use ($noCaminho): bool {
+    foreach ($itens as [$caminho, , , $visivel]) {
+        if ($visivel && $caminho !== 'divisor' && $noCaminho($caminho)) {
+            return true;
+        }
+    }
+
+    return false;
+};
+
+$renderItens = static function (array $itens) use ($noCaminho, $e): string {
+    $html = '';
+    foreach ($itens as [$caminho, $icone, $rotulo, $visivel]) {
+        if (!$visivel) {
+            continue;
+        }
+        if ($caminho === 'divisor') {
+            $html .= '<li><hr class="dropdown-divider"></li>'
+                . '<li><h6 class="dropdown-header">' . $e($rotulo) . '</h6></li>';
+            continue;
+        }
+        $ativo = $noCaminho($caminho);
+        $html .= '<li><a class="dropdown-item' . ($ativo ? ' active' : '') . '" href="' . $e(url($caminho)) . '"'
+            . ($ativo ? ' aria-current="page"' : '') . '>'
+            . '<i class="bi ' . $e($icone) . '"></i>' . $e($rotulo) . '</a></li>';
+    }
+
+    return $html;
+};
+
+$inicioAtivo = $caminhoAtual === '/' || $noCaminho('/analytics');
+$passeLivreAtivo = $noCaminho('/passe-livre');
 ?>
-<nav class="navbar navbar-expand-xl navbar-dark navbar-mapa mb-4">
+<nav class="navbar navbar-expand-xl topo-mapa mb-4">
     <div class="container">
-        <a class="navbar-brand fw-bold py-2" href="<?= htmlspecialchars(url('/'), ENT_QUOTES, 'UTF-8') ?>">
-            <?= htmlspecialchars($app['short_name'], ENT_QUOTES, 'UTF-8') ?>
+        <a class="navbar-brand py-1" href="<?= $e(url('/')) ?>">
+            <img src="<?= $e(asset('assets/img/logo-icone.png')) ?>" alt="">
+            <span class="marca-texto">
+                <span class="marca-sigla">M<span class="marca-a">A</span>PA</span>
+                <span class="marca-nome"><?= $e($app['full_name']) ?></span>
+            </span>
         </a>
         <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navMapa"
                 aria-controls="navMapa" aria-expanded="false" aria-label="Abrir menu">
             <span class="navbar-toggler-icon"></span>
         </button>
         <div class="collapse navbar-collapse" id="navMapa">
-            <ul class="navbar-nav me-auto mb-2 mb-xl-0 gap-xl-1">
+            <ul class="navbar-nav me-auto ms-xl-3">
                 <li class="nav-item">
-                    <a class="nav-link" href="<?= htmlspecialchars(url('/'), ENT_QUOTES, 'UTF-8') ?>">Relatórios</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="<?= htmlspecialchars(url('/analytics'), ENT_QUOTES, 'UTF-8') ?>">Geral</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="<?= htmlspecialchars(url('/alarmes'), ENT_QUOTES, 'UTF-8') ?>">Alarmes</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="<?= htmlspecialchars(url('/ingressantes'), ENT_QUOTES, 'UTF-8') ?>">Ingressantes</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="<?= htmlspecialchars(url('/trancados'), ENT_QUOTES, 'UTF-8') ?>">Trancados</a>
-                </li>
-                <li class="nav-item">
-                    <a class="nav-link" href="<?= htmlspecialchars(url('/disciplinas-trancadas'), ENT_QUOTES, 'UTF-8') ?>">Disc. trancadas</a>
+                    <a class="nav-link<?= $inicioAtivo ? ' active' : '' ?>" href="<?= $e(url('/')) ?>"
+                        <?= $inicioAtivo ? 'aria-current="page"' : '' ?>>Início</a>
                 </li>
                 <li class="nav-item dropdown">
-                    <a class="nav-link dropdown-toggle" href="#" id="navOutrosRelatorios" role="button"
-                       data-bs-toggle="dropdown" aria-expanded="false">
-                        Outros relatórios
+                    <a class="nav-link dropdown-toggle<?= $grupoAtivo($itensAcompanhamento) ? ' active' : '' ?>"
+                       href="#" id="navAcompanhamento" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Acompanhamento
                     </a>
-                    <ul class="dropdown-menu" aria-labelledby="navOutrosRelatorios">
-                        <li>
-                            <a class="dropdown-item" href="<?= htmlspecialchars(url('/perda-vaga'), ENT_QUOTES, 'UTF-8') ?>">
-                                Perda de vaga
-                            </a>
-                        </li>
-                        <?php if (!empty($podeVerPasseLivre)): ?>
-                            <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/passe-livre'), ENT_QUOTES, 'UTF-8') ?>">
-                                    Passe livre
-                                </a>
-                            </li>
-                        <?php endif; ?>
-                        <?php if (!empty($podeVerFrequenciaAnual)): ?>
-                            <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/frequencia-anual'), ENT_QUOTES, 'UTF-8') ?>">
-                                    Frequência corrente
-                                </a>
-                            </li>
-                        <?php endif; ?>
+                    <ul class="dropdown-menu" aria-labelledby="navAcompanhamento">
+                        <?= $renderItens($itensAcompanhamento) ?>
                     </ul>
                 </li>
-                <?php if (!empty($podeVerChamadas)): ?>
+                <li class="nav-item dropdown">
+                    <a class="nav-link dropdown-toggle<?= $grupoAtivo($itensSituacao) ? ' active' : '' ?>"
+                       href="#" id="navSituacao" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        Situação acadêmica
+                    </a>
+                    <ul class="dropdown-menu" aria-labelledby="navSituacao">
+                        <?= $renderItens($itensSituacao) ?>
+                    </ul>
+                </li>
+                <?php if (!empty($podeVerPasseLivre)): ?>
                     <li class="nav-item">
-                        <a class="nav-link" href="<?= htmlspecialchars(url('/chamadas'), ENT_QUOTES, 'UTF-8') ?>">Chamadas</a>
+                        <a class="nav-link<?= $passeLivreAtivo ? ' active' : '' ?>" href="<?= $e(url('/passe-livre')) ?>"
+                            <?= $passeLivreAtivo ? 'aria-current="page"' : '' ?>>Passe livre</a>
                     </li>
                 <?php endif; ?>
                 <?php if (!empty($isAdmin)): ?>
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="navConfig" role="button"
-                           data-bs-toggle="dropdown" aria-expanded="false">
-                            Configurações
+                        <a class="nav-link dropdown-toggle<?= $grupoAtivo($itensAdmin) ? ' active' : '' ?>"
+                           href="#" id="navAdmin" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                            Administração
                         </a>
-                        <ul class="dropdown-menu" aria-labelledby="navConfig">
-                            <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/usuarios'), ENT_QUOTES, 'UTF-8') ?>">Usuários</a>
-                            </li>
-                            <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/estatisticas-uso'), ENT_QUOTES, 'UTF-8') ?>">Estatísticas de uso</a>
-                            </li>
-                            <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/api'), ENT_QUOTES, 'UTF-8') ?>">API</a>
-                            </li>
-                            <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/ldap'), ENT_QUOTES, 'UTF-8') ?>">LDAP</a>
-                            </li>
-                            <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/email'), ENT_QUOTES, 'UTF-8') ?>">E-mail</a>
-                            </li>
-                            <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/coordenacao'), ENT_QUOTES, 'UTF-8') ?>">Coordenação</a>
-                            </li>
-                            <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/alarmes'), ENT_QUOTES, 'UTF-8') ?>">Alarmes</a>
-                            </li>
-                            <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/configuracoes/feriados'), ENT_QUOTES, 'UTF-8') ?>">Feriados</a>
-                            </li>
+                        <ul class="dropdown-menu" aria-labelledby="navAdmin">
+                            <?= $renderItens($itensAdmin) ?>
                         </ul>
                     </li>
                 <?php endif; ?>
             </ul>
 
             <?php if (!empty($usuario)): ?>
-                <ul class="navbar-nav ms-xl-3">
+                <ul class="navbar-nav">
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="navConta" role="button"
+                        <a class="nav-link dropdown-toggle conta-link" href="#" id="navConta" role="button"
                            data-bs-toggle="dropdown" aria-expanded="false">
-                            <?= htmlspecialchars($nomeUsuario !== '' ? $nomeUsuario : 'Conta', ENT_QUOTES, 'UTF-8') ?>
-                            <?php if ($perfilUsuario !== ''): ?>
-                                <span class="badge bg-light text-dark perfil-badge ms-1">
-                                    <?= htmlspecialchars($perfilUsuario, ENT_QUOTES, 'UTF-8') ?>
-                                </span>
-                            <?php endif; ?>
+                            <span class="avatar-iniciais"><?= $e($iniciais) ?></span>
+                            <span><?= $e($nomeUsuario !== '' ? $nomeUsuario : 'Conta') ?></span>
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navConta">
+                            <?php if ($perfilUsuario !== ''): ?>
+                                <li><h6 class="dropdown-header"><?= $e($perfilUsuario) ?></h6></li>
+                            <?php endif; ?>
                             <?php if ($authLocal): ?>
                                 <li>
-                                    <a class="dropdown-item" href="<?= htmlspecialchars(url('/conta/senha'), ENT_QUOTES, 'UTF-8') ?>">
-                                        Minha senha
+                                    <a class="dropdown-item" href="<?= $e(url('/conta/senha')) ?>">
+                                        <i class="bi bi-key"></i>Minha senha
                                     </a>
                                 </li>
-                                <li><hr class="dropdown-divider"></li>
                             <?php endif; ?>
+                            <li><hr class="dropdown-divider"></li>
                             <li>
-                                <a class="dropdown-item" href="<?= htmlspecialchars(url('/logout'), ENT_QUOTES, 'UTF-8') ?>">
-                                    Sair
+                                <a class="dropdown-item" href="<?= $e(url('/logout')) ?>">
+                                    <i class="bi bi-box-arrow-right"></i>Sair
                                 </a>
                             </li>
                         </ul>

@@ -24,6 +24,9 @@ class Auth
         self::PERFIL_PROFESSOR => 'Professor',
     ];
 
+    /** @var array<int, bool> */
+    private static $podeAssinarPorUsuario = [];
+
     /** @return array<string, mixed>|null */
     public static function user(): ?array
     {
@@ -101,13 +104,13 @@ class Auth
     }
 
     /**
-     * Relatório de passe livre: mesma marcação de assinar.
-     * Sem ela, o item some do menu e a rota é bloqueada.
+     * Relatório de passe livre: administradores e quem pode assinar.
+     * Para os demais, o item some do menu e a rota é bloqueada.
      * A lista não é filtrada por perfil coordenador/professor.
      */
     public static function canVerPasseLivre(): bool
     {
-        return self::canAssinarPasseLivre();
+        return self::isAdmin() || self::canAssinarPasseLivre();
     }
 
     /**
@@ -119,7 +122,11 @@ class Auth
         return self::isAdmin() || self::isGeral() || self::isProfessor();
     }
 
-    /** Usuários com permissão explícita para assinar atestados de passe livre. */
+    /**
+     * Usuários com permissão explícita para assinar atestados de passe livre.
+     * Lido do banco (não da sessão) para que conceder ou retirar a permissão
+     * valha sem novo login.
+     */
     public static function canAssinarPasseLivre(): bool
     {
         $user = self::user();
@@ -127,7 +134,16 @@ class Auth
             return false;
         }
 
-        return !empty($user['pode_assinar_passe_livre']);
+        $id = (int)$user['id'];
+        if (!array_key_exists($id, self::$podeAssinarPorUsuario)) {
+            $statement = Database::connection()->prepare(
+                'SELECT pode_assinar_passe_livre FROM usuarios WHERE id = :id AND ativo = 1'
+            );
+            $statement->execute(['id' => $id]);
+            self::$podeAssinarPorUsuario[$id] = !empty($statement->fetchColumn());
+        }
+
+        return self::$podeAssinarPorUsuario[$id];
     }
 
     /** @return list<int> */

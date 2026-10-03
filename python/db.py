@@ -164,6 +164,41 @@ def fechar() -> None:
         _CONN = None
 
 
+def nome_disciplina_conhecido(
+    cursor: Any,
+    codigo: str,
+    curso_id: int | None = None,
+) -> str:
+    """Nome da disciplina pelo codigo: grade (preferindo o curso) ou frequencia anterior.
+
+    Trancamentos que so aparecem em ausencias_especiais chegam da API sem nome.
+    """
+    codigo = str(codigo or "").strip()
+    if codigo == "":
+        return ""
+
+    row = cursor.execute(
+        """
+        SELECT disciplina FROM disciplina_grade
+        WHERE codigo_disciplina = ? AND TRIM(disciplina) != ''
+        ORDER BY curso_id = ? DESC
+        LIMIT 1
+        """,
+        (codigo, curso_id if curso_id is not None else -1),
+    ).fetchone()
+    if row is None:
+        row = cursor.execute(
+            """
+            SELECT disciplina FROM frequencia_disciplina
+            WHERE codigo_disciplina = ? AND TRIM(disciplina) != ''
+            ORDER BY coleta_id DESC
+            LIMIT 1
+            """,
+            (codigo,),
+        ).fetchone()
+    return str(row[0]).strip() if row is not None else ""
+
+
 def parsear_data_sql(texto: str | None) -> str | None:
     """Converte DD-MM-AAAA / DD/MM/AAAA para AAAA-MM-DD."""
     if texto is None:
