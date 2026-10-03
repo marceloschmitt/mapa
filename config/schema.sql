@@ -373,7 +373,8 @@ CREATE INDEX IF NOT EXISTS idx_perda_vaga_reprovacoes_candidato
     ON perda_vaga_reprovacoes(candidato_id);
 
 -- Efeito dos contatos (manual, python/gerar_efeito_contatos.py): taxa de faltas
--- dos alunos contatados antes do primeiro contato, antes do ultimo e depois do ultimo.
+-- dos alunos contatados antes do primeiro contato, antes do ultimo e depois do ultimo
+-- (N dias seguintes e, em *_ate_corte, do dia seguinte ate a data dos dados).
 -- Um contato = um dia com algum contato (e-mail automatico ou registro na tela de alarmes).
 -- total_eventos = alunos/curso contatados.
 CREATE TABLE IF NOT EXISTS efeito_contatos_execucoes (
@@ -403,6 +404,8 @@ CREATE TABLE IF NOT EXISTS efeito_contatos_alunos (
     faltas_antes_ultimo INTEGER NOT NULL DEFAULT 0,
     aulas_depois_ultimo INTEGER NOT NULL DEFAULT 0,
     faltas_depois_ultimo INTEGER NOT NULL DEFAULT 0,
+    aulas_ate_corte INTEGER NOT NULL DEFAULT 0,
+    faltas_ate_corte INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (execucao_id) REFERENCES efeito_contatos_execucoes(id) ON DELETE CASCADE
 );
 

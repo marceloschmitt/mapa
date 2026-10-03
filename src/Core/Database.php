@@ -98,10 +98,13 @@ class Database
         self::ensureColumn('passe_livre_disciplina', 'data_trancamento', 'TEXT');
         self::ensureColumn('frequencia_disciplina', 'situacao', 'TEXT');
         self::ensureColumn('frequencia_disciplina', 'data_trancamento', 'TEXT');
+        self::ensureColumn('efeito_contatos_alunos', 'aulas_ate_corte', 'INTEGER NOT NULL DEFAULT 0');
+        self::ensureColumn('efeito_contatos_alunos', 'faltas_ate_corte', 'INTEGER NOT NULL DEFAULT 0');
         self::migrarPasseLivreAtestadosEstrutura();
         self::migrarDatasAulaCsvParaTabela();
-        // Tabela descontinuada (carga horaria por disciplina): remove de bancos antigos.
+        // Tabelas descontinuadas: removidas de bancos antigos.
         self::$connection->exec('DROP TABLE IF EXISTS disciplina_carga_horaria');
+        self::$connection->exec('DROP TABLE IF EXISTS efeito_contatos_eventos');
         self::seedAdminIfEmpty();
         self::migrateLdapConfigFromEnv();
         self::migrateApiConfigFromEnv();

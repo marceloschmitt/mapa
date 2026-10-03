@@ -32,11 +32,16 @@ class EfeitoContatosRepository
         return $row === false ? null : $row;
     }
 
+    /** Janelas "antes" e "depois" comparadas: chave => sufixo das colunas. */
+    private const ANTES = ['primeiro' => 'antes_primeiro', 'ultimo' => 'antes_ultimo'];
+    private const DEPOIS = ['janela' => 'depois_ultimo', 'corte' => 'ate_corte'];
+
     /**
      * Alunos contatados em dois grupos: 'um' (um contato) e 'varios' (dois ou mais).
-     * Em cada grupo (e em cada canal do último contato) há duas comparações com as
-     * faltas depois do último contato: 'primeiro' (antes do primeiro contato) e
-     * 'ultimo' (antes do último). Com um só contato as duas são iguais.
+     * Em cada grupo (e em cada canal do último contato) compara as faltas antes do
+     * primeiro contato ('primeiro') e antes do último ('ultimo') com as faltas depois
+     * do último: nos N dias seguintes ('janela') e até a data de corte ('corte').
+     * Com um só contato, 'primeiro' e 'ultimo' são iguais.
      *
      * @param list<int>|null $cursoIds
      * @return array<string, mixed>
@@ -50,7 +55,8 @@ class EfeitoContatosRepository
             'SELECT total_contatos, canais_ultimo,
                     aulas_antes_primeiro, faltas_antes_primeiro,
                     aulas_antes_ultimo, faltas_antes_ultimo,
-                    aulas_depois_ultimo, faltas_depois_ultimo
+                    aulas_depois_ultimo, faltas_depois_ultimo,
+                    aulas_ate_corte, faltas_ate_corte
              FROM efeito_contatos_alunos
              WHERE execucao_id = :execucao' . $filtro
         );
@@ -91,8 +97,12 @@ class EfeitoContatosRepository
     private function novoGrupo(): array
     {
         $comparacao = ['analisados' => 0, 'melhoraram' => 0, 'soma_antes' => 0.0, 'soma_depois' => 0.0];
+        $grupo = ['alunos' => 0, 'contatos' => 0];
+        foreach (array_keys(self::ANTES) as $antes) {
+            $grupo[$antes] = array_fill_keys(array_keys(self::DEPOIS), $comparacao);
+        }
 
-        return ['alunos' => 0, 'contatos' => 0, 'primeiro' => $comparacao, 'ultimo' => $comparacao];
+        return $grupo;
     }
 
     /**
@@ -103,19 +113,26 @@ class EfeitoContatosRepository
     {
         $grupo['alunos']++;
         $grupo['contatos'] += (int)$row['total_contatos'];
-        $aulasDepois = (int)$row['aulas_depois_ultimo'];
-        $faltasDepois = (int)$row['faltas_depois_ultimo'];
-        foreach (['primeiro', 'ultimo'] as $antes) {
-            $aulasAntes = (int)$row['aulas_antes_' . $antes];
-            $faltasAntes = (int)$row['faltas_antes_' . $antes];
-            if ($aulasAntes < $minimo || $aulasDepois < $minimo) {
+        foreach (self::ANTES as $antes => $colunaAntes) {
+            $aulasAntes = (int)$row['aulas_' . $colunaAntes];
+            $faltasAntes = (int)$row['faltas_' . $colunaAntes];
+            if ($aulasAntes < $minimo) {
                 continue;
             }
-            $grupo[$antes]['analisados']++;
-            if ($faltasDepois * $aulasAntes < $faltasAntes * $aulasDepois) {
-                $grupo[$antes]['melhoraram']++;
-                $grupo[$antes]['soma_antes'] += 100 * $faltasAntes / $aulasAntes;
-                $grupo[$antes]['soma_depois'] += 100 * $faltasDepois / $aulasDepois;
+            foreach (self::DEPOIS as $depois => $colunaDepois) {
+                $aulasDepois = (int)$row['aulas_' . $colunaDepois];
+                $faltasDepois = (int)$row['faltas_' . $colunaDepois];
+                if ($aulasDepois < $minimo) {
+                    continue;
+                }
+                $c = &$grupo[$antes][$depois];
+                $c['analisados']++;
+                if ($faltasDepois * $aulasAntes < $faltasAntes * $aulasDepois) {
+                    $c['melhoraram']++;
+                    $c['soma_antes'] += 100 * $faltasAntes / $aulasAntes;
+                    $c['soma_depois'] += 100 * $faltasDepois / $aulasDepois;
+                }
+                unset($c);
             }
         }
     }
@@ -127,15 +144,17 @@ class EfeitoContatosRepository
      */
     private function finalizar(array &$grupo): void
     {
-        foreach (['primeiro', 'ultimo'] as $antes) {
-            $c = $grupo[$antes];
-            $melhoraram = (int)$c['melhoraram'];
-            $grupo[$antes] = [
-                'analisados' => (int)$c['analisados'],
-                'melhoraram' => $melhoraram,
-                'taxa_antes' => $melhoraram > 0 ? $c['soma_antes'] / $melhoraram : null,
-                'taxa_depois' => $melhoraram > 0 ? $c['soma_depois'] / $melhoraram : null,
-            ];
+        foreach (array_keys(self::ANTES) as $antes) {
+            foreach (array_keys(self::DEPOIS) as $depois) {
+                $c = $grupo[$antes][$depois];
+                $melhoraram = (int)$c['melhoraram'];
+                $grupo[$antes][$depois] = [
+                    'analisados' => (int)$c['analisados'],
+                    'melhoraram' => $melhoraram,
+                    'taxa_antes' => $melhoraram > 0 ? $c['soma_antes'] / $melhoraram : null,
+                    'taxa_depois' => $melhoraram > 0 ? $c['soma_depois'] / $melhoraram : null,
+                ];
+            }
         }
     }
 

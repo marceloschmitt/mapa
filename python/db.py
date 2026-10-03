@@ -150,9 +150,12 @@ def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
     _ensure_column(conn, "passe_livre_disciplina", "data_trancamento", "TEXT")
     _ensure_column(conn, "frequencia_disciplina", "situacao", "TEXT")
     _ensure_column(conn, "frequencia_disciplina", "data_trancamento", "TEXT")
+    _ensure_column(conn, "efeito_contatos_alunos", "aulas_ate_corte", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "efeito_contatos_alunos", "faltas_ate_corte", "INTEGER NOT NULL DEFAULT 0")
     _migrar_datas_aula_csv(conn)
-    # Tabela descontinuada (carga horaria por disciplina): remove de bancos antigos.
+    # Tabelas descontinuadas: removidas de bancos antigos.
     conn.execute("DROP TABLE IF EXISTS disciplina_carga_horaria")
+    conn.execute("DROP TABLE IF EXISTS efeito_contatos_eventos")
     conn.commit()
 
 

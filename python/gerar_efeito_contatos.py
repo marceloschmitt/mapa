@@ -4,9 +4,10 @@
 So alunos/curso contatados no semestre atual (e-mail automatico em
 alarme_emails; contatos registrados na tela de alarmes). Um contato = um dia
 com algum contato, qualquer que seja o canal. Para cada aluno grava o numero
-de contatos e a taxa de faltas (faltas / aulas) em tres janelas de N dias:
-antes do primeiro contato, antes do ultimo e depois do ultimo (com um so
-contato, as duas primeiras coincidem).
+de contatos e a taxa de faltas (faltas / aulas) nas janelas de N dias antes do
+primeiro contato, antes do ultimo e depois do ultimo (com um so contato, as
+duas primeiras coincidem), e do dia seguinte ao ultimo contato ate a data de
+corte dos dados.
 
 As aulas vem da grade (disciplina_aulas), limitadas a ultima chamada
 registrada de cada disciplina: dias sem chamada lancada nao contam, senao
@@ -33,7 +34,8 @@ from db import conectar, fechar
 
 CANAL_AUTOMATICO = "email_automatico"
 CANAL_NAO_INFORMADO = "nao_informado"
-JANELAS = ("antes_primeiro", "antes_ultimo", "depois_ultimo")
+JANELAS = ("antes_primeiro", "antes_ultimo", "depois_ultimo", "ate_corte")
+SEM_FIM = "9999-12-31"
 
 Par = tuple[int, int]
 
@@ -150,6 +152,7 @@ def montar_registros(
                 "antes_primeiro": ((primeiro - tamanho).isoformat(), (primeiro - um_dia).isoformat()),
                 "antes_ultimo": ((ultimo - tamanho).isoformat(), (ultimo - um_dia).isoformat()),
                 "depois_ultimo": ((ultimo + um_dia).isoformat(), (ultimo + tamanho).isoformat()),
+                "ate_corte": ((ultimo + um_dia).isoformat(), SEM_FIM),
             },
             "contagem": {nome: [0, 0] for nome in JANELAS},
         })
@@ -361,8 +364,9 @@ def gravar(
             primeiro_contato, ultimo_contato, canais_ultimo,
             aulas_antes_primeiro, faltas_antes_primeiro,
             aulas_antes_ultimo, faltas_antes_ultimo,
-            aulas_depois_ultimo, faltas_depois_ultimo
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            aulas_depois_ultimo, faltas_depois_ultimo,
+            aulas_ate_corte, faltas_ate_corte
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         """,
         [
             (
@@ -376,6 +380,7 @@ def gravar(
                 *r["contagem"]["antes_primeiro"],
                 *r["contagem"]["antes_ultimo"],
                 *r["contagem"]["depois_ultimo"],
+                *r["contagem"]["ate_corte"],
             )
             for r in registros
         ],
@@ -390,20 +395,27 @@ def imprimir_resumo(registros: list[dict[str, Any]], min_aulas: int) -> None:
         ("2+ contatos, desde o primeiro", lambda r: r["total"] > 1, "antes_primeiro"),
         ("2+ contatos, desde o ultimo", lambda r: r["total"] > 1, "antes_ultimo"),
     ]
-    print("\nGrupo                           Alunos  Contatos  Analisados  Melhoraram")
+    print("\n                                              Janela seguinte     Ate o corte")
+    print("Grupo                           Alunos  Contatos  Anal.  Melh.  Anal.  Melh.")
     for rotulo, filtro, antes in comparacoes:
         lista = [r for r in registros if filtro(r)]
-        analisados = melhoraram = 0
-        for r in lista:
-            aulas_a, faltas_a = r["contagem"][antes]
-            aulas_d, faltas_d = r["contagem"]["depois_ultimo"]
-            if aulas_a < min_aulas or aulas_d < min_aulas:
-                continue
-            analisados += 1
-            if faltas_d * aulas_a < faltas_a * aulas_d:
-                melhoraram += 1
+        colunas: list[int] = []
+        for depois in ("depois_ultimo", "ate_corte"):
+            analisados = melhoraram = 0
+            for r in lista:
+                aulas_a, faltas_a = r["contagem"][antes]
+                aulas_d, faltas_d = r["contagem"][depois]
+                if aulas_a < min_aulas or aulas_d < min_aulas:
+                    continue
+                analisados += 1
+                if faltas_d * aulas_a < faltas_a * aulas_d:
+                    melhoraram += 1
+            colunas += [analisados, melhoraram]
         contatos = sum(r["total"] for r in lista)
-        print(f"{rotulo:<31} {len(lista):>6}  {contatos:>8}  {analisados:>10}  {melhoraram:>10}")
+        print(
+            f"{rotulo:<31} {len(lista):>6}  {contatos:>8}  "
+            + "  ".join(f"{valor:>5}" for valor in colunas)
+        )
 
 
 def main(argv: list[str] | None = None) -> int:
