@@ -113,12 +113,16 @@ class EfeitoContatosRepository
 
     /**
      * Só entram na conta os eventos com aulas suficientes nas duas janelas.
-     * "Melhorou" compara as taxas por multiplicação cruzada (sem divisão por zero).
+     * "Melhorou" compara as taxas por multiplicação cruzada; reducao_melhoraram soma,
+     * em pontos percentuais, quanto a taxa de faltas de cada um desses alunos caiu.
      */
     private function colunasResumo(int $minAulas, string $alias = ''): string
     {
         $a = $alias;
-        $valido = '(' . $a . 'aulas_antes >= ' . $minAulas . ' AND ' . $a . 'aulas_depois >= ' . $minAulas . ')';
+        $minimo = max(1, $minAulas);
+        $valido = '(' . $a . 'aulas_antes >= ' . $minimo . ' AND ' . $a . 'aulas_depois >= ' . $minimo . ')';
+        $melhorou = $valido . ' AND ' . $a . 'faltas_depois * ' . $a . 'aulas_antes
+                    < ' . $a . 'faltas_antes * ' . $a . 'aulas_depois';
 
         return 'COUNT(*) AS total,
                 SUM(CASE WHEN ' . $valido . ' THEN 1 ELSE 0 END) AS analisados,
@@ -126,10 +130,11 @@ class EfeitoContatosRepository
                 SUM(CASE WHEN ' . $valido . ' THEN ' . $a . 'faltas_antes ELSE 0 END) AS faltas_antes,
                 SUM(CASE WHEN ' . $valido . ' THEN ' . $a . 'aulas_depois ELSE 0 END) AS aulas_depois,
                 SUM(CASE WHEN ' . $valido . ' THEN ' . $a . 'faltas_depois ELSE 0 END) AS faltas_depois,
-                SUM(CASE WHEN ' . $valido . ' AND ' . $a . 'faltas_depois * ' . $a . 'aulas_antes
-                              < ' . $a . 'faltas_antes * ' . $a . 'aulas_depois THEN 1 ELSE 0 END) AS melhoraram,
-                SUM(CASE WHEN ' . $valido . ' AND ' . $a . 'faltas_depois * ' . $a . 'aulas_antes
-                              > ' . $a . 'faltas_antes * ' . $a . 'aulas_depois THEN 1 ELSE 0 END) AS pioraram';
+                SUM(CASE WHEN ' . $melhorou . ' THEN 1 ELSE 0 END) AS melhoraram,
+                SUM(CASE WHEN ' . $melhorou . '
+                         THEN 100.0 * ' . $a . 'faltas_antes / ' . $a . 'aulas_antes
+                            - 100.0 * ' . $a . 'faltas_depois / ' . $a . 'aulas_depois
+                         ELSE 0 END) AS reducao_melhoraram';
     }
 
     /**
@@ -140,12 +145,13 @@ class EfeitoContatosRepository
     {
         $aulasAntes = (int)$row['aulas_antes'];
         $aulasDepois = (int)$row['aulas_depois'];
+        $melhoraram = (int)$row['melhoraram'];
 
         return [
             'total' => (int)$row['total'],
             'analisados' => (int)$row['analisados'],
-            'melhoraram' => (int)$row['melhoraram'],
-            'pioraram' => (int)$row['pioraram'],
+            'melhoraram' => $melhoraram,
+            'reducao_media' => $melhoraram > 0 ? (float)$row['reducao_melhoraram'] / $melhoraram : null,
             'taxa_antes' => $aulasAntes > 0 ? 100 * (int)$row['faltas_antes'] / $aulasAntes : null,
             'taxa_depois' => $aulasDepois > 0 ? 100 * (int)$row['faltas_depois'] / $aulasDepois : null,
         ];

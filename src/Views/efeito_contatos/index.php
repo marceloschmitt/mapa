@@ -43,6 +43,14 @@ $parcela = static function (int $parte, int $total) use ($num): string {
     return number_format(100 * $parte / $total, 0, ',', '.') . '%'
         . ' <span class="small text-secondary">(' . $num($parte) . ')</span>';
 };
+$reducao = static function (?array $linha): string {
+    if ($linha === null || $linha['reducao_media'] === null) {
+        return '<span class="text-secondary">—</span>';
+    }
+
+    return '<span class="fw-semibold text-success">−'
+        . number_format((float)$linha['reducao_media'], 1, ',', '.') . ' p.p.</span>';
+};
 $analisados = static function (array $linha) use ($num): string {
     $html = $num((int)$linha['analisados']);
     if ((int)$linha['total'] > (int)$linha['analisados']) {
@@ -135,7 +143,8 @@ foreach ($rotulosCanal as $canal => $rotulo) {
         <div class="card-body">
             <h2 class="h6 mb-1">Faltas antes e depois do contato</h2>
             <p class="small text-secondary mb-3">
-                Percentual de aulas com falta. Diferença negativa (verde) = o aluno passou a faltar menos.
+                Quantos alunos passaram a faltar menos e quanto caiu, em média, a taxa de faltas desses alunos.
+                As últimas colunas mostram a taxa do grupo inteiro.
             </p>
             <?php if ($linhasContato === [] && $semContato === null): ?>
                 <p class="text-secondary mb-0">Nenhum aluno com alarme ou contato neste recorte.</p>
@@ -146,11 +155,11 @@ foreach ($rotulosCanal as $canal => $rotulo) {
                             <tr>
                                 <th>Contato</th>
                                 <th class="text-end">Alunos analisados</th>
-                                <th class="text-end">Faltas antes</th>
+                                <th class="text-end">Melhoraram</th>
+                                <th class="text-end">Queda média das faltas</th>
+                                <th class="text-end border-start">Faltas antes</th>
                                 <th class="text-end">Faltas depois</th>
                                 <th class="text-end">Diferença</th>
-                                <th class="text-end">Melhoraram</th>
-                                <th class="text-end">Pioraram</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -164,11 +173,11 @@ foreach ($rotulosCanal as $canal => $rotulo) {
                                 <tr<?= $canal === 'primeiro' ? ' class="fw-semibold"' : '' ?>>
                                     <td<?= $canal === 'primeiro' ? '' : ' class="ps-4"' ?>><?= $e($rotulo) ?></td>
                                     <td class="text-end"><?= $analisados($linha) ?></td>
-                                    <td class="text-end"><?= $pct($linha['taxa_antes']) ?></td>
+                                    <td class="text-end"><?= $parcela((int)$linha['melhoraram'], (int)$linha['analisados']) ?></td>
+                                    <td class="text-end"><?= $reducao($linha) ?></td>
+                                    <td class="text-end border-start"><?= $pct($linha['taxa_antes']) ?></td>
                                     <td class="text-end"><?= $pct($linha['taxa_depois']) ?></td>
                                     <td class="text-end"><?= $diferenca($linha) ?></td>
-                                    <td class="text-end"><?= $parcela((int)$linha['melhoraram'], (int)$linha['analisados']) ?></td>
-                                    <td class="text-end"><?= $parcela((int)$linha['pioraram'], (int)$linha['analisados']) ?></td>
                                 </tr>
                             <?php endforeach; ?>
                             <?php if ($semContato !== null): ?>
@@ -178,11 +187,11 @@ foreach ($rotulosCanal as $canal => $rotulo) {
                                         <div class="small text-secondary fw-normal">a partir do primeiro alarme</div>
                                     </td>
                                     <td class="text-end"><?= $analisados($semContato) ?></td>
-                                    <td class="text-end"><?= $pct($semContato['taxa_antes']) ?></td>
+                                    <td class="text-end"><?= $parcela((int)$semContato['melhoraram'], (int)$semContato['analisados']) ?></td>
+                                    <td class="text-end"><?= $reducao($semContato) ?></td>
+                                    <td class="text-end border-start"><?= $pct($semContato['taxa_antes']) ?></td>
                                     <td class="text-end"><?= $pct($semContato['taxa_depois']) ?></td>
                                     <td class="text-end"><?= $diferenca($semContato) ?></td>
-                                    <td class="text-end"><?= $parcela((int)$semContato['melhoraram'], (int)$semContato['analisados']) ?></td>
-                                    <td class="text-end"><?= $parcela((int)$semContato['pioraram'], (int)$semContato['analisados']) ?></td>
                                 </tr>
                             <?php endif; ?>
                         </tbody>
@@ -209,11 +218,11 @@ foreach ($rotulosCanal as $canal => $rotulo) {
                             </tr>
                             <tr>
                                 <th class="text-end border-start">Alunos</th>
-                                <th class="text-end">Antes → depois</th>
-                                <th class="text-end">Diferença</th>
+                                <th class="text-end">Melhoraram</th>
+                                <th class="text-end">Queda média</th>
                                 <th class="text-end border-start">Alunos</th>
-                                <th class="text-end">Antes → depois</th>
-                                <th class="text-end">Diferença</th>
+                                <th class="text-end">Melhoraram</th>
+                                <th class="text-end">Queda média</th>
                             </tr>
                         </thead>
                         <tbody>
@@ -229,9 +238,9 @@ foreach ($rotulosCanal as $canal => $rotulo) {
                                         <?php else: ?>
                                             <td class="text-end border-start"><?= $num((int)$linha['analisados']) ?></td>
                                             <td class="text-end text-nowrap">
-                                                <?= $pct($linha['taxa_antes']) ?> → <?= $pct($linha['taxa_depois']) ?>
+                                                <?= $parcela((int)$linha['melhoraram'], (int)$linha['analisados']) ?>
                                             </td>
-                                            <td class="text-end text-nowrap"><?= $diferenca($linha) ?></td>
+                                            <td class="text-end text-nowrap"><?= $reducao($linha) ?></td>
                                         <?php endif; ?>
                                     <?php endforeach; ?>
                                 </tr>
@@ -250,6 +259,10 @@ foreach ($rotulosCanal as $canal => $rotulo) {
                 <li>
                     Taxa de faltas = faltas ÷ aulas da grade nos <?= $janela ?> dias antes e nos <?= $janela ?> dias
                     depois do contato (o dia do contato não entra). Dias sem chamada registrada pelo professor não contam.
+                </li>
+                <li>
+                    "Melhoraram" = alunos cuja taxa de faltas caiu depois do contato. "Queda média" = quanto essa taxa
+                    caiu, em pontos percentuais, na média desses alunos (ex.: de 40% para 15% = 25 p.p.).
                 </li>
                 <li>
                     Cada canal usa o primeiro contato daquele tipo com o aluno; "Qualquer contato" usa o primeiro de todos.
