@@ -1800,6 +1800,8 @@ class AnalyticsRepository
     /**
      * Nome da disciplina com fallback na grade pelo código (preferindo o mesmo curso):
      * trancamentos vindos só de ausencias_especiais chegam sem nome da API.
+     * Colunas da consulta externa só no WHERE: SQLite antigo (produção) não as
+     * resolve no ORDER BY de subconsulta ("no such column").
      */
     private function sqlNomeDisciplina(string $colunaNome, string $colunaCodigo, string $colunaCurso): string
     {
@@ -1807,8 +1809,12 @@ class AnalyticsRepository
                     NULLIF(TRIM(' . $colunaNome . '), \'\'),
                     (SELECT g.disciplina FROM disciplina_grade g
                      WHERE g.codigo_disciplina = ' . $colunaCodigo . '
+                       AND g.curso_id = ' . $colunaCurso . '
                        AND TRIM(g.disciplina) != \'\'
-                     ORDER BY g.curso_id = ' . $colunaCurso . ' DESC
+                     LIMIT 1),
+                    (SELECT g.disciplina FROM disciplina_grade g
+                     WHERE g.codigo_disciplina = ' . $colunaCodigo . '
+                       AND TRIM(g.disciplina) != \'\'
                      LIMIT 1),
                     \'\'
                 )';
