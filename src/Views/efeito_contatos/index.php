@@ -1,10 +1,7 @@
 <?php
 
-use Mapa\Models\EfeitoContatosRepository;
-
 $execucao = $execucao ?? null;
-$porCanal = $porCanal ?? [];
-$porCurso = $porCurso ?? [];
+$resumo = $resumo ?? null;
 $rotulosCanal = $rotulosCanal ?? [];
 $semSeletorCurso = !empty($semSeletorCurso);
 $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
@@ -24,43 +21,48 @@ if (is_array($execucao)) {
 }
 $pct = static fn(?float $valor): string => $valor === null ? '—' : number_format($valor, 1, ',', '.') . '%';
 $num = static fn(int $valor): string => number_format($valor, 0, ',', '.');
+$traco = '<span class="text-secondary">—</span>';
 
-$diferenca = static function (?array $linha): string {
-    if ($linha === null || $linha['taxa_antes'] === null || $linha['taxa_depois'] === null) {
-        return '<span class="text-secondary">—</span>';
-    }
-    $delta = (float)$linha['taxa_depois'] - (float)$linha['taxa_antes'];
-    $classe = $delta < -0.05 ? 'text-success' : ($delta > 0.05 ? 'text-danger' : 'text-secondary');
-    $sinal = $delta > 0.05 ? '+' : '';
-
-    return '<span class="fw-semibold ' . $classe . '">' . $sinal . number_format($delta, 1, ',', '.') . ' p.p.</span>';
-};
-$parcela = static function (int $parte, int $total) use ($num): string {
+$parcela = static function (array $comparacao) use ($num, $traco): string {
+    $total = (int)$comparacao['analisados'];
     if ($total === 0) {
-        return '<span class="text-secondary">—</span>';
+        return $traco;
     }
+    $parte = (int)$comparacao['melhoraram'];
 
     return number_format(100 * $parte / $total, 0, ',', '.') . '%'
         . ' <span class="small text-secondary">(' . $num($parte) . ')</span>';
 };
-$analisados = static function (array $linha) use ($num): string {
-    $html = $num((int)$linha['analisados']);
-    if ((int)$linha['total'] > (int)$linha['analisados']) {
-        $html .= ' <span class="small text-secondary">de ' . $num((int)$linha['total']) . '</span>';
+$queda = static function (array $comparacao) use ($traco): string {
+    if ($comparacao['taxa_antes'] === null || $comparacao['taxa_depois'] === null) {
+        return $traco;
+    }
+    $delta = (float)$comparacao['taxa_antes'] - (float)$comparacao['taxa_depois'];
+
+    return '<span class="fw-semibold text-success">' . number_format($delta, 1, ',', '.') . ' p.p.</span>';
+};
+$linhasGrupo = static function (array $grupo) use ($rotulosCanal): array {
+    $saida = [['Todos os canais', $grupo, true]];
+    foreach ($rotulosCanal as $canal => $rotulo) {
+        if (isset($grupo['canais'][$canal])) {
+            $saida[] = [$rotulo, $grupo['canais'][$canal], false];
+        }
+    }
+    foreach ($grupo['canais'] as $canal => $linha) {
+        if (!isset($rotulosCanal[$canal])) {
+            $saida[] = [(string)$canal, $linha, false];
+        }
     }
 
-    return $html;
+    return $saida;
 };
 
 $janela = (int)($execucao['janela_dias'] ?? 14);
 $minAulas = (int)($execucao['min_aulas'] ?? 3);
-$semContato = $porCanal[EfeitoContatosRepository::CANAL_SEM_CONTATO] ?? null;
-$linhasContato = [];
-foreach ($rotulosCanal as $canal => $rotulo) {
-    if (isset($porCanal[$canal])) {
-        $linhasContato[$canal] = $rotulo;
-    }
-}
+$comparacoesVarios = [
+    'primeiro' => 'Antes do primeiro contato',
+    'ultimo' => 'Antes do último contato',
+];
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
@@ -74,8 +76,8 @@ foreach ($rotulosCanal as $canal => $rotulo) {
             </p>
         <?php endif; ?>
         <p class="text-secondary mb-2">
-            Faltas dos alunos nos <?= $janela ?> dias antes e depois do contato, comparadas
-            com as de alunos com alarme que não foram contatados.
+            Alunos que receberam contato: quantos passaram a faltar menos nos <?= $janela ?> dias depois do
+            último contato e quanto melhoraram.
         </p>
         <?php if (is_array($execucao)): ?>
             <div class="d-flex flex-wrap align-items-center gap-2">
@@ -130,22 +132,65 @@ foreach ($rotulosCanal as $canal => $rotulo) {
     <div class="alert alert-warning"><?= $e((string)$avisoCoordenador) ?></div>
 <?php endif; ?>
 
-<?php if (is_array($execucao) && empty($avisoCoordenador)): ?>
+<?php if (is_array($execucao) && is_array($resumo)): ?>
+    <?php $um = $resumo['um']; $varios = $resumo['varios']; ?>
+    <div class="row g-3 mb-4">
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-secondary small">Alunos contatados</div>
+                    <div class="fs-3 fw-semibold"><?= $num((int)$resumo['alunos']) ?></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-secondary small">Contatos feitos</div>
+                    <div class="fs-3 fw-semibold"><?= $num((int)$resumo['contatos']) ?></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-secondary small">Com um contato</div>
+                    <div class="fs-3 fw-semibold"><?= $num((int)$um['alunos']) ?></div>
+                </div>
+            </div>
+        </div>
+        <div class="col-6 col-md-3">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <div class="text-secondary small">Com dois ou mais contatos</div>
+                    <div class="fs-3 fw-semibold"><?= $num((int)$varios['alunos']) ?></div>
+                    <?php if ((int)$varios['alunos'] > 0): ?>
+                        <div class="small text-secondary">
+                            <?= $num((int)$varios['contatos']) ?> contatos
+                            (média de <?= number_format((int)$varios['contatos'] / (int)$varios['alunos'], 1, ',', '.') ?>)
+                        </div>
+                    <?php endif; ?>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <div class="card border-0 shadow-sm mb-4">
         <div class="card-body">
-            <h2 class="h6 mb-1">Faltas antes e depois do contato</h2>
+            <h2 class="h6 mb-1">Alunos com um contato</h2>
             <p class="small text-secondary mb-3">
-                Quantos alunos passaram a faltar menos e, desses, a taxa de faltas que tinham antes e que têm depois.
+                Faltas nos <?= $janela ?> dias antes e nos <?= $janela ?> dias depois do contato.
             </p>
-            <?php if ($linhasContato === [] && $semContato === null): ?>
-                <p class="text-secondary mb-0">Nenhum aluno com alarme ou contato neste recorte.</p>
+            <?php if ((int)$um['alunos'] === 0): ?>
+                <p class="text-secondary mb-0">Nenhum aluno com um único contato neste recorte.</p>
             <?php else: ?>
                 <div class="table-responsive">
                     <table class="table table-sm align-middle mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th rowspan="2" class="align-bottom">Contato</th>
-                                <th rowspan="2" class="text-end align-bottom">Alunos analisados</th>
+                                <th rowspan="2" class="align-bottom">Canal</th>
+                                <th rowspan="2" class="text-end align-bottom">Alunos</th>
+                                <th rowspan="2" class="text-end align-bottom">Analisados</th>
                                 <th rowspan="2" class="text-end align-bottom">Melhoraram</th>
                                 <th colspan="3" class="text-center border-start">Faltas dos que melhoraram</th>
                             </tr>
@@ -156,35 +201,18 @@ foreach ($rotulosCanal as $canal => $rotulo) {
                             </tr>
                         </thead>
                         <tbody>
-                            <?php if ($linhasContato === []): ?>
-                                <tr>
-                                    <td colspan="6" class="text-secondary">Nenhum contato registrado no semestre.</td>
-                                </tr>
-                            <?php endif; ?>
-                            <?php foreach ($linhasContato as $canal => $rotulo): ?>
-                                <?php $linha = $porCanal[$canal]; ?>
-                                <tr<?= $canal === 'primeiro' ? ' class="fw-semibold"' : '' ?>>
-                                    <td<?= $canal === 'primeiro' ? '' : ' class="ps-4"' ?>><?= $e($rotulo) ?></td>
-                                    <td class="text-end"><?= $analisados($linha) ?></td>
-                                    <td class="text-end"><?= $parcela((int)$linha['melhoraram'], (int)$linha['analisados']) ?></td>
-                                    <td class="text-end border-start"><?= $pct($linha['taxa_antes']) ?></td>
-                                    <td class="text-end"><?= $pct($linha['taxa_depois']) ?></td>
-                                    <td class="text-end"><?= $diferenca($linha) ?></td>
+                            <?php foreach ($linhasGrupo($um) as [$rotulo, $linha, $todos]): ?>
+                                <?php $c = $linha['primeiro']; ?>
+                                <tr<?= $todos ? ' class="fw-semibold"' : '' ?>>
+                                    <td<?= $todos ? '' : ' class="ps-4"' ?>><?= $e((string)$rotulo) ?></td>
+                                    <td class="text-end"><?= $num((int)$linha['alunos']) ?></td>
+                                    <td class="text-end"><?= $num((int)$c['analisados']) ?></td>
+                                    <td class="text-end"><?= $parcela($c) ?></td>
+                                    <td class="text-end border-start"><?= $pct($c['taxa_antes']) ?></td>
+                                    <td class="text-end"><?= $pct($c['taxa_depois']) ?></td>
+                                    <td class="text-end"><?= $queda($c) ?></td>
                                 </tr>
                             <?php endforeach; ?>
-                            <?php if ($semContato !== null): ?>
-                                <tr class="table-light">
-                                    <td>
-                                        Comparação: com alarme e sem contato
-                                        <div class="small text-secondary fw-normal">a partir do primeiro alarme</div>
-                                    </td>
-                                    <td class="text-end"><?= $analisados($semContato) ?></td>
-                                    <td class="text-end"><?= $parcela((int)$semContato['melhoraram'], (int)$semContato['analisados']) ?></td>
-                                    <td class="text-end border-start"><?= $pct($semContato['taxa_antes']) ?></td>
-                                    <td class="text-end"><?= $pct($semContato['taxa_depois']) ?></td>
-                                    <td class="text-end"><?= $diferenca($semContato) ?></td>
-                                </tr>
-                            <?php endif; ?>
                         </tbody>
                     </table>
                 </div>
@@ -192,83 +220,89 @@ foreach ($rotulosCanal as $canal => $rotulo) {
         </div>
     </div>
 
-    <?php if (count($porCurso) > 1): ?>
-        <div class="card border-0 shadow-sm mb-4">
-            <div class="card-body">
-                <h2 class="h6 mb-1">Por curso</h2>
-                <p class="small text-secondary mb-3">
-                    Primeiro contato de cada aluno, por qualquer canal, ao lado dos alunos com alarme não contatados.
-                </p>
+    <div class="card border-0 shadow-sm mb-4">
+        <div class="card-body">
+            <h2 class="h6 mb-1">Alunos com dois ou mais contatos</h2>
+            <p class="small text-secondary mb-3">
+                Faltas nos <?= $janela ?> dias depois do último contato, comparadas com as dos <?= $janela ?> dias antes
+                do primeiro contato (efeito do conjunto) e antes do último (efeito só do último).
+            </p>
+            <?php if ((int)$varios['alunos'] === 0): ?>
+                <p class="text-secondary mb-0">Nenhum aluno com dois ou mais contatos neste recorte.</p>
+            <?php else: ?>
                 <div class="table-responsive">
                     <table class="table table-sm align-middle mb-0">
                         <thead class="table-light">
                             <tr>
-                                <th rowspan="2" class="align-bottom">Curso</th>
-                                <th colspan="3" class="text-center border-start">Contatados</th>
-                                <th colspan="3" class="text-center border-start">Sem contato</th>
+                                <th rowspan="2" class="align-bottom">Canal do último contato</th>
+                                <th rowspan="2" class="text-end align-bottom">Alunos</th>
+                                <th rowspan="2" class="text-end align-bottom">Contatos</th>
+                                <th rowspan="2" class="align-bottom border-start">Comparação</th>
+                                <th rowspan="2" class="text-end align-bottom">Analisados</th>
+                                <th rowspan="2" class="text-end align-bottom">Melhoraram</th>
+                                <th colspan="3" class="text-center border-start">Faltas dos que melhoraram</th>
                             </tr>
                             <tr>
-                                <th class="text-end border-start">Alunos</th>
-                                <th class="text-end">Melhoraram</th>
-                                <th class="text-end">Faltas antes → depois</th>
-                                <th class="text-end border-start">Alunos</th>
-                                <th class="text-end">Melhoraram</th>
-                                <th class="text-end">Faltas antes → depois</th>
+                                <th class="text-end border-start">Antes</th>
+                                <th class="text-end">Depois</th>
+                                <th class="text-end">Queda</th>
                             </tr>
                         </thead>
                         <tbody>
-                            <?php foreach ($porCurso as $curso): ?>
-                                <tr>
-                                    <td class="small"><?= $e((string)$curso['nome_curso']) ?></td>
-                                    <?php foreach (['contato', 'sem_contato'] as $grupo): ?>
-                                        <?php $linha = $curso[$grupo]; ?>
-                                        <?php if ($linha === null || (int)$linha['analisados'] === 0): ?>
-                                            <td class="text-end border-start text-secondary"><?= $linha === null ? '—' : '0' ?></td>
-                                            <td class="text-end text-secondary">—</td>
-                                            <td class="text-end text-secondary">—</td>
-                                        <?php else: ?>
-                                            <td class="text-end border-start"><?= $num((int)$linha['analisados']) ?></td>
-                                            <td class="text-end text-nowrap">
-                                                <?= $parcela((int)$linha['melhoraram'], (int)$linha['analisados']) ?>
-                                            </td>
-                                            <td class="text-end text-nowrap">
-                                                <?php if ((int)$linha['melhoraram'] > 0): ?>
-                                                    <?= $pct($linha['taxa_antes']) ?> → <?= $pct($linha['taxa_depois']) ?>
-                                                <?php else: ?>
-                                                    <span class="text-secondary">—</span>
-                                                <?php endif; ?>
-                                            </td>
+                            <?php foreach ($linhasGrupo($varios) as [$rotulo, $linha, $todos]): ?>
+                                <?php $primeiraLinha = true; ?>
+                                <?php foreach ($comparacoesVarios as $chave => $rotuloComparacao): ?>
+                                    <?php $c = $linha[$chave]; ?>
+                                    <tr<?= $todos ? ' class="fw-semibold"' : '' ?>>
+                                        <?php if ($primeiraLinha): ?>
+                                            <td rowspan="2"<?= $todos ? '' : ' class="ps-4"' ?>><?= $e((string)$rotulo) ?></td>
+                                            <td rowspan="2" class="text-end"><?= $num((int)$linha['alunos']) ?></td>
+                                            <td rowspan="2" class="text-end"><?= $num((int)$linha['contatos']) ?></td>
                                         <?php endif; ?>
-                                    <?php endforeach; ?>
-                                </tr>
+                                        <td class="small border-start fw-normal"><?= $e($rotuloComparacao) ?></td>
+                                        <td class="text-end"><?= $num((int)$c['analisados']) ?></td>
+                                        <td class="text-end"><?= $parcela($c) ?></td>
+                                        <td class="text-end border-start"><?= $pct($c['taxa_antes']) ?></td>
+                                        <td class="text-end"><?= $pct($c['taxa_depois']) ?></td>
+                                        <td class="text-end"><?= $queda($c) ?></td>
+                                    </tr>
+                                    <?php $primeiraLinha = false; ?>
+                                <?php endforeach; ?>
                             <?php endforeach; ?>
                         </tbody>
                     </table>
                 </div>
-            </div>
+            <?php endif; ?>
         </div>
-    <?php endif; ?>
+    </div>
 
     <div class="card border-0 shadow-sm">
         <div class="card-body small text-secondary">
             <h2 class="h6 text-body mb-2">Como ler</h2>
             <ul class="mb-0 ps-3">
                 <li>
-                    Taxa de faltas = faltas ÷ aulas da grade nos <?= $janela ?> dias antes e nos <?= $janela ?> dias
-                    depois do contato (o dia do contato não entra). Dias sem chamada registrada pelo professor não contam.
+                    Um contato = um dia em que o aluno recebeu algum contato (e-mail automático ou contato registrado
+                    na tela de alarmes). Mais de um canal no mesmo dia conta como um contato.
                 </li>
                 <li>
-                    "Melhoraram" = alunos cuja taxa de faltas caiu depois do contato. "Antes" e "Depois" são a média
-                    das taxas desses alunos; "Queda" é a diferença, em pontos percentuais (ex.: de 40% para 15% = 25 p.p.).
+                    Taxa de faltas = faltas ÷ aulas da grade nos <?= $janela ?> dias da janela (o dia do contato não entra).
+                    Dias sem chamada registrada pelo professor não contam.
                 </li>
                 <li>
-                    Cada canal usa o primeiro contato daquele tipo com o aluno; "Qualquer contato" usa o primeiro de todos.
-                    Só entram alunos com pelo menos <?= $minAulas ?> aulas em cada janela — contatos recentes ainda não
-                    têm o período "depois" completo.
+                    "Melhoraram" = a taxa de faltas depois do último contato ficou menor que a de antes. "Antes" e
+                    "Depois" são a média das taxas desses alunos; "Queda" é a diferença, em pontos percentuais
+                    (ex.: de 40% para 15% = 25 p.p.).
                 </li>
                 <li>
-                    Compare sempre com a linha "sem contato": o aluno costuma ser contatado no pior momento, e parte da
-                    melhora viria de qualquer forma. O efeito do contato é a diferença entre as duas linhas.
+                    Com dois ou mais contatos, a janela antes do último contato pode incluir contatos anteriores.
+                </li>
+                <li>
+                    O canal é o do dia do último contato. Quem recebeu mais de um canal nesse dia aparece em cada um,
+                    por isso a soma dos canais pode passar do total.
+                </li>
+                <li>
+                    "Analisados" = alunos com pelo menos <?= $minAulas ?> aulas em cada janela comparada; contatos
+                    recentes ainda não têm o período "depois" completo.
                 </li>
                 <li>Mostra associação, não prova que o contato causou a mudança.</li>
             </ul>

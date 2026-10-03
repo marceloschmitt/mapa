@@ -11,8 +11,6 @@ use PDO;
  */
 class EfeitoContatosRepository
 {
-    public const CANAL_SEM_CONTATO = 'sem_contato';
-
     private PDO $db;
 
     public function __construct(?PDO $db = null)
@@ -35,119 +33,110 @@ class EfeitoContatosRepository
     }
 
     /**
-     * Totais por canal e, em 'primeiro', o primeiro contato de cada aluno (qualquer canal).
+     * Alunos contatados em dois grupos: 'um' (um contato) e 'varios' (dois ou mais).
+     * Em cada grupo (e em cada canal do último contato) há duas comparações com as
+     * faltas depois do último contato: 'primeiro' (antes do primeiro contato) e
+     * 'ultimo' (antes do último). Com um só contato as duas são iguais.
      *
      * @param list<int>|null $cursoIds
-     * @return array<string, array<string, int|float|null>>
+     * @return array<string, mixed>
      */
-    public function resumoPorCanal(int $execucaoId, int $minAulas, ?array $cursoIds): array
+    public function resumo(int $execucaoId, int $minAulas, ?array $cursoIds): array
     {
         [$filtro, $params] = $this->filtroCurso('curso_id', $cursoIds);
         $params['execucao'] = $execucaoId;
 
         $statement = $this->db->prepare(
-            'SELECT canal, ' . $this->colunasResumo($minAulas) . '
-             FROM efeito_contatos_eventos
-             WHERE execucao_id = :execucao' . $filtro . '
-             GROUP BY canal'
+            'SELECT total_contatos, canais_ultimo,
+                    aulas_antes_primeiro, faltas_antes_primeiro,
+                    aulas_antes_ultimo, faltas_antes_ultimo,
+                    aulas_depois_ultimo, faltas_depois_ultimo
+             FROM efeito_contatos_alunos
+             WHERE execucao_id = :execucao' . $filtro
         );
         $statement->execute($params);
-        $saida = [];
+
+        $minimo = max(1, $minAulas);
+        $saida = [
+            'alunos' => 0,
+            'contatos' => 0,
+            'um' => $this->novoGrupo() + ['canais' => []],
+            'varios' => $this->novoGrupo() + ['canais' => []],
+        ];
         foreach ($statement->fetchAll() as $row) {
-            $saida[(string)$row['canal']] = $this->normalizar($row);
+            $grupo = (int)$row['total_contatos'] > 1 ? 'varios' : 'um';
+            $saida['alunos']++;
+            $saida['contatos'] += (int)$row['total_contatos'];
+            $this->acumular($saida[$grupo], $row, $minimo);
+            foreach (array_filter(explode(',', (string)$row['canais_ultimo'])) as $canal) {
+                if (!isset($saida[$grupo]['canais'][$canal])) {
+                    $saida[$grupo]['canais'][$canal] = $this->novoGrupo();
+                }
+                $this->acumular($saida[$grupo]['canais'][$canal], $row, $minimo);
+            }
         }
 
-        $statement = $this->db->prepare(
-            'SELECT ' . $this->colunasResumo($minAulas) . '
-             FROM efeito_contatos_eventos
-             WHERE execucao_id = :execucao AND primeiro_contato = 1' . $filtro
-        );
-        $statement->execute($params);
-        $row = $statement->fetch();
-        if ($row !== false && (int)$row['total'] > 0) {
-            $saida['primeiro'] = $this->normalizar($row);
+        foreach (['um', 'varios'] as $grupo) {
+            $this->finalizar($saida[$grupo]);
+            foreach ($saida[$grupo]['canais'] as &$porCanal) {
+                $this->finalizar($porCanal);
+            }
+            unset($porCanal);
         }
 
         return $saida;
     }
 
-    /**
-     * Por curso: primeiro contato de cada aluno contra alunos com alarme nunca contatados.
-     *
-     * @param list<int>|null $cursoIds
-     * @return list<array{nome_curso: string, contato: array<string, int|float|null>|null, sem_contato: array<string, int|float|null>|null}>
-     */
-    public function resumoPorCurso(int $execucaoId, int $minAulas, ?array $cursoIds): array
+    /** @return array<string, mixed> */
+    private function novoGrupo(): array
     {
-        [$filtro, $params] = $this->filtroCurso('e.curso_id', $cursoIds);
-        $params['execucao'] = $execucaoId;
+        $comparacao = ['analisados' => 0, 'melhoraram' => 0, 'soma_antes' => 0.0, 'soma_depois' => 0.0];
 
-        $statement = $this->db->prepare(
-            'SELECT e.curso_id, c.nome_curso,
-                    CASE WHEN e.canal = \'' . self::CANAL_SEM_CONTATO . '\' THEN \'sem_contato\' ELSE \'contato\' END AS grupo,
-                    ' . $this->colunasResumo($minAulas, 'e.') . '
-             FROM efeito_contatos_eventos e
-             INNER JOIN cursos c ON c.id = e.curso_id
-             WHERE e.execucao_id = :execucao
-               AND (e.primeiro_contato = 1 OR e.canal = \'' . self::CANAL_SEM_CONTATO . '\')' . $filtro . '
-             GROUP BY e.curso_id, c.nome_curso, grupo
-             ORDER BY c.nome_curso'
-        );
-        $statement->execute($params);
-
-        $porCurso = [];
-        foreach ($statement->fetchAll() as $row) {
-            $cursoId = (int)$row['curso_id'];
-            if (!isset($porCurso[$cursoId])) {
-                $porCurso[$cursoId] = [
-                    'nome_curso' => (string)$row['nome_curso'],
-                    'contato' => null,
-                    'sem_contato' => null,
-                ];
-            }
-            $porCurso[$cursoId][(string)$row['grupo']] = $this->normalizar($row);
-        }
-
-        return array_values($porCurso);
+        return ['alunos' => 0, 'contatos' => 0, 'primeiro' => $comparacao, 'ultimo' => $comparacao];
     }
 
     /**
-     * Só entram na conta os eventos com aulas suficientes nas duas janelas.
-     * "Melhorou" compara as taxas por multiplicação cruzada; das que melhoraram somam-se
-     * as taxas individuais (média por aluno, não ponderada por aulas).
-     */
-    private function colunasResumo(int $minAulas, string $alias = ''): string
-    {
-        $a = $alias;
-        $minimo = max(1, $minAulas);
-        $valido = '(' . $a . 'aulas_antes >= ' . $minimo . ' AND ' . $a . 'aulas_depois >= ' . $minimo . ')';
-        $melhorou = $valido . ' AND ' . $a . 'faltas_depois * ' . $a . 'aulas_antes
-                    < ' . $a . 'faltas_antes * ' . $a . 'aulas_depois';
-
-        return 'COUNT(*) AS total,
-                SUM(CASE WHEN ' . $valido . ' THEN 1 ELSE 0 END) AS analisados,
-                SUM(CASE WHEN ' . $melhorou . ' THEN 1 ELSE 0 END) AS melhoraram,
-                SUM(CASE WHEN ' . $melhorou . '
-                         THEN 100.0 * ' . $a . 'faltas_antes / ' . $a . 'aulas_antes ELSE 0 END) AS soma_taxa_antes,
-                SUM(CASE WHEN ' . $melhorou . '
-                         THEN 100.0 * ' . $a . 'faltas_depois / ' . $a . 'aulas_depois ELSE 0 END) AS soma_taxa_depois';
-    }
-
-    /**
+     * @param array<string, mixed> $grupo
      * @param array<string, mixed> $row
-     * @return array<string, int|float|null>
      */
-    private function normalizar(array $row): array
+    private function acumular(array &$grupo, array $row, int $minimo): void
     {
-        $melhoraram = (int)$row['melhoraram'];
+        $grupo['alunos']++;
+        $grupo['contatos'] += (int)$row['total_contatos'];
+        $aulasDepois = (int)$row['aulas_depois_ultimo'];
+        $faltasDepois = (int)$row['faltas_depois_ultimo'];
+        foreach (['primeiro', 'ultimo'] as $antes) {
+            $aulasAntes = (int)$row['aulas_antes_' . $antes];
+            $faltasAntes = (int)$row['faltas_antes_' . $antes];
+            if ($aulasAntes < $minimo || $aulasDepois < $minimo) {
+                continue;
+            }
+            $grupo[$antes]['analisados']++;
+            if ($faltasDepois * $aulasAntes < $faltasAntes * $aulasDepois) {
+                $grupo[$antes]['melhoraram']++;
+                $grupo[$antes]['soma_antes'] += 100 * $faltasAntes / $aulasAntes;
+                $grupo[$antes]['soma_depois'] += 100 * $faltasDepois / $aulasDepois;
+            }
+        }
+    }
 
-        return [
-            'total' => (int)$row['total'],
-            'analisados' => (int)$row['analisados'],
-            'melhoraram' => $melhoraram,
-            'taxa_antes' => $melhoraram > 0 ? (float)$row['soma_taxa_antes'] / $melhoraram : null,
-            'taxa_depois' => $melhoraram > 0 ? (float)$row['soma_taxa_depois'] / $melhoraram : null,
-        ];
+    /**
+     * Taxas antes/depois = média das taxas individuais dos que melhoraram.
+     *
+     * @param array<string, mixed> $grupo
+     */
+    private function finalizar(array &$grupo): void
+    {
+        foreach (['primeiro', 'ultimo'] as $antes) {
+            $c = $grupo[$antes];
+            $melhoraram = (int)$c['melhoraram'];
+            $grupo[$antes] = [
+                'analisados' => (int)$c['analisados'],
+                'melhoraram' => $melhoraram,
+                'taxa_antes' => $melhoraram > 0 ? $c['soma_antes'] / $melhoraram : null,
+                'taxa_depois' => $melhoraram > 0 ? $c['soma_depois'] / $melhoraram : null,
+            ];
+        }
     }
 
     /**

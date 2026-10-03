@@ -11,9 +11,8 @@ use Mapa\Models\EfeitoContatosRepository;
 
 class EfeitoContatosController extends Controller
 {
-    /** Ordem das linhas na tela; 'primeiro' é o primeiro contato de cada aluno, por qualquer canal. */
+    /** Ordem das linhas de canal na tela. */
     public const ROTULOS_CANAL = [
-        'primeiro' => 'Qualquer contato (o primeiro de cada aluno)',
         'email_automatico' => 'E-mail automático',
         'email' => 'E-mail enviado',
         'whatsapp' => 'WhatsApp',
@@ -57,12 +56,9 @@ class EfeitoContatosController extends Controller
             }
         }
 
-        $porCanal = [];
-        $porCurso = [];
+        $resumo = null;
         if ($execucao !== null && $aviso === null) {
-            $minAulas = (int)$execucao['min_aulas'];
-            $porCanal = $repo->resumoPorCanal((int)$execucao['id'], $minAulas, $cursoIds);
-            $porCurso = $repo->resumoPorCurso((int)$execucao['id'], $minAulas, $cursoIds);
+            $resumo = $repo->resumo((int)$execucao['id'], (int)$execucao['min_aulas'], $cursoIds);
         }
 
         $podeGerar = Auth::isAdmin();
@@ -75,8 +71,7 @@ class EfeitoContatosController extends Controller
 
         $this->render('efeito_contatos/index', [
             'execucao' => $execucao,
-            'porCanal' => $porCanal,
-            'porCurso' => $porCurso,
+            'resumo' => $resumo,
             'rotulosCanal' => self::ROTULOS_CANAL,
             'cursosDisponiveis' => $cursosDisponiveis,
             'cursoSelecionado' => $cursoSelecionado,
