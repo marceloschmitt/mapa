@@ -347,9 +347,11 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                                     $codigoDisc = (string)($disciplina['codigo'] ?? '');
                                     $minhaDisciplina = !$isProfessor
                                         || $codigoDisc === ''
-                                        || isset($minhasDisciplinasMapa[$codigoDisc]);
-                                    $outraDisciplina = $isProfessor && $codigoDisc !== ''
-                                        && !isset($minhasDisciplinasMapa[$codigoDisc]);
+                                        || !empty($disciplina['minha']);
+                                    $outraDisciplina = !$minhaDisciplina;
+                                    $rotuloOutra = isset($minhasDisciplinasMapa[$codigoDisc])
+                                        ? 'Outra turma'
+                                        : 'Outra disciplina';
                                     ?>
                                     <tr class="<?= trim(($outraDisciplina ? 'linha-outra-disciplina ' : '') . ($todosVisualizados ? 'table-secondary' : '')) ?>">
                                         <td class="td-codigo">
@@ -361,9 +363,13 @@ if (!function_exists('mapaFormatarContatoAlarme')) {
                                         </td>
                                         <td class="td-disciplina">
                                             <?= htmlspecialchars($nomeDisc, ENT_QUOTES, 'UTF-8') ?>
+                                            <?php $nomeTurmaDisc = trim((string)($disciplina['nome_turma'] ?? '')); ?>
+                                            <?php if ($nomeTurmaDisc !== ''): ?>
+                                                <span class="text-secondary">— <?= htmlspecialchars($nomeTurmaDisc, ENT_QUOTES, 'UTF-8') ?></span>
+                                            <?php endif; ?>
                                             <?php if ($outraDisciplina): ?>
                                                 <div>
-                                                    <span class="badge text-bg-light border text-secondary">Outra disciplina</span>
+                                                    <span class="badge text-bg-light border text-secondary"><?= $rotuloOutra ?></span>
                                                 </div>
                                             <?php endif; ?>
                                             <?php

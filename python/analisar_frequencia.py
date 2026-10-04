@@ -6,7 +6,9 @@ Le os arquivos gravados por consulta_alunos_massa.py:
 - resposta_alunos_massa_intervalo.json: um registro por vinculo (aluno x curso)
   com status, totais, disciplinas e ausencias_especiais;
 - resposta_alunos_massa_cadastro.json: nome civil, nome social, e-mail e
-  turma de entrada, que o intervalo nao traz.
+  turma de entrada, que o intervalo nao traz;
+- resposta_matriculas.json (opcional): turma (id_turma) do aluno em cada
+  disciplina, casada por id_discente + codigo da disciplina.
 
 Frequencia/controle: apenas vinculos ATIVO ou FORMANDO; demais status
 (inclusive trancados) sao ignorados. Vinculos sem curso (alunos especiais)
@@ -25,6 +27,7 @@ from typing import Any
 from paths import (
     JSON_RESPOSTA_ALUNOS_MASSA,
     JSON_RESPOSTA_ALUNOS_MASSA_CADASTRO,
+    JSON_RESPOSTA_MATRICULAS,
     JSON_TABELA_FREQUENCIA,
     garantir_diretorios,
 )
@@ -37,6 +40,8 @@ from ausencias_especiais import (
 ARQUIVO_INTERVALO = JSON_RESPOSTA_ALUNOS_MASSA
 ARQUIVO_CADASTRO = JSON_RESPOSTA_ALUNOS_MASSA_CADASTRO
 ARQUIVO_SAIDA_JSON = JSON_TABELA_FREQUENCIA
+
+ChaveTurma = tuple[str, str]
 
 
 def parsear_data_br(texto: str) -> date | None:
@@ -147,7 +152,35 @@ def extrair_frequencia_geral(vinculo: dict[str, Any]) -> dict[str, Any] | None:
     }
 
 
-def extrair_disciplinas(vinculo: dict[str, Any]) -> list[dict[str, Any]]:
+def indexar_turmas(matriculas: Any) -> dict[ChaveTurma, int]:
+    """id_turma por (id_discente, codigo da disciplina), a partir de resposta_matriculas.json."""
+    if not isinstance(matriculas, dict) or isinstance(matriculas.get("data"), list):
+        return {}
+
+    turmas: dict[ChaveTurma, int] = {}
+    for registro in matriculas.values():
+        if not isinstance(registro, dict):
+            continue
+        id_discente = str(registro.get("id_discente") or "").strip()
+        if id_discente == "":
+            continue
+        for item in registro.get("disciplinas") or []:
+            if not isinstance(item, dict):
+                continue
+            codigo = str(item.get("cod_disciplina") or "").strip()
+            try:
+                id_turma = int(item.get("id_turma"))
+            except (TypeError, ValueError):
+                continue
+            if codigo:
+                turmas[(id_discente, codigo)] = id_turma
+    return turmas
+
+
+def extrair_disciplinas(
+    vinculo: dict[str, Any],
+    turmas: dict[ChaveTurma, int] | None = None,
+) -> list[dict[str, Any]]:
     """Frequencia por disciplina do vinculo.
 
     Disciplinas em ausencias_especiais.trancamento_cancelamento ficam com
@@ -156,6 +189,8 @@ def extrair_disciplinas(vinculo: dict[str, Any]) -> list[dict[str, Any]]:
     disciplinas = vinculo.get("disciplinas") or []
     if not isinstance(disciplinas, list):
         disciplinas = []
+    turmas = turmas or {}
+    id_discente = str(vinculo.get("id_discente") or "").strip()
 
     linhas: list[dict[str, Any]] = []
     for disciplina in disciplinas:
@@ -166,8 +201,10 @@ def extrair_disciplinas(vinculo: dict[str, Any]) -> list[dict[str, Any]]:
         if not isinstance(freq, dict):
             freq = {}
 
+        codigo = str(disciplina.get("cod_disciplina") or "").strip()
         linhas.append({
             "codigo_disciplina": disciplina.get("cod_disciplina", ""),
+            "id_turma": turmas.get((id_discente, codigo)),
             "disciplina": disciplina.get("nome", ""),
             "horarios": freq.get("horarios", 0),
             "ausencias": freq.get("ausencias", 0),
@@ -214,6 +251,7 @@ def _matricula(valor: Any) -> Any:
 def montar_resultado(
     vinculos: list[dict[str, Any]],
     cadastro: dict[str, Any],
+    turmas: dict[ChaveTurma, int] | None = None,
 ) -> list[dict[str, Any]]:
     """Tabela de frequencia (um registro por vinculo ATIVO/FORMANDO com curso)."""
     cursos = indexar_cursos(cadastro)
@@ -235,7 +273,7 @@ def montar_resultado(
             continue
 
         frequencia_geral = extrair_frequencia_geral(vinculo)
-        disciplinas = extrair_disciplinas(vinculo)
+        disciplinas = extrair_disciplinas(vinculo, turmas)
         if frequencia_geral is None and disciplinas == []:
             continue
 
@@ -278,12 +316,13 @@ def salvar_json(resultado: list[dict[str, Any]], caminho: Path) -> None:
 def resumir(vinculos: list[dict[str, Any]], resultado: list[dict[str, Any]]) -> str:
     """Resumo textual da analise."""
     alunos_com_frequencia = len({registro["login"] for registro in resultado})
-    total_disciplinas = sum(len(registro.get("disciplinas", [])) for registro in resultado)
+    linhas = [d for registro in resultado for d in registro.get("disciplinas", [])]
+    com_turma = sum(1 for d in linhas if d.get("id_turma") is not None)
     return (
         f"Vinculos no arquivo: {len(vinculos)}\n"
         f"Alunos com frequencia (ATIVO/FORMANDO): {alunos_com_frequencia}\n"
         f"Registros (aluno/curso): {len(resultado)}\n"
-        f"Linhas de disciplina: {total_disciplinas}"
+        f"Linhas de disciplina: {len(linhas)} (com turma identificada: {com_turma})"
     )
 
 
@@ -300,7 +339,16 @@ def main() -> int:
         print(f"Erro ao ler entrada: {error}", file=sys.stderr)
         return 1
 
-    resultado = montar_resultado(vinculos, cadastro)
+    turmas: dict[ChaveTurma, int] = {}
+    if JSON_RESPOSTA_MATRICULAS.is_file():
+        try:
+            turmas = indexar_turmas(json.loads(JSON_RESPOSTA_MATRICULAS.read_text(encoding="utf-8")))
+        except (OSError, json.JSONDecodeError) as error:
+            print(f"Aviso: turmas nao identificadas ({JSON_RESPOSTA_MATRICULAS.name}: {error})")
+    else:
+        print(f"Aviso: {JSON_RESPOSTA_MATRICULAS.name} nao encontrado; disciplinas sem turma.")
+
+    resultado = montar_resultado(vinculos, cadastro, turmas)
     garantir_diretorios()
     salvar_json(resultado, ARQUIVO_SAIDA_JSON)
 

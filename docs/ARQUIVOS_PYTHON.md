@@ -70,6 +70,12 @@ vínculos `ATIVO` ou `FORMANDO` com curso (alunos especiais, sem curso, ficam de
 fora). O percentual total do curso é arredondado para inteiro, como a consulta
 individual devolvia. Gera `tabela_frequencia.json`.
 
+Também lê `resposta_matriculas.json` (gerado no passo anterior) para
+identificar a turma (`id_turma`) do aluno em cada disciplina, casando
+`id_discente` + código da disciplina (`indexar_turmas`). Sem o arquivo, as
+disciplinas saem sem turma e as etapas seguintes usam os dados por
+disciplina/curso.
+
 Diferenças em relação à tabela que era montada a partir da consulta individual
 por login (comparação de 01/10/2026): entram vínculos que a consulta individual
 perdia (frequência ou cursos vazios, ex.: Meio Ambiente Subsequente e mestrados)
@@ -86,8 +92,8 @@ semestres anteriores). Também é chamado automaticamente após
 
 ### `importar_frequencia.py`
 Importa `tabela_frequencia.json` para o SQLite: cria uma nova coleta e popula
-`alunos`, `frequencia_disciplina`, `faltas_dia`, entre outras. O JSON
-permanece como cache daquela coleta.
+`alunos`, `frequencia_disciplina` (com `id_turma`), `faltas_dia`, entre
+outras. O JSON permanece como cache daquela coleta.
 
 ### `importar_trancados.py`
 Lê `resposta_alunos_massa_cadastro.json` (consulta em massa), seleciona os
@@ -99,27 +105,44 @@ para consulta no portal (tela Trancados).
 
 ### `importar_professores.py`
 A partir de `resposta_matriculas.json`, popula `cursos` (todos os cursos da
-matrícula, não só os com frequência), `professores` e o vínculo
-`disciplina_professores`.
+matrícula, não só os com frequência), `professores`, o vínculo por código
+`disciplina_professores` e o vínculo por turma `turma_professores`
+(substituído a cada execução; cria a linha mínima em `turmas` se a turma
+ainda não existir).
 
 ### `importar_grade.py`
 Lê `resposta_matriculas.json`, expande os códigos de `turno_turma` (via
-`turno_turma.py`) em datas efetivas de aula (segunda a sábado) e popula
-`disciplina_grade` + `disciplina_aulas`.
+`turno_turma.py`) em datas efetivas de aula (segunda a sábado, sem feriados)
+e popula:
+- `turmas` + `turma_aulas`: grade de cada turma (`id_turma` do SIGAA);
+- `disciplina_grade` + `disciplina_aulas`: união das turmas por
+  disciplina/curso, usada para nome/semestre e quando o aluno não tem turma
+  identificada.
 
 ### `importar_chamadas.py`
 A partir de `resposta_alunos_massa_intervalo.json` (consulta em massa), grava
-por disciplina/curso a data da última aula ministrada (snapshot em
-`disciplina_ultima_aula`) e acumula o histórico de datas distintas em
-`disciplina_chamadas`. Vínculos sem curso (alunos especiais) ficam de fora.
+a data da última aula ministrada:
+- por turma: a maior `ultima_aula_ministrada` entre os alunos da turma
+  (snapshot por curso em `turma_ultima_aula`, histórico em `turma_chamadas`).
+  A turma de cada aluno vem de `resposta_matriculas.json`. Turma nova que é a
+  única da disciplina no curso herda o histórico de `disciplina_chamadas`;
+- por disciplina/curso, como antes (`disciplina_ultima_aula`,
+  `disciplina_chamadas`), usado quando a turma não é identificada.
+
+Vínculos sem curso (alunos especiais) ficam de fora.
 
 ### `gerar_alarmes.py`
 Gera os alarmes de risco de evasão a partir dos dados já no SQLite. Aplica
-duas regras — percentual de frequência abaixo do limite (após período de
-carência) e sequência de faltas consecutivas dentro de uma janela de dias
-úteis — cujos parâmetros (limites, janelas, textos) vêm de
-`config_alarmes.py`/tabela `configuracoes` (tela Configurações → Alarmes),
-com os valores antigos como padrão. Grava em `alarmes`.
+três regras — percentual de frequência abaixo do limite (após período de
+carência), sequência de dias úteis com falta e semanas consecutivas faltando
+a todas as aulas da disciplina — cujos parâmetros (limites, janelas, textos)
+vêm de `config_alarmes.py`/tabela `configuracoes` (tela Configurações →
+Alarmes), com os valores antigos como padrão. Grava em `alarmes`, com a
+turma do aluno (`id_turma`).
+
+A carência e as semanas consecutivas usam as aulas da turma do aluno
+(`turma_aulas`); sem turma identificada, as da disciplina no curso
+(`disciplina_aulas`).
 
 Depois deste passo, `executar_coleta.py` ainda dispara três scripts PHP
 (fora do escopo deste diretório): envio de e-mails de chamadas em atraso e
@@ -198,6 +221,15 @@ cargo de `sincronizar_passe_livre_semestre_atual.py`, que reaproveita
 `gravar_banco` e `validar_periodo` deste script). Acionado pela tela Passe
 livre → gerar.
 
+### `gerar_efeito_contatos.py`
+Compara a taxa de faltas dos alunos contatados no semestre (e-mail automático
+em `alarme_emails` e contatos registrados na tela de alarmes) antes e depois
+do contato. Conta as aulas da turma do aluno (`turma_aulas`) até a última
+chamada da turma (`turma_ultima_aula`); sem turma identificada, usa a grade e
+a última chamada da disciplina no curso. Só lê o banco e grava em
+`efeito_contatos_*`. Acionado pela tela Efeito dos contatos → Gerar análise
+(opções `--janela` e `--min-aulas`).
+
 ### `importar_emails_professores.py`
 Atualiza os e-mails dos professores a partir de um CSV exportado do Moodle
 (`data/Users.csv`). Casa os registros pelo nome (normalizado, sem acentos) e
@@ -216,10 +248,10 @@ remove prefixos de iniciais que o Moodle cola no início do nome.
 | `sincronizar_passe_livre_semestre_atual.py` | Pipeline (2b) | Espelha o semestre atual em `passe_livre_*` |
 | `importar_frequencia.py` | Pipeline (3) | Grava frequência/faltas no SQLite |
 | `importar_trancados.py` | Pipeline (4) | Grava alunos trancados no SQLite |
-| `importar_professores.py` | Pipeline (5) | Grava cursos, professores e vínculos |
-| `importar_grade.py` | Pipeline (6) | Grava grade e datas de aula |
-| `importar_chamadas.py` | Pipeline (7) | Grava última aula e histórico de chamadas |
-| `gerar_alarmes.py` | Pipeline (8) | Calcula e grava alarmes de risco de evasão |
+| `importar_professores.py` | Pipeline (5) | Grava cursos, professores e vínculos por disciplina e por turma |
+| `importar_grade.py` | Pipeline (6) | Grava turmas, grade e datas de aula |
+| `importar_chamadas.py` | Pipeline (7) | Grava última aula e histórico de chamadas por turma e por disciplina |
+| `gerar_alarmes.py` | Pipeline (8) | Calcula e grava alarmes de risco de evasão (com a turma) |
 | `paths.py` | Módulo de apoio | Caminhos padronizados do projeto |
 | `db.py` | Módulo de apoio | Conexão SQLite e schema |
 | `api_auth.py` | Módulo de apoio | Token OAuth e URLs da API |
@@ -231,4 +263,5 @@ remove prefixos de iniciais que o Moodle cola no início do nome.
 | `ausencias_especiais.py` | Módulo de apoio | Trancamento/cancelamento de disciplina (API) |
 | `gerar_perda_vaga.py` | Manual (tela Perda de vaga) | Candidatos a perda de vaga |
 | `gerar_passe_livre.py` | Manual | Passe livre a partir da frequência mensal |
+| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos) | Faltas antes e depois do contato com o aluno |
 | `importar_emails_professores.py` | Manual | Atualiza e-mails de professores via CSV |

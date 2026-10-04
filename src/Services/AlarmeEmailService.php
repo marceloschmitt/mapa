@@ -905,11 +905,12 @@ class AlarmeEmailService
         }
 
         $statement = $this->pdo->prepare(
-            'SELECT id, tipo, severidade, mensagem, codigo_disciplina, disciplina,
-                    aluno_id, curso_id
-             FROM alarmes
-             WHERE id IN (' . implode(', ', $placeholders) . ')
-             ORDER BY CASE severidade WHEN \'critico\' THEN 0 ELSE 1 END, disciplina, tipo'
+            'SELECT al.id, al.tipo, al.severidade, al.mensagem, al.codigo_disciplina, al.disciplina,
+                    al.aluno_id, al.curso_id, al.id_turma, t.nome_turma
+             FROM alarmes al
+             LEFT JOIN turmas t ON t.id_turma = al.id_turma
+             WHERE al.id IN (' . implode(', ', $placeholders) . ')
+             ORDER BY CASE al.severidade WHEN \'critico\' THEN 0 ELSE 1 END, al.disciplina, al.tipo'
         );
         $statement->execute($params);
 
@@ -998,6 +999,7 @@ class AlarmeEmailService
     {
         $digest = [];
         $codigos = [];
+        $turmas = [];
 
         foreach ($gruposEnviados as $grupo) {
             foreach ($grupo['alarmes'] as $alarme) {
@@ -1005,10 +1007,15 @@ class AlarmeEmailService
                 if ($codigo !== '') {
                     $codigos[$codigo] = true;
                 }
+                $idTurma = (int)($alarme['id_turma'] ?? 0);
+                if ($idTurma > 0) {
+                    $turmas[$idTurma] = true;
+                }
             }
         }
 
         $professoresPorCodigo = $this->mapaProfessoresPorCodigo(array_keys($codigos));
+        $professoresPorTurma = $this->mapaProfessoresPorTurma(array_keys($turmas));
 
         foreach ($gruposEnviados as $grupo) {
             $emailAluno = strtolower(trim((string)($grupo['email'] ?? '')));
@@ -1033,7 +1040,11 @@ class AlarmeEmailService
                 if ($codigo === '') {
                     continue;
                 }
-                foreach ($professoresPorCodigo[$codigo] ?? [] as $emailProf) {
+                // Professores da turma do aluno; sem turma (ou turma sem e-mail), os do código.
+                $idTurma = (int)($alarme['id_turma'] ?? 0);
+                $emailsProf = ($idTurma > 0 ? ($professoresPorTurma[$idTurma] ?? []) : [])
+                    ?: ($professoresPorCodigo[$codigo] ?? []);
+                foreach ($emailsProf as $emailProf) {
                     if (strtolower($emailProf) === $emailAluno) {
                         continue;
                     }
@@ -1175,6 +1186,39 @@ class AlarmeEmailService
         return $saida;
     }
 
+    /**
+     * @param list<int> $idsTurma
+     * @return array<int, list<string>>
+     */
+    private function mapaProfessoresPorTurma(array $idsTurma): array
+    {
+        if ($idsTurma === []) {
+            return [];
+        }
+
+        $mapa = [];
+        // Lotes abaixo do limite de 999 parâmetros do SQLite antigo.
+        foreach (array_chunk(array_values($idsTurma), 500) as $lote) {
+            $statement = $this->pdo->prepare(
+                'SELECT tp.id_turma, TRIM(p.email) AS email
+                 FROM turma_professores tp
+                 INNER JOIN professores p ON p.id = tp.professor_id
+                 WHERE tp.id_turma IN (' . implode(', ', array_fill(0, count($lote), '?')) . ')
+                   AND p.email IS NOT NULL
+                   AND TRIM(p.email) != \'\''
+            );
+            $statement->execute(array_map('intval', $lote));
+            foreach ($statement->fetchAll() as $row) {
+                $email = trim((string)($row['email'] ?? ''));
+                if (filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                    $mapa[(int)$row['id_turma']][$email] = $email;
+                }
+            }
+        }
+
+        return array_map('array_values', $mapa);
+    }
+
     /** Semanas consecutivas exigidas pela regra (Configuracoes -> Alarmes). */
     private function semanasConsecutivas(): int
     {
@@ -1202,6 +1246,11 @@ class AlarmeEmailService
             $contexto = $comSeveridade
                 ? 'Curso (sem disciplina específica)'
                 : 'No curso, de forma geral';
+        }
+
+        $nomeTurma = trim((string)($alarme['nome_turma'] ?? ''));
+        if ($comSeveridade && $nomeTurma !== '' && $codigo !== '') {
+            $contexto .= ' (' . $nomeTurma . ')';
         }
 
         $prefixo = '';

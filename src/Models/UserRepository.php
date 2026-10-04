@@ -429,6 +429,35 @@ class UserRepository
         return $codigos;
     }
 
+    /**
+     * Turmas do docente cujo CPF coincide com o do usuario.
+     *
+     * @return list<int>
+     */
+    public function turmaIdsDoUsuario(int $usuarioId): array
+    {
+        $usuario = $this->findById($usuarioId);
+        if ($usuario === null) {
+            return [];
+        }
+
+        $cpf = $this->normalizarCpf($usuario['cpf'] ?? null);
+        if ($cpf === null) {
+            return [];
+        }
+
+        $statement = $this->db->prepare(
+            'SELECT DISTINCT tp.id_turma
+             FROM professores p
+             INNER JOIN turma_professores tp ON tp.professor_id = p.id
+             WHERE p.cpf = :cpf
+             ORDER BY tp.id_turma'
+        );
+        $statement->execute(['cpf' => $cpf]);
+
+        return array_map('intval', $statement->fetchAll(PDO::FETCH_COLUMN));
+    }
+
     /** @return list<string> */
     public function nomesDisciplinasDoUsuario(int $usuarioId): array
     {

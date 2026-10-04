@@ -142,7 +142,7 @@ if ($coleta !== null) {
             'icone' => 'bi-journal-text',
             'cor' => 'verde',
             'valor' => $numero(count($disciplinasCriticas)),
-            'rotulo' => 'Disciplinas com alunos abaixo de ' . $rotuloLimite . '%',
+            'rotulo' => 'Turmas com alunos abaixo de ' . $rotuloLimite . '%',
             'link' => '#disciplinas-criticas',
         ],
     ];
@@ -227,6 +227,7 @@ if ($coleta !== null) {
                     <span class="text-secondary fw-normal" id="criticasContador"></span>
                 <?php endif; ?>
             </h2>
+            <p class="small text-secondary mb-2">Cada linha é uma turma da disciplina no curso.</p>
             <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0 small" id="tabelaCriticas">
                     <colgroup>
@@ -265,6 +266,12 @@ if ($coleta !== null) {
                                             $nomeCrit .= ' (' . $semCrit . ')';
                                         }
                                         echo htmlspecialchars($nomeCrit, ENT_QUOTES, 'UTF-8');
+                                        $turmaCrit = trim((string)($disc['nome_turma'] ?? ''));
+                                        if ($turmaCrit !== ''):
+                                        ?>
+                                            <span class="text-secondary">— <?= htmlspecialchars($turmaCrit, ENT_QUOTES, 'UTF-8') ?></span>
+                                        <?php
+                                        endif;
                                         $profs = trim((string)($disc['professores'] ?? ''));
                                         if ($profs !== ''):
                                         ?>

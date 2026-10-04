@@ -2,7 +2,10 @@
 """Importa a grade de aulas das disciplinas (turno_turma).
 
 Le resposta_matriculas.json, expande os intervalos em datas efetivas de aula
-(segunda a sabado) e popula `disciplina_grade` + `disciplina_aulas`.
+(segunda a sabado) e popula:
+  - `turmas` + `turma_aulas`: grade de cada turma (id_turma do SIGAA);
+  - `disciplina_grade` + `disciplina_aulas`: uniao das turmas por disciplina/curso,
+    usada para nome/semestre e quando o aluno nao tem turma identificada.
 
 Uso:
     python3 importar_grade.py
@@ -135,6 +138,73 @@ def extrair_grades(
     return grades
 
 
+def extrair_turmas(matriculas: dict[str, Any]) -> dict[int, dict[str, Any]]:
+    """Grade de cada turma (id_turma), com as datas efetivas de aula."""
+    turmas: dict[int, dict[str, Any]] = {}
+
+    for registro in matriculas.values():
+        if not isinstance(registro, dict):
+            continue
+        for item in registro.get("disciplinas") or []:
+            if not isinstance(item, dict):
+                continue
+            codigo = str(item.get("cod_disciplina") or "").strip()
+            try:
+                id_turma = int(item.get("id_turma"))
+            except (TypeError, ValueError):
+                continue
+            if codigo == "" or id_turma in turmas:
+                continue
+
+            turno = item.get("turno_turma")
+            turmas[id_turma] = {
+                "id_turma": id_turma,
+                "codigo_disciplina": codigo,
+                "disciplina": str(item.get("disciplina") or "").strip() or codigo,
+                "nome_turma": str(item.get("turma") or "").strip(),
+                "turno_turma": str(turno).strip() if turno else None,
+                "datas": set(extrair_datas_aula(turno, incluir_sabado=True, incluir_domingo=False)),
+                "dias": set(extrair_dias_sigaa(turno, incluir_sabado=True)),
+            }
+
+    return turmas
+
+
+def upsert_turma(cursor: Any, item: dict[str, Any], feriados: set[date]) -> int:
+    """Persiste a turma e substitui suas datas de aula; retorna qtd de datas."""
+    datas = sorted(d for d in item["datas"] if d not in feriados)
+    id_turma = int(item["id_turma"])
+    cursor.execute(
+        """
+        INSERT INTO turmas (
+            id_turma, codigo_disciplina, disciplina, nome_turma,
+            turno_turma, dias_semana, atualizado_em
+        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+        ON CONFLICT(id_turma) DO UPDATE SET
+            codigo_disciplina = excluded.codigo_disciplina,
+            disciplina = excluded.disciplina,
+            nome_turma = excluded.nome_turma,
+            turno_turma = COALESCE(excluded.turno_turma, turmas.turno_turma),
+            dias_semana = excluded.dias_semana,
+            atualizado_em = excluded.atualizado_em
+        """,
+        (
+            id_turma,
+            item["codigo_disciplina"],
+            item["disciplina"],
+            item["nome_turma"],
+            item["turno_turma"],
+            dias_para_texto(sorted(item["dias"])),
+        ),
+    )
+    cursor.execute("DELETE FROM turma_aulas WHERE id_turma = ?", (id_turma,))
+    cursor.executemany(
+        "INSERT INTO turma_aulas (id_turma, data_aula) VALUES (?, ?)",
+        [(id_turma, d.isoformat()) for d in datas],
+    )
+    return len(datas)
+
+
 def carregar_feriados(cursor: Any) -> set[date]:
     """Datas de feriado cadastradas pelo administrador."""
     try:
@@ -262,12 +332,20 @@ def importar(matriculas: dict[str, Any]) -> dict[str, int]:
         if n > 0:
             com_datas += 1
 
+    turmas = extrair_turmas(matriculas)
+    turmas_com_datas = 0
+    for item in turmas.values():
+        if upsert_turma(cursor, item, feriados) > 0:
+            turmas_com_datas += 1
+
     conn.commit()
     return {
         "grades": len(grades),
         "com_datas": com_datas,
         "sem_datas": len(grades) - com_datas,
         "total_datas": total_datas,
+        "turmas": len(turmas),
+        "turmas_com_datas": turmas_com_datas,
     }
 
 
@@ -298,6 +376,7 @@ def main() -> int:
     print(f"Com datas de aula: {resumo['com_datas']}")
     print(f"Sem datas de aula: {resumo['sem_datas']}")
     print(f"Total de datas: {resumo['total_datas']}")
+    print(f"Turmas: {resumo['turmas']} (com datas de aula: {resumo['turmas_com_datas']})")
     return 0
 
 

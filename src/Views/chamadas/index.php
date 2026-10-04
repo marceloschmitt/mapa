@@ -69,6 +69,7 @@ $renderLinhas = static function (
         if ($semestreRotulo !== '') {
             $nomeDisciplina .= ' (' . $semestreRotulo . ')';
         }
+        $nomeTurma = trim((string)($linha['nome_turma'] ?? ''));
         $diaEsperado = trim((string)($linha['dia_esperado'] ?? ''));
         $exibirFaltante = $mostrarFaltante && $diaEsperado !== '';
         $diaEsperadoFmt = $exibirFaltante ? $formatarData($diaEsperado) : '';
@@ -98,7 +99,8 @@ $renderLinhas = static function (
                 'dia' => $formatarDiaSemana($dataChamada),
             ];
         }
-        $tituloModal = trim((string)$linha['codigo_disciplina'] . ' — ' . $nomeDisciplina);
+        $tituloModal = trim((string)$linha['codigo_disciplina'] . ' — ' . $nomeDisciplina)
+            . ($nomeTurma !== '' ? ' — ' . $nomeTurma : '');
         $classeLinha = $mostrarFaltante ? 'table-danger' : ($semData ? 'table-warning' : '');
         ?>
         <tr class="linha-chamada <?= $classeLinha ?>"
@@ -112,7 +114,12 @@ $renderLinhas = static function (
             <td>
                 <code><?= htmlspecialchars((string)$linha['codigo_disciplina'], ENT_QUOTES, 'UTF-8') ?></code>
             </td>
-            <td><?= htmlspecialchars($nomeDisciplina, ENT_QUOTES, 'UTF-8') ?></td>
+            <td>
+                <?= htmlspecialchars($nomeDisciplina, ENT_QUOTES, 'UTF-8') ?>
+                <?php if ($nomeTurma !== ''): ?>
+                    <div class="small text-secondary"><?= htmlspecialchars($nomeTurma, ENT_QUOTES, 'UTF-8') ?></div>
+                <?php endif; ?>
+            </td>
             <td><?= htmlspecialchars((string)$linha['nome_curso'], ENT_QUOTES, 'UTF-8') ?></td>
             <td>
                 <?= $diasAula !== ''
@@ -173,7 +180,7 @@ $renderLinhas = static function (
             </p>
         <?php endif; ?>
         <p class="text-secondary mb-2">
-            Chamadas em atraso e demais disciplinas, separadas.
+            Chamadas em atraso e demais turmas, separadas; cada linha é uma turma da disciplina no curso.
             Clique na linha para ver todas as datas de chamada.
             <?php if ($coleta !== null): ?>
                 <?= htmlspecialchars(View::rotuloColeta($coleta), ENT_QUOTES, 'UTF-8') ?>.
@@ -182,7 +189,7 @@ $renderLinhas = static function (
         <?php if ($coleta !== null): ?>
             <div class="d-flex flex-wrap gap-2">
                 <span class="badge text-bg-secondary">
-                    <?= $totalDisciplinas ?> disciplina<?= $totalDisciplinas === 1 ? '' : 's' ?>
+                    <?= $totalDisciplinas ?> turma<?= $totalDisciplinas === 1 ? '' : 's' ?>
                 </span>
                 <span class="badge text-bg-danger">
                     <?= $atrasadas ?> atrasada<?= $atrasadas === 1 ? '' : 's' ?><?php if ($atrasadas > 0): ?>,
@@ -232,10 +239,10 @@ $renderLinhas = static function (
             <div class="card-header bg-white border-0 pt-3 pb-2 px-3">
                 <div class="d-flex flex-wrap justify-content-between align-items-start gap-2">
                     <div>
-                        <h2 class="h6 mb-1 text-danger">Disciplinas com chamadas em atraso</h2>
+                        <h2 class="h6 mb-1 text-danger">Turmas com chamadas em atraso</h2>
                         <p class="small text-secondary mb-0">
                             Ordenadas pela data faltante (mais recente primeiro).
-                            <?= $atrasadas ?> disciplina<?= $atrasadas === 1 ? '' : 's' ?><?php if ($atrasadas > 0): ?>,
+                            <?= $atrasadas ?> turma<?= $atrasadas === 1 ? '' : 's' ?><?php if ($atrasadas > 0): ?>,
                             das quais <?= (int)($atrasadasComEmail ?? 0) ?> já tiveram e-mail enviado<?php endif; ?>.
                         </p>
                     </div>
@@ -282,11 +289,11 @@ $renderLinhas = static function (
 
         <section class="card border-0 shadow-sm">
             <div class="card-header bg-white border-0 pt-3 pb-0 px-3">
-                <h2 class="h6 mb-1">Disciplinas com chamadas em dia</h2>
+                <h2 class="h6 mb-1">Turmas com chamadas em dia</h2>
                 <p class="small text-secondary mb-0">
                     Inclui as ainda sem data para registrar (sem aula esperada).
                     Ordenadas pelo último registro.
-                    <?= count($disciplinasEmDia) ?> disciplina<?= count($disciplinasEmDia) === 1 ? '' : 's' ?><?php if ($semRegistroSemData > 0): ?>
+                    <?= count($disciplinasEmDia) ?> turma<?= count($disciplinasEmDia) === 1 ? '' : 's' ?><?php if ($semRegistroSemData > 0): ?>
                     · <?= $semRegistroSemData ?> sem data para registrar<?php endif; ?>.
                 </p>
             </div>

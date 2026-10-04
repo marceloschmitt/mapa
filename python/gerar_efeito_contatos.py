@@ -9,9 +9,11 @@ primeiro contato, antes do ultimo e depois do ultimo (com um so contato, as
 duas primeiras coincidem), e do dia seguinte ao ultimo contato ate a data de
 corte dos dados.
 
-As aulas vem da grade (disciplina_aulas), limitadas a ultima chamada
-registrada de cada disciplina: dias sem chamada lancada nao contam, senao
-pareceriam presenca e a taxa "depois" ficaria artificialmente baixa.
+As aulas vem da turma do aluno (turma_aulas), limitadas a ultima chamada
+registrada da turma (turma_ultima_aula): dias sem chamada lancada nao contam,
+senao pareceriam presenca e a taxa "depois" ficaria artificialmente baixa.
+Sem turma identificada (ou sem dados dela), usa a grade e a ultima chamada
+da disciplina no curso (disciplina_aulas, disciplina_ultima_aula).
 
 Nao faz parte da coleta: le so o banco e pode levar alguns minutos.
 
@@ -175,6 +177,49 @@ def carregar_aulas(cursor: Any, inicio: date) -> dict[tuple[str, int], list[str]
     return aulas
 
 
+def carregar_aulas_turma(cursor: Any, inicio: date) -> dict[int, list[str]]:
+    """Datas de aula de cada turma (ordenadas)."""
+    aulas: dict[int, list[str]] = defaultdict(list)
+    for row in cursor.execute(
+        """
+        SELECT id_turma, data_aula
+        FROM turma_aulas
+        WHERE data_aula >= ?
+        ORDER BY id_turma, data_aula
+        """,
+        (inicio.isoformat(),),
+    ).fetchall():
+        aulas[int(row[0])].append(str(row[1]))
+    return aulas
+
+
+def carregar_ultimas_chamadas_turma(
+    cursor: Any,
+    primeira_id: int,
+) -> dict[int, tuple[list[int], list[str]]]:
+    """Ultima chamada registrada por turma, em cada coleta (ordem de coleta).
+
+    turma_ultima_aula tem uma linha por curso da turma, todas com a mesma data.
+    """
+    saida: dict[int, tuple[list[int], list[str]]] = {}
+    for row in cursor.execute(
+        """
+        SELECT id_turma, coleta_id, MAX(data_ultima_aula)
+        FROM turma_ultima_aula
+        WHERE coleta_id >= ?
+          AND data_ultima_aula IS NOT NULL
+          AND TRIM(data_ultima_aula) != ''
+        GROUP BY id_turma, coleta_id
+        ORDER BY id_turma, coleta_id
+        """,
+        (primeira_id,),
+    ).fetchall():
+        coletas, datas = saida.setdefault(int(row[0]), ([], []))
+        coletas.append(int(row[1]))
+        datas.append(str(row[2])[:10])
+    return saida
+
+
 def carregar_ultimas_chamadas(
     cursor: Any,
     primeira_id: int,
@@ -200,11 +245,11 @@ def carregar_ultimas_chamadas(
 
 
 def ultima_chamada_ate(
-    ultimas: dict[tuple[str, int], tuple[list[int], list[str]]],
-    chave: tuple[str, int],
+    ultimas: dict[Any, tuple[list[int], list[str]]],
+    chave: Any,
     coleta_id: int,
 ) -> str | None:
-    """Ultima chamada da disciplina conhecida ate a coleta informada."""
+    """Ultima chamada da disciplina (ou turma) conhecida ate a coleta informada."""
     registro = ultimas.get(chave)
     if registro is None:
         return None
@@ -269,14 +314,16 @@ def calcular_janelas(
 
     aulas = carregar_aulas(cursor, semestre["inicio"])
     ultimas = carregar_ultimas_chamadas(cursor, primeira_id)
+    aulas_turma = carregar_aulas_turma(cursor, semestre["inicio"])
+    ultimas_turma = carregar_ultimas_chamadas_turma(cursor, primeira_id)
     sem_dados = 0
 
     for coleta_id in sorted(pares_por_coleta):
         pares = pares_por_coleta[coleta_id]
-        disciplinas: dict[Par, list[str]] = defaultdict(list)
+        disciplinas: dict[Par, list[tuple[str, int | None]]] = defaultdict(list)
         for row in cursor.execute(
             """
-            SELECT aluno_id, curso_id, codigo_disciplina
+            SELECT aluno_id, curso_id, codigo_disciplina, id_turma
             FROM frequencia_disciplina
             WHERE coleta_id = ?
               AND (situacao IS NULL OR TRIM(situacao) = '')
@@ -285,7 +332,8 @@ def calcular_janelas(
         ).fetchall():
             par = (int(row[0]), int(row[1]))
             if par in pares:
-                disciplinas[par].append(str(row[2]))
+                id_turma = int(row[3]) if row[3] is not None else None
+                disciplinas[par].append((str(row[2]), id_turma))
 
         faltas: dict[tuple[Par, str], set[str]] = defaultdict(set)
         for row in cursor.execute(
@@ -306,13 +354,17 @@ def calcular_janelas(
         corte_iso = corte_coleta.isoformat()
 
         for par in pares:
-            for codigo in disciplinas.get(par, []):
-                chave = (codigo, par[1])
-                datas_aula = aulas.get(chave)
-                if not datas_aula:
-                    continue
-                ultima = ultima_chamada_ate(ultimas, chave, coleta_id)
-                if ultima is None:
+            for codigo, id_turma in disciplinas.get(par, []):
+                datas_aula = None
+                ultima = None
+                if id_turma is not None:
+                    datas_aula = aulas_turma.get(id_turma)
+                    ultima = ultima_chamada_ate(ultimas_turma, id_turma, coleta_id)
+                if not datas_aula or ultima is None:
+                    chave = (codigo, par[1])
+                    datas_aula = aulas.get(chave)
+                    ultima = ultima_chamada_ate(ultimas, chave, coleta_id)
+                if not datas_aula or ultima is None:
                     continue
                 limite = min(ultima, corte_iso)
                 faltas_disc = faltas.get((par, codigo), set())

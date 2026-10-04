@@ -66,7 +66,8 @@ class AuthController extends Controller
 
         $cursoIds = $repository->cursoIdsDoUsuario((int)$usuario['id']);
         $disciplinaCodigos = $repository->disciplinaCodigosDoUsuario((int)$usuario['id']);
-        Auth::login($usuario, $cursoIds, $disciplinaCodigos);
+        $turmaIds = $repository->turmaIdsDoUsuario((int)$usuario['id']);
+        Auth::login($usuario, $cursoIds, $disciplinaCodigos, $turmaIds);
         (new AccessLogRepository())->registrarLogin();
         Session::flash('sucesso', 'Senha do administrador definida. Bem-vindo ao MAPA.');
         $this->redirect('/');
@@ -137,7 +138,8 @@ class AuthController extends Controller
 
         $cursoIds = $repository->cursoIdsDoUsuario((int)$usuario['id']);
         $disciplinaCodigos = $repository->disciplinaCodigosDoUsuario((int)$usuario['id']);
-        Auth::login($usuario, $cursoIds, $disciplinaCodigos);
+        $turmaIds = $repository->turmaIdsDoUsuario((int)$usuario['id']);
+        Auth::login($usuario, $cursoIds, $disciplinaCodigos, $turmaIds);
         (new AccessLogRepository())->registrarLogin();
         $this->redirect('/');
     }

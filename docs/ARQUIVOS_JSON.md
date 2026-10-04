@@ -18,7 +18,7 @@ portal vem do SQLite. Os JSON são entrada/cache dos scripts Python.
 
 | Arquivo | Gerado por | Lido por | Frequência |
 |---|---|---|---|
-| `resposta_matriculas.json` | `consulta_inicial.py` | `importar_professores.py`, `importar_grade.py`, `gerar_passe_livre.py`, `gerar_perda_vaga.py`* | **Periódico** |
+| `resposta_matriculas.json` | `consulta_inicial.py` | `analisar_frequencia.py`, `importar_professores.py`, `importar_grade.py`, `importar_chamadas.py`, `gerar_passe_livre.py`, `gerar_perda_vaga.py`* | **Periódico** |
 | `resposta_matriculas_AAAA_S.json` | `consulta_inicial.py` (2 semestres anteriores); `gerar_perda_vaga.py` (se não existir) | `gerar_perda_vaga.py`* | **Periódico** (2 anteriores); demais sob demanda |
 | `tabela_frequencia.json` | `analisar_frequencia.py` | `sincronizar_passe_livre_semestre_atual.py`, `importar_frequencia.py` | **Periódico** |
 | `resposta_alunos_massa_cadastro.json` | `consulta_alunos_massa.py` | `importar_trancados.py`, `analisar_frequencia.py` | **Periódico** |
@@ -38,11 +38,16 @@ consulta_alunos_massa.py
   ├─ resposta_alunos_massa_cadastro.json ──┬─> importar_trancados.py    → alunos_trancados
   │                                        └─> analisar_frequencia.py
   └─ resposta_alunos_massa_intervalo.json ─┬─> analisar_frequencia.py
-                                           └─> importar_chamadas.py     → disciplina_ultima_aula, disciplina_chamadas
+                                           └─> importar_chamadas.py     → turma_ultima_aula, turma_chamadas,
+                                                                          disciplina_ultima_aula, disciplina_chamadas
 
 consulta_inicial.py
-  ├─ resposta_matriculas.json ─────────────┬─> importar_professores.py  → cursos, professores, disciplina_professores
-  │                                        └─> importar_grade.py        → disciplina_grade, disciplina_aulas
+  ├─ resposta_matriculas.json ─────────────┬─> analisar_frequencia.py   (turma do aluno em cada disciplina)
+  │                                        ├─> importar_professores.py  → cursos, professores, disciplina_professores,
+  │                                        │                              turma_professores
+  │                                        ├─> importar_grade.py        → turmas, turma_aulas,
+  │                                        │                              disciplina_grade, disciplina_aulas
+  │                                        └─> importar_chamadas.py     (turma de cada aluno)
   └─ resposta_matriculas_AAAA_S.json           (cache de gerar_perda_vaga.py)
 
 analisar_frequencia.py
@@ -56,9 +61,15 @@ analisar_frequencia.py
 - **Conteúdo:** matriculados do período atual (`/matriculados?matriculado=sim`),
   com disciplinas, turmas, `turno_turma` e docentes.
 - **Telas que dependem dele (via BD):** Chamadas, Grade/aulas, Professores,
-  filtros de curso, e-mails de chamadas em atraso.
+  filtros de curso, e-mails de chamadas em atraso e tudo o que é separado por
+  turma (alarmes, disciplinas críticas, escopo do professor).
+- **Turma do aluno:** cada disciplina do aluno traz `id_turma`, `turma`
+  (nome), `turno_turma` e os docentes da turma. A análise de frequência e a
+  importação de chamadas casam o aluno pela chave `id_discente` + código da
+  disciplina.
 - **Observação:** só pode conter matriculados — `importar_professores.py` e
-  `importar_grade.py` contam com isso.
+  `importar_grade.py` contam com isso. Se faltar, a coleta segue com os dados
+  por disciplina/curso (sem turma).
 
 ### `resposta_matriculas_AAAA_S.json` (2 semestres anteriores)
 - **Conteúdo:** matriculados de cada semestre anterior.
@@ -91,7 +102,9 @@ analisar_frequencia.py
   registro por vínculo com status, totais, disciplinas e `ausencias_especiais`
   (inclui a data de trancamento de quem trancou no período atual).
 - **Usado por:** `analisar_frequencia.py` (fonte da frequência) e
-  `importar_chamadas.py` (última aula ministrada por disciplina/curso).
+  `importar_chamadas.py` (última aula ministrada por turma e por
+  disciplina/curso; o campo `ultima_aula_ministrada` é por aluno, e a data da
+  turma é a maior entre os seus alunos).
 - **Telas que dependem dele (via BD):** Chamadas e, via
   `tabela_frequencia.json`, as de frequência.
 

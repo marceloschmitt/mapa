@@ -134,8 +134,14 @@ class ChamadasController extends Controller
             if ($codigo === '') {
                 continue;
             }
-            $porCurso[$curso][$codigo] = [
-                'disciplina' => trim((string)($linha['disciplina'] ?? '')),
+            $nomeTurma = trim((string)($linha['nome_turma'] ?? ''));
+            $disciplina = trim((string)($linha['disciplina'] ?? ''));
+            if ($nomeTurma !== '') {
+                $disciplina .= ' (' . $nomeTurma . ')';
+            }
+            $porCurso[$curso][$codigo . '|' . $nomeTurma] = [
+                'codigo' => $codigo,
+                'disciplina' => $disciplina,
                 'professores' => trim((string)($linha['professores'] ?? '')),
                 'data_faltante' => trim((string)($linha['dia_esperado'] ?? '')),
             ];
@@ -179,7 +185,7 @@ class ChamadasController extends Controller
                 'Dia não registrado',
             ]);
 
-            foreach ($itens as $codigo => $info) {
+            foreach ($itens as $info) {
                 $faltante = trim((string)($info['data_faltante'] ?? ''));
                 $faltanteFmt = '';
                 if ($faltante !== '') {
@@ -187,7 +193,7 @@ class ChamadasController extends Controller
                     $faltanteFmt = $ts !== false ? date('d/m/Y', $ts) : $faltante;
                 }
                 $pdf->tableRow($larguras, [
-                    (string)$codigo,
+                    (string)$info['codigo'],
                     (string)($info['disciplina'] ?? ''),
                     (string)($info['professores'] ?? ''),
                     $faltanteFmt,
@@ -205,13 +211,10 @@ class ChamadasController extends Controller
      */
     private function anexarEmailChamada(array $disciplinas): array
     {
-        $mapa = (new ChamadaEmailService())->mapaEmailsEnviados();
+        $servico = new ChamadaEmailService();
+        $mapa = $servico->mapaEmailsEnviados();
         foreach ($disciplinas as &$linha) {
-            $codigo = trim((string)($linha['codigo_disciplina'] ?? ''));
-            $cursoId = (int)($linha['curso_id'] ?? 0);
-            $diaEsperado = trim((string)($linha['dia_esperado'] ?? ''));
-            $chave = $codigo . '|' . $cursoId . '|' . $diaEsperado;
-            $info = $mapa[$chave] ?? null;
+            $info = $servico->envioRegistrado($mapa, $linha);
             $linha['email_enviado'] = $info !== null;
             $linha['email_enviado_em'] = $info['enviado_em'] ?? '';
             $linha['email_destinatarios'] = $info['destinatarios'] ?? '';

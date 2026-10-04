@@ -38,6 +38,10 @@ class AlarmeController extends Controller
         $isCoordenador = Auth::isCoordenador();
         $isProfessor = Auth::isProfessor();
         $semSeletorCurso = $isCoordenador || $isProfessor;
+        $turmasProfessor = $isProfessor ? Auth::turmaIds() : [];
+        if ($isProfessor) {
+            $repo->restringirTurmas($turmasProfessor);
+        }
 
         $cursosDisponiveis = $semSeletorCurso ? [] : $repo->listarCursos(null);
         $cursoSelecionado = $this->cursoSelecionado($cursosDisponiveis);
@@ -154,9 +158,19 @@ class AlarmeController extends Controller
                     'codigo' => $codigo,
                     'nome' => $nomeDisc !== '' ? $nomeDisc : 'Sem disciplina',
                     'semestre_oferta' => trim((string)($alarme['semestre_oferta'] ?? '')),
+                    'id_turma' => 0,
+                    'nome_turma' => '',
                     'professores' => '',
                     'alarmes' => [],
                 ];
+            }
+
+            // Alarme tratado copiado de coleta antiga pode vir sem turma.
+            $idTurmaAlarme = (int)($alarme['id_turma'] ?? 0);
+            if ($idTurmaAlarme > 0 && $alarmesPorAluno[$chaveAluno]['disciplinas'][$chaveDisc]['id_turma'] === 0) {
+                $alarmesPorAluno[$chaveAluno]['disciplinas'][$chaveDisc]['id_turma'] = $idTurmaAlarme;
+                $alarmesPorAluno[$chaveAluno]['disciplinas'][$chaveDisc]['nome_turma'] =
+                    trim((string)($alarme['nome_turma'] ?? ''));
             }
 
             $alarmesPorAluno[$chaveAluno]['disciplinas'][$chaveDisc]['alarmes'][] = $alarme;
@@ -167,31 +181,45 @@ class AlarmeController extends Controller
         }
 
         $codigosDisc = [];
+        $idsTurma = [];
         foreach ($alarmesPorAluno as $grupo) {
             foreach ($grupo['disciplinas'] as $disciplina) {
                 $codigo = trim((string)($disciplina['codigo'] ?? ''));
+                if ((int)$disciplina['id_turma'] > 0) {
+                    $idsTurma[] = (int)$disciplina['id_turma'];
+                }
                 if ($codigo !== '') {
                     $codigosDisc[] = $codigo;
                 }
             }
         }
         $professoresPorCodigo = $repo->nomesProfessoresPorCodigo($codigosDisc);
+        $professoresPorTurma = $repo->nomesProfessoresPorTurmas($idsTurma);
 
+        $minhas = array_fill_keys($codigosDisciplina ?? [], true);
+        $minhasTurmas = array_fill_keys($turmasProfessor, true);
         $candidatosEmailCritico = [];
         foreach ($alarmesPorAluno as &$grupo) {
             foreach ($grupo['disciplinas'] as &$disciplina) {
                 $codigo = trim((string)($disciplina['codigo'] ?? ''));
-                $disciplina['professores'] = $professoresPorCodigo[$codigo] ?? '';
+                $idTurma = (int)$disciplina['id_turma'];
+                // Turma sem professor cadastrado: mostra os do código, como antes.
+                $disciplina['professores'] = ($idTurma > 0 ? ($professoresPorTurma[$idTurma] ?? '') : '')
+                    ?: ($professoresPorCodigo[$codigo] ?? '');
+                // Professor: mesma disciplina em turma de outro docente não é dele.
+                $disciplina['minha'] = !$isProfessor || (
+                    isset($minhas[$codigo])
+                    && ($idTurma <= 0 || $minhasTurmas === [] || isset($minhasTurmas[$idTurma]))
+                );
             }
             unset($disciplina);
             $grupo['disciplinas'] = array_values($grupo['disciplinas']);
-            if ($isProfessor && $codigosDisciplina !== null && $codigosDisciplina !== []) {
-                $minhas = array_fill_keys($codigosDisciplina, true);
+            if ($isProfessor && $minhas !== []) {
                 usort(
                     $grupo['disciplinas'],
-                    static function (array $a, array $b) use ($minhas): int {
-                        $aMinha = isset($minhas[(string)($a['codigo'] ?? '')]);
-                        $bMinha = isset($minhas[(string)($b['codigo'] ?? '')]);
+                    static function (array $a, array $b): int {
+                        $aMinha = $a['minha'];
+                        $bMinha = $b['minha'];
                         if ($aMinha !== $bMinha) {
                             return $aMinha ? -1 : 1;
                         }
@@ -278,6 +306,9 @@ class AlarmeController extends Controller
         $cursoIds = $escopo['cursoIds'];
         $codigosDisciplina = $escopo['codigosDisciplina'];
         $repo = new AnalyticsRepository();
+        if (Auth::isProfessor()) {
+            $repo->restringirTurmas(Auth::turmaIds());
+        }
         $usuarioId = (int)$user['id'];
 
         if ($alarmeId > 0) {
@@ -355,6 +386,9 @@ class AlarmeController extends Controller
         }
 
         $repo = new AnalyticsRepository();
+        if (Auth::isProfessor()) {
+            $repo->restringirTurmas(Auth::turmaIds());
+        }
         if ($codigosDisciplina !== null) {
             if ($codigosDisciplina === []) {
                 Session::flash('erro', 'Nenhuma disciplina vinculada ao seu CPF.');

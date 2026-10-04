@@ -43,6 +43,28 @@ erDiagram
     cursos ||--o{ faltas_dia : agrupa
     cursos ||--o{ alarmes : agrupa
     professores ||--o{ disciplina_professores : leciona
+    professores ||--o{ turma_professores : leciona
+    turmas ||--o{ turma_professores : tem
+    turmas ||--o{ turma_aulas : tem
+    turmas ||--o{ turma_chamadas : registra
+    turmas ||--o{ turma_ultima_aula : snapshot
+    turmas |o--o{ frequencia_disciplina : cursa
+    turmas |o--o{ alarmes : refere
+
+    turmas {
+        INTEGER id_turma PK
+        TEXT codigo_disciplina
+        TEXT disciplina
+        TEXT nome_turma
+        TEXT turno_turma
+        TEXT dias_semana
+    }
+    turma_professores {
+        INTEGER id PK
+        INTEGER id_turma FK
+        INTEGER professor_id FK
+        TEXT tipo_docente
+    }
 
     professores {
         INTEGER id PK
@@ -112,6 +134,7 @@ erDiagram
         INTEGER ausencias
         INTEGER presencas
         REAL percentual_frequencia
+        INTEGER id_turma FK
     }
 
     faltas_dia {
@@ -138,6 +161,7 @@ erDiagram
         INTEGER visualizado
         TEXT visualizado_em
         INTEGER visualizado_por FK
+        INTEGER id_turma FK
     }
 ```
 
@@ -168,7 +192,10 @@ Senhas locais **nunca** são gravadas em texto aberto — apenas `senha_hash`. U
 - `administrador` — tudo, inclusive gestão de usuários e configuração LDAP
 - `coordenador_curso` — alarmes apenas dos cursos em `usuario_cursos`
 - `geral` — tudo exceto gestão de usuários
-- `professor` — alarmes apenas das disciplinas vinculadas ao CPF em `professores` / `disciplina_professores`
+- `professor` — alarmes apenas das disciplinas vinculadas ao CPF em `professores` / `disciplina_professores`,
+  e dentro delas só os alunos das **suas turmas** (`turma_professores`). Linha sem turma identificada
+  (`id_turma` nulo) vale só pelo código. Professor ainda sem turmas importadas fica com o escopo por código.
+
 ---
 
 ### `configuracoes`
@@ -308,6 +335,117 @@ Vínculo N:N entre código da disciplina e professor.
 
 ---
 
+## Turmas
+
+Uma disciplina pode ter várias turmas no SIGAA, com horário, professores e
+chamada próprios (ex.: Turma 01 e Turma 02 de `POA-SSI115`). A turma do aluno
+vem de `resposta_matriculas.json` (`id_turma`, casada por `id_discente` +
+código da disciplina) e é gravada em `frequencia_disciplina.id_turma` e
+`alarmes.id_turma`.
+
+Quando a turma não é identificada (`id_turma` nulo), tudo volta aos dados por
+disciplina/curso: `disciplina_aulas`, `disciplina_chamadas`,
+`disciplina_ultima_aula` e `disciplina_professores`.
+
+Uma turma pode ter alunos de mais de um curso. As tabelas por curso
+(`turma_ultima_aula`) têm uma linha por curso, mas a data é a da turma inteira.
+
+### `turmas`
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `id_turma` | INTEGER | sim (PK) | Id da turma no SIGAA |
+| `codigo_disciplina` | TEXT | sim | Código da disciplina |
+| `disciplina` | TEXT | sim | Nome da disciplina |
+| `nome_turma` | TEXT | sim | Ex.: `Turma 01` (padrão `''`) |
+| `turno_turma` | TEXT | não | Horário bruto do SIGAA |
+| `dias_semana` | TEXT | sim | Dias de aula derivados de `turno_turma` |
+| `atualizado_em` | TEXT | sim | Última atualização |
+
+Gravada por `importar_grade.py`; `importar_professores.py` e
+`importar_chamadas.py` só criam a linha mínima se a turma ainda não existir.  
+**Índice:** `idx_turmas_codigo` em `codigo_disciplina`.
+
+### `turma_aulas`
+
+Datas efetivas de aula de cada turma (de `turno_turma`, segunda a sábado, sem
+feriados). Ao cadastrar um feriado no portal, a data sai daqui e de
+`disciplina_aulas`.
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `id` | INTEGER | sim (PK) | Identificador |
+| `id_turma` | INTEGER | sim (FK) | → `turmas.id_turma` |
+| `data_aula` | TEXT | sim | Data ISO |
+
+**Unique:** `(id_turma, data_aula)`. **Índice:** `idx_turma_aulas_data`.
+
+### `turma_professores`
+
+Professores de cada turma (substituídos a cada `importar_professores.py`).
+Define o escopo do perfil professor e quem recebe os e-mails de chamada e o
+resumo de alarmes da turma.
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `id` | INTEGER | sim (PK) | Identificador |
+| `id_turma` | INTEGER | sim (FK) | → `turmas.id_turma` |
+| `professor_id` | INTEGER | sim (FK) | → `professores.id` |
+| `tipo_docente` | TEXT | não | Ex.: `Docente` |
+
+**Unique:** `(id_turma, professor_id)`. **Índice:** `idx_turma_professores_professor`.
+
+### `turma_chamadas`
+
+Histórico de datas de chamada da turma: a maior `ultima_aula_ministrada`
+entre os alunos da turma em cada coleta.
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `id` | INTEGER | sim (PK) | Identificador |
+| `id_turma` | INTEGER | sim (FK) | → `turmas.id_turma` |
+| `data_chamada` | TEXT | sim | Data ISO |
+| `coleta_id` | INTEGER | sim (FK) | Coleta em que a data foi vista pela última vez |
+
+**Unique:** `(id_turma, data_chamada)`.  
+Turma nova que é a única da disciplina no curso herda as datas de
+`disciplina_chamadas` (histórico de antes da separação por turma).
+
+### `turma_ultima_aula`
+
+Snapshot da última chamada de cada turma por curso na coleta (base da tela
+Chamadas e do efeito dos contatos).
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `id` | INTEGER | sim (PK) | Identificador |
+| `coleta_id` | INTEGER | sim (FK) | → `coletas.id` |
+| `id_turma` | INTEGER | sim (FK) | → `turmas.id_turma` |
+| `curso_id` | INTEGER | sim (FK) | → `cursos.id` |
+| `data_ultima_aula` | TEXT | não | Data ISO; nulo = turma ainda sem chamada |
+
+**Unique:** `(coleta_id, id_turma, curso_id)`.
+
+### `turma_chamada_emails`
+
+E-mails automáticos de chamada em atraso enviados aos professores da turma
+(um por turma e data esperada, mesmo com alunos de vários cursos). Envios
+antigos por disciplina continuam em `chamada_emails` e são respeitados para
+não repetir o aviso.
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `id` | INTEGER | sim (PK) | Identificador |
+| `id_turma` | INTEGER | sim (FK) | → `turmas.id_turma` |
+| `data_esperada` | TEXT | sim | Data da chamada que faltou |
+| `destinatarios` | TEXT | sim | E-mails avisados |
+| `enviado_em` | TEXT | sim | Data/hora do envio |
+| `coleta_id` | INTEGER | não (FK) | → `coletas.id` (SET NULL) |
+
+**Unique:** `(id_turma, data_esperada)`.
+
+---
+
 ### `frequencia_disciplina`
 
 Snapshot de frequência por disciplina em uma coleta.
@@ -324,9 +462,10 @@ Snapshot de frequência por disciplina em uma coleta.
 | `ausencias` | INTEGER | sim | Ausências |
 | `presencas` | INTEGER | sim | Presenças |
 | `percentual_frequencia` | REAL | não | Percentual de frequência |
+| `id_turma` | INTEGER | não | Turma do aluno na disciplina → `turmas.id_turma`; nulo = não identificada |
 
 **Unique:** `(coleta_id, aluno_id, curso_id, codigo_disciplina)`.  
-**Índice:** `idx_freq_percentual` em `percentual_frequencia`.  
+**Índices:** `idx_freq_percentual` em `percentual_frequencia`; `idx_frequencia_disciplina_turma` em `(coleta_id, id_turma)`.  
 **ON DELETE CASCADE** nas FKs para `coletas`, `alunos` e `cursos`.
 
 ---
@@ -371,6 +510,7 @@ Sinais de risco de evasão gerados a partir da coleta.
 | `visualizado_em` | TEXT | não | Data/hora do contato |
 | `visualizado_por` | INTEGER | não (FK) | → `usuarios.id` (quem registrou) |
 | `contato_tipo` | TEXT | não | `email`, `whatsapp`, `telefone`, `presencial` ou `assistencia` |
+| `id_turma` | INTEGER | não | Turma do aluno na disciplina → `turmas.id_turma`; nulo = alarme do curso ou turma não identificada |
 
 **Unique:** `(coleta_id, aluno_id, curso_id, codigo_disciplina, tipo)`.  
 **Índice:** `idx_alarmes_visualizado` em `visualizado`.  
@@ -393,10 +533,20 @@ Sinais de risco de evasão gerados a partir da coleta.
 | `alarmes.curso_id` | `cursos.id` | N:1 | CASCADE |
 | `alarmes.visualizado_por` | `usuarios.id` | N:1 | SET NULL |
 | `disciplina_professores.professor_id` | `professores.id` | N:1 | CASCADE |
+| `turma_professores.id_turma` | `turmas.id_turma` | N:1 | CASCADE |
+| `turma_professores.professor_id` | `professores.id` | N:1 | CASCADE |
+| `turma_aulas.id_turma` | `turmas.id_turma` | N:1 | CASCADE |
+| `turma_chamadas.id_turma` | `turmas.id_turma` | N:1 | CASCADE |
+| `turma_ultima_aula.id_turma` | `turmas.id_turma` | N:1 | CASCADE |
+| `turma_chamada_emails.id_turma` | `turmas.id_turma` | N:1 | CASCADE |
 | `usuario_cursos.usuario_id` | `usuarios.id` | N:1 | CASCADE |
 | `usuario_cursos.curso_id` | `cursos.id` | N:1 | CASCADE |
 
 Não há FK direta de `faltas_dia` / `alarmes` para `frequencia_disciplina`: o vínculo com a disciplina é pelo campo `codigo_disciplina` (mais `aluno_id`, `curso_id` e `coleta_id`).
+
+`frequencia_disciplina.id_turma` e `alarmes.id_turma` não têm FK declarada
+(colunas acrescentadas por migração em bancos já existentes); apontam para
+`turmas.id_turma`.
 
 ---
 
@@ -408,9 +558,9 @@ o valor padrão de cada parâmetro:
 
 | Tipo | Critério | Escopo típico |
 |------|----------|---------------|
-| `percentual_baixo` | Frequência abaixo do limite (75%) na disciplina, após a carência (3 semanas) do início; abaixo do limite crítico (50%) a severidade é `critico` | Por disciplina |
+| `percentual_baixo` | Frequência abaixo do limite (75%) na disciplina, após a carência (3 semanas) da primeira aula da turma do aluno (`turma_aulas`; sem turma, `disciplina_aulas`); abaixo do limite crítico (50%) a severidade é `critico` | Por disciplina (com a turma) |
 | `faltas_4dias` | Mínimo de dias úteis seguidos de falta (3) tocando a janela de dias úteis recentes (4); a partir de certo tamanho (4) vira `critico` | Por aluno/curso (agregado) |
-| `faltas_3semanas` | N semanas ISO consecutivas em que o aluno faltou em **todas** as aulas previstas da disciplina na grade (`disciplina_aulas`); semana incompleta não conta; última falta dentro da janela de recência (7 dias); severidade configurável (`critico`) | Por disciplina |
+| `faltas_3semanas` | N semanas ISO consecutivas em que o aluno faltou em **todas** as aulas previstas da sua turma (`turma_aulas`; sem turma, `disciplina_aulas`); semana incompleta não conta; última falta dentro da janela de recência (7 dias); severidade configurável (`critico`) | Por disciplina (com a turma) |
 
 Cada regra pode ser desligada no portal — os alarmes **abertos** daquele tipo
 somem na geração seguinte (os já tratados continuam preservados).
@@ -439,5 +589,6 @@ O schema é aplicado automaticamente na primeira conexão PHP (`Database.php`) o
 - Frequência média por curso → `frequencia_disciplina` + `cursos`
 - Faltas por dia da semana → `strftime('%w', data_falta)` em `faltas_dia`
 - Evolução mensal de faltas → `strftime('%Y-%m', data_falta)` em `faltas_dia`
-- Disciplinas críticas → `AVG(percentual_frequencia)` com filtro &lt; 75%
+- Disciplinas críticas → `AVG(percentual_frequencia)` com filtro &lt; 75%, uma linha por turma e curso (`GROUP BY id_turma`)
+- Chamadas em atraso → `turma_ultima_aula` + `turma_aulas`; disciplina/curso sem turma em `disciplina_ultima_aula` + `disciplina_aulas`
 - Alarmes abertos → `alarmes` onde `visualizado = 0`

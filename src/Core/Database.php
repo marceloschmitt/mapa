@@ -98,6 +98,11 @@ class Database
         self::ensureColumn('passe_livre_disciplina', 'data_trancamento', 'TEXT');
         self::ensureColumn('frequencia_disciplina', 'situacao', 'TEXT');
         self::ensureColumn('frequencia_disciplina', 'data_trancamento', 'TEXT');
+        self::ensureColumn('frequencia_disciplina', 'id_turma', 'INTEGER');
+        self::$connection->exec(
+            'CREATE INDEX IF NOT EXISTS idx_frequencia_disciplina_turma
+             ON frequencia_disciplina(coleta_id, id_turma)'
+        );
         self::ensureColumn('efeito_contatos_alunos', 'aulas_ate_corte', 'INTEGER NOT NULL DEFAULT 0');
         self::ensureColumn('efeito_contatos_alunos', 'faltas_ate_corte', 'INTEGER NOT NULL DEFAULT 0');
         self::migrarPasseLivreAtestadosEstrutura();
@@ -110,6 +115,8 @@ class Database
         self::migrateApiConfigFromEnv();
         self::migrateEmailConfigDefaults();
         self::migrateAlarmesContatoEmailAutomatico();
+        // Depois da reconstrucao acima, que recria alarmes sem esta coluna.
+        self::ensureColumn('alarmes', 'id_turma', 'INTEGER');
     }
 
     /**

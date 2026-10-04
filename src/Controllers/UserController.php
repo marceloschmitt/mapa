@@ -169,7 +169,8 @@ class UserController extends Controller
                 Auth::login(
                     $atualizado,
                     $repository->cursoIdsDoUsuario($id),
-                    $repository->disciplinaCodigosDoUsuario($id)
+                    $repository->disciplinaCodigosDoUsuario($id),
+                    $repository->turmaIdsDoUsuario($id)
                 );
             }
         }

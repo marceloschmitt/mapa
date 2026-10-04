@@ -160,7 +160,7 @@ Sem trilha de erro, falha de envio de e-mail, erro de PDF ou `SQLITE_BUSY` são 
 **Correção:** handler global de exceção/erro gravando em `data/app.log` (com página de erro genérica ao usuário), e trocar os `catch` vazios por `catch + log`.
 
 ### A9. Autorização congelada na sessão
-`Auth::login` (`src/Core/Auth.php:41-58`) copia `perfil`, `curso_ids`, `disciplina_codigos` e `pode_assinar_passe_livre` para a sessão, e nada revalida contra o banco depois. Desativar um usuário, rebaixar seu perfil ou revogar a permissão de assinar **não tem efeito** enquanto a sessão dele estiver viva.
+`Auth::login` (`src/Core/Auth.php:41-58`) copia `perfil`, `curso_ids`, `disciplina_codigos`, `turma_ids` e `pode_assinar_passe_livre` para a sessão, e nada revalida contra o banco depois. Desativar um usuário, rebaixar seu perfil ou revogar a permissão de assinar **não tem efeito** enquanto a sessão dele estiver viva.
 
 Também faltam: `session_regenerate_id(true)` no login (fixação de sessão), limite de tentativas no `AuthController::login` (força bruta livre), e `password_needs_rehash`. A senha mínima é de 6 caracteres (`AuthController:50,180`).
 

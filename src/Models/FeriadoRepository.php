@@ -126,10 +126,10 @@ class FeriadoRepository
      */
     private function removerDataDaGrade(string $dataIso): void
     {
-        $statement = $this->db->prepare(
-            'DELETE FROM disciplina_aulas WHERE data_aula = :data'
-        );
-        $statement->execute(['data' => $dataIso]);
+        foreach (['disciplina_aulas', 'turma_aulas'] as $tabela) {
+            $statement = $this->db->prepare('DELETE FROM ' . $tabela . ' WHERE data_aula = :data');
+            $statement->execute(['data' => $dataIso]);
+        }
     }
 
     private function normalizarData(string $valor): ?string

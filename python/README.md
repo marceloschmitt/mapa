@@ -41,7 +41,15 @@ massa.
 
 A 1ª consulta (`consulta_inicial.py`) busca os matriculados do período corrente
 **e dos 2 semestres anteriores** (`SEMESTRES_RETROATIVOS`). Na coleta, só
-`resposta_matriculas.json` (período corrente) é usado — por professores e grade.
+`resposta_matriculas.json` (período corrente) é usado — por professores, grade
+e para identificar a turma do aluno em cada disciplina.
+
+**Turmas:** uma disciplina pode ter várias turmas, com horário, professores e
+chamada próprios. A turma do aluno (`id_turma`) vem de
+`resposta_matriculas.json` e segue para `frequencia_disciplina` e `alarmes`.
+Chamadas, alarmes e o escopo do professor usam os dados da turma; sem turma
+identificada, os da disciplina no curso. Detalhes em
+[`docs/banco-de-dados.md`](../docs/banco-de-dados.md#turmas).
 Os semestres anteriores são regravados a cada coleta como cache atualizado de
 `gerar_perda_vaga.py`.
 
@@ -79,17 +87,17 @@ Comportamentos observados no endpoint `alunos` (set/2026):
 |---|----------|-----------|----|------|
 | 0 | `consulta_alunos_massa.py` | Consulta em massa (sem login), respostas cruas: cadastro e frequência por intervalo. | BD (`configuracoes` API) | `resposta_alunos_massa_cadastro.json`, `resposta_alunos_massa_intervalo.json` |
 | 1 | `consulta_inicial.py` | Matriculados do período corrente + 2 anteriores | BD (`configuracoes` API) | `resposta_matriculas.json`, `resposta_matriculas_AAAA_S.json` |
-| 2 | `analisar_frequencia.py` | Frequência (ATIVO/FORMANDO) | `resposta_alunos_massa_intervalo.json`, `resposta_alunos_massa_cadastro.json` | `tabela_frequencia.json` |
+| 2 | `analisar_frequencia.py` | Frequência (ATIVO/FORMANDO), com a turma do aluno em cada disciplina | `resposta_alunos_massa_intervalo.json`, `resposta_alunos_massa_cadastro.json`, `resposta_matriculas.json` | `tabela_frequencia.json` |
 | 2b | `sincronizar_passe_livre_semestre_atual.py` | Espelha o semestre atual (`api_periodo_letivo`) em `passe_livre_*` para frequência anual | `tabela_frequencia.json` | BD (`passe_livre_aluno_curso`, `passe_livre_disciplina`) |
 | 3 | `importar_frequencia.py` | Nova coleta no SQLite (alunos, frequência, faltas) | `tabela_frequencia.json`, `config/consultas.json` | BD (`coletas`, `alunos`, `frequencia_disciplina`, `faltas_dia`, …) |
 | 4 | `importar_trancados.py` | Alunos TRANCADO / TRANC. AUTOMÁTICO | `resposta_alunos_massa_cadastro.json` | BD (`alunos_trancados`) |
-| 5 | `importar_professores.py` | Cursos, docentes e vínculos | `resposta_matriculas.json` | BD (`cursos`, `professores`, `disciplina_professores`) |
-| 6 | `importar_grade.py` | Datas de aula a partir de `turno_turma` | `resposta_matriculas.json` | BD (`disciplina_grade`, `disciplina_aulas`) |
-| 7 | `importar_chamadas.py` | Última aula / histórico de chamadas | `resposta_alunos_massa_intervalo.json`, BD (coleta) | BD (`disciplina_ultima_aula`, `disciplina_chamadas`) |
-| 8 | `gerar_alarmes.py` | Regras de risco de evasão (limites, janelas e mensagens vindos do portal) | BD (coleta + faltas + `configuracoes`), `config/consultas.json` | BD (`alarmes`) |
-| 9 | `enviar_emails_chamadas.php` | Avisa chamadas em atraso (2+ dias) | BD + `.env` (`EMAIL_SEND`) | BD (`chamada_emails`) + e-mail SMTP |
+| 5 | `importar_professores.py` | Cursos, docentes e vínculos por disciplina e por turma | `resposta_matriculas.json` | BD (`cursos`, `professores`, `disciplina_professores`, `turma_professores`) |
+| 6 | `importar_grade.py` | Turmas e datas de aula a partir de `turno_turma` | `resposta_matriculas.json` | BD (`turmas`, `turma_aulas`, `disciplina_grade`, `disciplina_aulas`) |
+| 7 | `importar_chamadas.py` | Última aula / histórico de chamadas por turma e por disciplina | `resposta_alunos_massa_intervalo.json`, `resposta_matriculas.json`, BD (coleta) | BD (`turma_ultima_aula`, `turma_chamadas`, `disciplina_ultima_aula`, `disciplina_chamadas`) |
+| 8 | `gerar_alarmes.py` | Regras de risco de evasão (limites, janelas e mensagens vindos do portal), com a turma do aluno | BD (coleta + faltas + `configuracoes`), `config/consultas.json` | BD (`alarmes`) |
+| 9 | `enviar_emails_chamadas.php` | Avisa chamadas em atraso (2+ dias), um e-mail por turma aos professores dela | BD + `.env` (`EMAIL_SEND`) | BD (`turma_chamada_emails`; `chamada_emails` sem turma) + e-mail SMTP |
 | 10 | `enviar_emails_alarmes_alunos.php` | E-mails de acolhimento aos alunos (alarmes críticos) | BD + `.env` | BD (`alarme_emails`, `alarmes`) + SMTP |
-| 11 | `enviar_emails_alarmes_staff.php` | Resumos a professores/coordenadores | BD + `.env` | BD (`alarme_emails.staff_avisado_em`) + SMTP |
+| 11 | `enviar_emails_alarmes_staff.php` | Resumos a professores (os da turma do aluno) e coordenadores | BD + `.env` | BD (`alarme_emails.staff_avisado_em`) + SMTP |
 
 ---
 
@@ -112,3 +120,20 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 | `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência **mensal** (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`), sem JSON. Trancadas (`ausencias_especiais`) → `situacao`; % total do curso = valor da API. Não apaga o semestre atual. Opção `--semestres N` (padrão 3). |
 | `sincronizar_passe_livre_semestre_atual.py` | Coleta: grava o semestre de `api_periodo_letivo` (datas da frequência) em `passe_livre_*` a partir de `tabela_frequencia.json`. |
 | `importar_emails_professores.py` | Manual: e-mails dos professores a partir de CSV do Moodle (`data/Users.csv`) |
+| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos → Gerar análise): faltas antes e depois do contato, com as aulas e a última chamada da turma do aluno → BD (`efeito_contatos_*`) |
+
+---
+
+## Testes
+
+Usam bancos SQLite temporários criados a partir do `schema.sql`; não tocam em `data/mapa.db`, não leem o `.env` e não chamam a API. Rodar na raiz do projeto:
+
+```bash
+python3 -m unittest discover -v python/tests   # regras por turma no pipeline
+php tests/php/turmas_test.php                  # escopo do professor, críticas por turma, e-mail de chamada
+```
+
+| Arquivo | O que cobre |
+|---------|-------------|
+| `python/tests/test_turmas.py` | `id_turma` vindo das matrículas; turmas e professores da grade; chamada da turma (maior data entre os alunos) e herança do histórico quando a disciplina tem uma só turma no curso; alarme de 3 semanas com as aulas da turma; efeito dos contatos parando na última chamada da turma |
+| `tests/php/turmas_test.php` | Turmas do usuário professor; alarmes, contagens e marcação restritos às turmas dele (sem turma identificada continua visível); disciplinas críticas uma linha por turma com os professores da turma; chave de envio do e-mail de chamada por turma, reconhecendo o envio antigo por disciplina |

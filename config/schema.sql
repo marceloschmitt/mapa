@@ -92,6 +92,46 @@ CREATE TABLE IF NOT EXISTS disciplina_professores (
 CREATE INDEX IF NOT EXISTS idx_disciplina_professores_codigo
     ON disciplina_professores(codigo_disciplina);
 
+-- Turmas do SIGAA (id_turma da API de matriculas). Uma disciplina pode ter varias.
+CREATE TABLE IF NOT EXISTS turmas (
+    id_turma INTEGER PRIMARY KEY,
+    codigo_disciplina TEXT NOT NULL,
+    disciplina TEXT NOT NULL,
+    nome_turma TEXT NOT NULL DEFAULT '',
+    turno_turma TEXT,
+    dias_semana TEXT NOT NULL DEFAULT '',
+    atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_turmas_codigo
+    ON turmas(codigo_disciplina);
+
+-- Datas efetivas de aula de cada turma (a partir de turno_turma, sem feriados).
+CREATE TABLE IF NOT EXISTS turma_aulas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_turma INTEGER NOT NULL,
+    data_aula TEXT NOT NULL,
+    FOREIGN KEY (id_turma) REFERENCES turmas(id_turma) ON DELETE CASCADE,
+    UNIQUE (id_turma, data_aula)
+);
+
+CREATE INDEX IF NOT EXISTS idx_turma_aulas_data
+    ON turma_aulas(data_aula);
+
+-- Professores de cada turma.
+CREATE TABLE IF NOT EXISTS turma_professores (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_turma INTEGER NOT NULL,
+    professor_id INTEGER NOT NULL,
+    tipo_docente TEXT,
+    FOREIGN KEY (id_turma) REFERENCES turmas(id_turma) ON DELETE CASCADE,
+    FOREIGN KEY (professor_id) REFERENCES professores(id) ON DELETE CASCADE,
+    UNIQUE (id_turma, professor_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_turma_professores_professor
+    ON turma_professores(professor_id);
+
 -- Grade da disciplina (metadados; datas efetivas em disciplina_aulas).
 CREATE TABLE IF NOT EXISTS disciplina_grade (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -156,6 +196,31 @@ CREATE TABLE IF NOT EXISTS disciplina_ultima_aula (
 CREATE INDEX IF NOT EXISTS idx_disciplina_ultima_aula_data
     ON disciplina_ultima_aula(data_ultima_aula);
 
+-- Historico de datas de chamada por turma (maior ultima_aula_ministrada entre os alunos).
+CREATE TABLE IF NOT EXISTS turma_chamadas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_turma INTEGER NOT NULL,
+    data_chamada TEXT NOT NULL,
+    coleta_id INTEGER NOT NULL,
+    FOREIGN KEY (id_turma) REFERENCES turmas(id_turma) ON DELETE CASCADE,
+    FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE CASCADE,
+    UNIQUE (id_turma, data_chamada)
+);
+
+-- Snapshot da ultima chamada por turma e curso na coleta (NULL = sem registro ainda).
+-- A data e a da turma inteira; o curso so separa as linhas para filtro e relatorios.
+CREATE TABLE IF NOT EXISTS turma_ultima_aula (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    coleta_id INTEGER NOT NULL,
+    id_turma INTEGER NOT NULL,
+    curso_id INTEGER NOT NULL,
+    data_ultima_aula TEXT,
+    FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE CASCADE,
+    FOREIGN KEY (id_turma) REFERENCES turmas(id_turma) ON DELETE CASCADE,
+    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
+    UNIQUE (coleta_id, id_turma, curso_id)
+);
+
 CREATE TABLE IF NOT EXISTS frequencia_disciplina (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     coleta_id INTEGER NOT NULL,
@@ -169,6 +234,8 @@ CREATE TABLE IF NOT EXISTS frequencia_disciplina (
     percentual_frequencia REAL,
     situacao TEXT,
     data_trancamento TEXT,
+    -- Turma do aluno na disciplina (NULL = nao identificada na API de matriculas).
+    id_turma INTEGER,
     FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE CASCADE,
     FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
@@ -222,6 +289,8 @@ CREATE TABLE IF NOT EXISTS alarmes (
     visualizado_em TEXT,
     visualizado_por INTEGER,
     contato_tipo TEXT CHECK (contato_tipo IS NULL OR contato_tipo IN ('email', 'email_automatico', 'whatsapp', 'telefone', 'presencial', 'assistencia')),
+    -- Turma do aluno na disciplina (NULL = alarme do curso ou turma nao identificada).
+    id_turma INTEGER,
     FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE CASCADE,
     FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
@@ -261,6 +330,19 @@ CREATE TABLE IF NOT EXISTS chamada_emails (
 
 CREATE INDEX IF NOT EXISTS idx_chamada_emails_disciplina
     ON chamada_emails(codigo_disciplina, curso_id);
+
+-- Historico de e-mails automaticos por chamada em atraso de uma turma.
+CREATE TABLE IF NOT EXISTS turma_chamada_emails (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    id_turma INTEGER NOT NULL,
+    data_esperada TEXT NOT NULL,
+    destinatarios TEXT NOT NULL,
+    enviado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    coleta_id INTEGER,
+    FOREIGN KEY (id_turma) REFERENCES turmas(id_turma) ON DELETE CASCADE,
+    FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE SET NULL,
+    UNIQUE (id_turma, data_esperada)
+);
 
 -- Historico de e-mails automaticos de alarmes criticos enviados aos alunos.
 CREATE TABLE IF NOT EXISTS alarme_emails (

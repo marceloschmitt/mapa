@@ -22,6 +22,10 @@ class AnalyticsController extends Controller
         $cursosDoCoordenador = $isCoordenador ? Auth::cursoIds() : [];
         $cursoProprioId = $cursosDoCoordenador[0] ?? null;
         $codigosProfessor = $isProfessor ? Auth::disciplinaCodigos() : null;
+        $turmasProfessor = $isProfessor ? Auth::turmaIds() : [];
+        if ($isProfessor) {
+            $repo->restringirTurmas($turmasProfessor);
+        }
 
         // Coordenador e professor nao escolhem curso livremente.
         $cursosDisponiveis = ($isCoordenador || $isProfessor)
@@ -117,12 +121,15 @@ class AnalyticsController extends Controller
         $disciplinasCriticas = $repo->disciplinasCriticas($coletaId, null, $filtroCursoIds);
         if ($isProfessor && $codigosProfessor !== null) {
             $permitidos = array_fill_keys($codigosProfessor, true);
+            $turmasPermitidas = array_fill_keys($turmasProfessor, true);
             $disciplinasCriticas = array_values(array_filter(
                 $disciplinasCriticas,
-                static function (array $row) use ($permitidos): bool {
+                static function (array $row) use ($permitidos, $turmasPermitidas): bool {
                     $codigo = trim((string)($row['codigo_disciplina'] ?? ''));
+                    $idTurma = (int)($row['id_turma'] ?? 0);
 
-                    return $codigo !== '' && isset($permitidos[$codigo]);
+                    return $codigo !== '' && isset($permitidos[$codigo])
+                        && ($idTurma <= 0 || $turmasPermitidas === [] || isset($turmasPermitidas[$idTurma]));
                 }
             ));
             $resumo['total_disciplinas'] = count($disciplinasCriticas);

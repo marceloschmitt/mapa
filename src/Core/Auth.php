@@ -3,6 +3,8 @@ declare(strict_types=1);
 
 namespace Mapa\Core;
 
+use Mapa\Models\UserRepository;
+
 class Auth
 {
     public const PERFIL_ADMIN = 'administrador';
@@ -44,9 +46,14 @@ class Auth
      * @param array<string, mixed> $user
      * @param list<int> $cursoIds
      * @param list<string> $disciplinaCodigos
+     * @param list<int> $turmaIds
      */
-    public static function login(array $user, array $cursoIds = [], array $disciplinaCodigos = []): void
-    {
+    public static function login(
+        array $user,
+        array $cursoIds = [],
+        array $disciplinaCodigos = [],
+        array $turmaIds = []
+    ): void {
         Session::set('usuario', [
             'id' => (int)$user['id'],
             'username' => (string)$user['username'],
@@ -58,6 +65,7 @@ class Auth
             'pode_assinar_passe_livre' => !empty($user['pode_assinar_passe_livre']),
             'curso_ids' => array_values(array_map('intval', $cursoIds)),
             'disciplina_codigos' => array_values(array_map('strval', $disciplinaCodigos)),
+            'turma_ids' => array_values(array_map('intval', $turmaIds)),
         ]);
     }
 
@@ -184,6 +192,34 @@ class Auth
         }
 
         return array_values(array_unique($resultado));
+    }
+
+    /**
+     * Turmas em que o professor leciona (turma_professores pelo CPF).
+     * Sessão aberta antes de existir a chave: carrega do banco uma vez.
+     *
+     * @return list<int>
+     */
+    public static function turmaIds(): array
+    {
+        $user = self::user();
+        if ($user === null) {
+            return [];
+        }
+
+        // Lista vazia não fica na sessão: as turmas só existem depois da
+        // primeira coleta com turmas e o escopo precisa valer sem novo login.
+        if (empty($user['turma_ids']) || !is_array($user['turma_ids'])) {
+            $user['turma_ids'] = (new UserRepository())->turmaIdsDoUsuario((int)$user['id']);
+            if ($user['turma_ids'] !== []) {
+                Session::set('usuario', $user);
+            }
+        }
+
+        return array_values(array_unique(array_filter(
+            array_map('intval', $user['turma_ids']),
+            static fn (int $id): bool => $id > 0
+        )));
     }
 
     public static function usesLocalPassword(): bool

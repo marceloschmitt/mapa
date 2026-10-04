@@ -14,9 +14,29 @@ class AnalyticsRepository
     /** @var float|null */
     private $limiteFrequencia = null;
 
+    /** @var list<int>|null */
+    private $turmasPermitidas = null;
+
     public function __construct()
     {
         $this->db = Database::connection();
+    }
+
+    /**
+     * Escopo do professor: os filtros por código de disciplina passam a
+     * exigir também uma das turmas informadas. Linha sem turma identificada
+     * continua valendo só pelo código. Lista vazia não restringe (professor
+     * ainda sem turmas importadas fica com o escopo por código).
+     *
+     * @param list<int> $idsTurma
+     */
+    public function restringirTurmas(array $idsTurma): void
+    {
+        $ids = array_values(array_unique(array_filter(
+            array_map('intval', $idsTurma),
+            static fn (int $id): bool => $id > 0
+        )));
+        $this->turmasPermitidas = $ids === [] ? null : $ids;
     }
 
     /**
@@ -173,7 +193,8 @@ class AnalyticsRepository
         [$sql, $discParams] = $this->appendCodigoDisciplinaFilter(
             $sql,
             $codigosDisciplina,
-            'codigo_disciplina'
+            'codigo_disciplina',
+            'id_turma'
         );
 
         $statement = $this->db->prepare($sql);
@@ -370,6 +391,9 @@ class AnalyticsRepository
     }
 
     /**
+     * Uma linha por turma e curso; alunos sem turma identificada ficam numa
+     * linha da disciplina (id_turma = null).
+     *
      * @param list<int>|null $cursoIds
      * @return list<array<string, mixed>>
      */
@@ -381,6 +405,7 @@ class AnalyticsRepository
 
         [$sql, $params] = $this->appendCursoFilter(
             'SELECT f.codigo_disciplina, f.disciplina, f.curso_id, c.nome_curso,
+                    f.id_turma, COALESCE(t.nome_turma, \'\') AS nome_turma,
                     g.semestre_oferta,
                     ROUND(AVG(f.percentual_frequencia), 1) AS media,
                     COUNT(*) AS alunos,
@@ -388,6 +413,7 @@ class AnalyticsRepository
                         AS abaixo_limite
              FROM frequencia_disciplina f
              INNER JOIN cursos c ON c.id = f.curso_id
+             LEFT JOIN turmas t ON t.id_turma = f.id_turma
              LEFT JOIN disciplina_grade g
                ON g.codigo_disciplina = f.codigo_disciplina
               AND g.curso_id = f.curso_id
@@ -396,9 +422,10 @@ class AnalyticsRepository
             $cursoIds,
             'f.curso_id'
         );
-        $sql .= ' GROUP BY f.codigo_disciplina, f.disciplina, f.curso_id, c.id, c.nome_curso, g.semestre_oferta
+        $sql .= ' GROUP BY f.codigo_disciplina, f.disciplina, f.curso_id, c.id, c.nome_curso,
+                           f.id_turma, t.nome_turma, g.semestre_oferta
              HAVING abaixo_limite > 0
-             ORDER BY media ASC, abaixo_limite DESC';
+             ORDER BY media ASC, abaixo_limite DESC, f.codigo_disciplina ASC, nome_turma ASC';
 
         if ($limite !== null) {
             $sql .= ' LIMIT :limite';
@@ -473,8 +500,9 @@ class AnalyticsRepository
     }
 
     /**
-     * Disciplinas da coleta ordenadas pela data da ultima chamada (mais antigas primeiro).
-     * Sem data (NULL) aparecem no topo.
+     * Chamadas da coleta: uma linha por turma e curso (id_turma preenchido) e,
+     * para disciplina/curso sem turma identificada, uma linha da disciplina
+     * (id_turma = null). Atrasadas primeiro.
      *
      * @param list<int>|null $cursoIds
      * @return list<array<string, mixed>>
@@ -485,45 +513,13 @@ class AnalyticsRepository
             return [];
         }
 
-        [$sql, $params] = $this->appendCursoFilter(
-            'SELECT d.codigo_disciplina,
-                    d.disciplina,
-                    d.curso_id,
-                    c.nome_curso,
-                    c.curso_nivel,
-                    d.data_ultima_aula,
-                    g.dias_semana,
-                    g.semestre_oferta,
-                    col.data_referencia AS coleta_data_referencia,
-                    col.data_inicial AS coleta_data_inicial,
-                    (SELECT COUNT(*)
-                     FROM disciplina_chamadas ch
-                     WHERE ch.codigo_disciplina = d.codigo_disciplina
-                       AND ch.curso_id = d.curso_id) AS total_registros
-             FROM disciplina_ultima_aula d
-             INNER JOIN cursos c ON c.id = d.curso_id
-             INNER JOIN coletas col ON col.id = d.coleta_id
-             LEFT JOIN disciplina_grade g
-               ON g.codigo_disciplina = d.codigo_disciplina
-              AND g.curso_id = d.curso_id
-             WHERE d.coleta_id = :coleta_id',
-            $cursoIds,
-            'd.curso_id'
+        $rows = array_merge(
+            $this->linhasChamadaTurmas($coletaId, $cursoIds),
+            $this->linhasChamadaDisciplinasSemTurma($coletaId, $cursoIds)
         );
-        $sql .= ' ORDER BY
-                CASE WHEN d.data_ultima_aula IS NULL OR TRIM(d.data_ultima_aula) = \'\' THEN 1 ELSE 0 END,
-                d.data_ultima_aula DESC,
-                c.nome_curso ASC,
-                d.disciplina ASC';
 
-        $statement = $this->db->prepare($sql);
-        $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
-        $this->bindCursoParams($statement, $params);
-        $statement->execute();
-        $rows = $statement->fetchAll();
-
-        $rows = $this->anexarAtrasoChamadas($rows);
-        $rows = $this->anexarDatasChamadas($rows);
+        $rows = $this->anexarAtrasoChamadas($rows, $coletaId);
+        $rows = $this->anexarDatasChamadas($rows, $coletaId);
         $rows = $this->anexarProfessoresNasDisciplinas($rows);
 
         usort($rows, static function (array $a, array $b): int {
@@ -561,7 +557,7 @@ class AnalyticsRepository
                     return $dataB <=> $dataA;
                 }
 
-                return strcmp((string)$a['disciplina'], (string)$b['disciplina']);
+                return self::compararDisciplinaTurma($a, $b);
             }
 
             // Em dia: última chamada da mais recente para a mais antiga.
@@ -577,17 +573,206 @@ class AnalyticsRepository
                 return $dataB <=> $dataA;
             }
 
-            return strcmp((string)$a['disciplina'], (string)$b['disciplina']);
+            return self::compararDisciplinaTurma($a, $b);
         });
 
         return $rows;
     }
 
     /**
+     * @param array<string, mixed> $a
+     * @param array<string, mixed> $b
+     */
+    private static function compararDisciplinaTurma(array $a, array $b): int
+    {
+        return strcmp((string)$a['disciplina'], (string)$b['disciplina'])
+            ?: strcmp((string)($a['nome_turma'] ?? ''), (string)($b['nome_turma'] ?? ''))
+            ?: strcmp((string)($a['nome_curso'] ?? ''), (string)($b['nome_curso'] ?? ''));
+    }
+
+    /**
+     * @param list<int>|null $cursoIds
+     * @return list<array<string, mixed>>
+     */
+    private function linhasChamadaTurmas(int $coletaId, ?array $cursoIds): array
+    {
+        [$sql, $params] = $this->appendCursoFilter(
+            'SELECT t.codigo_disciplina,
+                    t.disciplina,
+                    tu.id_turma,
+                    t.nome_turma,
+                    tu.curso_id,
+                    c.nome_curso,
+                    c.curso_nivel,
+                    tu.data_ultima_aula,
+                    t.dias_semana,
+                    g.semestre_oferta,
+                    col.data_referencia AS coleta_data_referencia,
+                    col.data_inicial AS coleta_data_inicial,
+                    (SELECT COUNT(*)
+                     FROM turma_chamadas ch
+                     WHERE ch.id_turma = tu.id_turma) AS total_registros
+             FROM turma_ultima_aula tu
+             INNER JOIN turmas t ON t.id_turma = tu.id_turma
+             INNER JOIN cursos c ON c.id = tu.curso_id
+             INNER JOIN coletas col ON col.id = tu.coleta_id
+             LEFT JOIN disciplina_grade g
+               ON g.codigo_disciplina = t.codigo_disciplina
+              AND g.curso_id = tu.curso_id
+             WHERE tu.coleta_id = :coleta_id',
+            $cursoIds,
+            'tu.curso_id'
+        );
+
+        $statement = $this->db->prepare($sql);
+        $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $this->bindCursoParams($statement, $params);
+        $statement->execute();
+
+        return $statement->fetchAll();
+    }
+
+    /**
+     * Disciplina/curso sem nenhuma turma identificada na coleta (ex.: sem
+     * resposta_matriculas.json): mantém a linha agregada por disciplina.
+     *
+     * @param list<int>|null $cursoIds
+     * @return list<array<string, mixed>>
+     */
+    private function linhasChamadaDisciplinasSemTurma(int $coletaId, ?array $cursoIds): array
+    {
+        [$sql, $params] = $this->appendCursoFilter(
+            'SELECT d.codigo_disciplina,
+                    d.disciplina,
+                    NULL AS id_turma,
+                    \'\' AS nome_turma,
+                    d.curso_id,
+                    c.nome_curso,
+                    c.curso_nivel,
+                    d.data_ultima_aula,
+                    g.dias_semana,
+                    g.semestre_oferta,
+                    col.data_referencia AS coleta_data_referencia,
+                    col.data_inicial AS coleta_data_inicial,
+                    (SELECT COUNT(*)
+                     FROM disciplina_chamadas ch
+                     WHERE ch.codigo_disciplina = d.codigo_disciplina
+                       AND ch.curso_id = d.curso_id) AS total_registros
+             FROM disciplina_ultima_aula d
+             INNER JOIN cursos c ON c.id = d.curso_id
+             INNER JOIN coletas col ON col.id = d.coleta_id
+             LEFT JOIN disciplina_grade g
+               ON g.codigo_disciplina = d.codigo_disciplina
+              AND g.curso_id = d.curso_id
+             WHERE d.coleta_id = :coleta_id
+               AND NOT EXISTS (
+                   SELECT 1
+                   FROM turma_ultima_aula tu
+                   INNER JOIN turmas t ON t.id_turma = tu.id_turma
+                   WHERE tu.coleta_id = d.coleta_id
+                     AND tu.curso_id = d.curso_id
+                     AND t.codigo_disciplina = d.codigo_disciplina
+               )',
+            $cursoIds,
+            'd.curso_id'
+        );
+
+        $statement = $this->db->prepare($sql);
+        $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $this->bindCursoParams($statement, $params);
+        $statement->execute();
+
+        return $statement->fetchAll();
+    }
+
+    /** Chave da linha de chamada: "T<id_turma>" ou "codigo|curso_id" (sem turma). */
+    public static function chaveLinhaChamada(array $row): string
+    {
+        $idTurma = (int)($row['id_turma'] ?? 0);
+        if ($idTurma > 0) {
+            return 'T' . $idTurma;
+        }
+
+        return trim((string)($row['codigo_disciplina'] ?? '')) . '|' . (int)($row['curso_id'] ?? 0);
+    }
+
+    /**
+     * Valores por linha de chamada: turmas da coleta via subconsulta (sem um
+     * parâmetro por turma) e disciplina/curso sem turma via pares.
+     *
+     * @param list<array<string, mixed>> $rows
+     * @return array<string, list<string>> chave chaveLinhaChamada => valores na ordem do SQL
+     */
+    private function mapaPorLinhaChamada(
+        array $rows,
+        int $coletaId,
+        string $sqlTurmas,
+        string $sqlPares,
+        string $colunaValor
+    ): array {
+        $mapa = [];
+        $temTurma = false;
+        $pares = [];
+        foreach ($rows as $row) {
+            if ((int)($row['id_turma'] ?? 0) > 0) {
+                $temTurma = true;
+                continue;
+            }
+            $codigo = trim((string)($row['codigo_disciplina'] ?? ''));
+            $cursoId = (int)($row['curso_id'] ?? 0);
+            if ($codigo !== '' && $cursoId > 0) {
+                $pares[$codigo . '|' . $cursoId] = [$codigo, $cursoId];
+            }
+        }
+
+        if ($temTurma) {
+            $statement = $this->db->prepare($sqlTurmas);
+            $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+            $statement->execute();
+            foreach ($statement->fetchAll() as $row) {
+                $valor = trim((string)($row[$colunaValor] ?? ''));
+                if ($valor !== '') {
+                    $mapa['T' . (int)$row['id_turma']][] = $valor;
+                }
+            }
+        }
+
+        if ($pares !== []) {
+            $conds = [];
+            $bind = [];
+            $i = 0;
+            foreach ($pares as [$codigo, $cursoId]) {
+                $conds[] = '(codigo_disciplina = :cod_' . $i . ' AND curso_id = :cur_' . $i . ')';
+                $bind['cod_' . $i] = $codigo;
+                $bind['cur_' . $i] = $cursoId;
+                $i++;
+            }
+
+            $statement = $this->db->prepare(str_replace('{pares}', implode(' OR ', $conds), $sqlPares));
+            foreach ($bind as $chave => $valor) {
+                $statement->bindValue(
+                    $chave,
+                    $valor,
+                    is_int($valor) ? PDO::PARAM_INT : PDO::PARAM_STR
+                );
+            }
+            $statement->execute();
+            foreach ($statement->fetchAll() as $row) {
+                $valor = trim((string)($row[$colunaValor] ?? ''));
+                if ($valor !== '') {
+                    $mapa[trim((string)$row['codigo_disciplina']) . '|' . (int)$row['curso_id']][] = $valor;
+                }
+            }
+        }
+
+        return $mapa;
+    }
+
+    /**
      * @param list<array<string, mixed>> $rows
      * @return list<array<string, mixed>>
      */
-    private function anexarAtrasoChamadas(array $rows): array
+    private function anexarAtrasoChamadas(array $rows, int $coletaId): array
     {
         $rotulos = [
             2 => 'Seg',
@@ -598,14 +783,11 @@ class AnalyticsRepository
             7 => 'Sáb',
         ];
 
-        $mapaDatas = $this->mapaDatasAula($rows);
+        $mapaDatas = $this->mapaDatasAula($rows, $coletaId);
         $feriados = (new FeriadoRepository($this->db))->mapaDatas();
 
         foreach ($rows as &$row) {
-            $chave = trim((string)($row['codigo_disciplina'] ?? ''))
-                . '|'
-                . (int)($row['curso_id'] ?? 0);
-            $datas = $mapaDatas[$chave] ?? [];
+            $datas = $mapaDatas[self::chaveLinhaChamada($row)] ?? [];
             if ($feriados !== [] && $datas !== []) {
                 $datas = array_values(array_filter(
                     $datas,
@@ -664,60 +846,27 @@ class AnalyticsRepository
     }
 
     /**
-     * Datas efetivas por disciplina/curso a partir de disciplina_aulas.
+     * Datas efetivas de aula: turma_aulas para linhas de turma, disciplina_aulas
+     * para disciplina/curso sem turma.
      *
      * @param list<array<string, mixed>> $rows
-     * @return array<string, list<string>> chave "codigo|curso_id" => datas ISO
+     * @return array<string, list<string>> chave chaveLinhaChamada => datas ISO
      */
-    private function mapaDatasAula(array $rows): array
+    private function mapaDatasAula(array $rows, int $coletaId): array
     {
-        $pares = [];
-        foreach ($rows as $row) {
-            $codigo = trim((string)($row['codigo_disciplina'] ?? ''));
-            $cursoId = (int)($row['curso_id'] ?? 0);
-            if ($codigo !== '' && $cursoId > 0) {
-                $pares[$codigo . '|' . $cursoId] = [$codigo, $cursoId];
-            }
-        }
-
-        if ($pares === []) {
-            return [];
-        }
-
-        $conds = [];
-        $bind = [];
-        $i = 0;
-        foreach ($pares as [$codigo, $cursoId]) {
-            $conds[] = '(codigo_disciplina = :cod_' . $i . ' AND curso_id = :cur_' . $i . ')';
-            $bind['cod_' . $i] = $codigo;
-            $bind['cur_' . $i] = $cursoId;
-            $i++;
-        }
-
-        $sql = 'SELECT codigo_disciplina, curso_id, data_aula
-                FROM disciplina_aulas
-                WHERE ' . implode(' OR ', $conds) . '
-                ORDER BY data_aula ASC';
-        $statement = $this->db->prepare($sql);
-        foreach ($bind as $chave => $valor) {
-            $statement->bindValue(
-                $chave,
-                $valor,
-                is_int($valor) ? PDO::PARAM_INT : PDO::PARAM_STR
-            );
-        }
-        $statement->execute();
-
-        $mapa = [];
-        foreach ($statement->fetchAll() as $row) {
-            $chave = trim((string)$row['codigo_disciplina']) . '|' . (int)$row['curso_id'];
-            $data = trim((string)($row['data_aula'] ?? ''));
-            if ($data !== '') {
-                $mapa[$chave][] = $data;
-            }
-        }
-
-        return $mapa;
+        return $this->mapaPorLinhaChamada(
+            $rows,
+            $coletaId,
+            'SELECT id_turma, data_aula
+             FROM turma_aulas
+             WHERE id_turma IN (SELECT id_turma FROM turma_ultima_aula WHERE coleta_id = :coleta_id)
+             ORDER BY data_aula ASC',
+            'SELECT codigo_disciplina, curso_id, data_aula
+             FROM disciplina_aulas
+             WHERE {pares}
+             ORDER BY data_aula ASC',
+            'data_aula'
+        );
     }
 
     /**
@@ -899,56 +1048,28 @@ class AnalyticsRepository
      * @param list<array<string, mixed>> $rows
      * @return list<array<string, mixed>>
      */
-    private function anexarDatasChamadas(array $rows): array
+    private function anexarDatasChamadas(array $rows, int $coletaId): array
     {
         if ($rows === []) {
             return [];
         }
 
-        $pares = [];
-        foreach ($rows as $row) {
-            $codigo = trim((string)($row['codigo_disciplina'] ?? ''));
-            $cursoId = (int)($row['curso_id'] ?? 0);
-            if ($codigo !== '' && $cursoId > 0) {
-                $pares[$codigo . '|' . $cursoId] = [$codigo, $cursoId];
-            }
-        }
-
-        $mapa = [];
-        if ($pares !== []) {
-            $conds = [];
-            $bind = [];
-            $i = 0;
-            foreach ($pares as [$codigo, $cursoId]) {
-                $conds[] = '(codigo_disciplina = :cod_' . $i . ' AND curso_id = :cur_' . $i . ')';
-                $bind['cod_' . $i] = $codigo;
-                $bind['cur_' . $i] = $cursoId;
-                $i++;
-            }
-
-            $sql = 'SELECT codigo_disciplina, curso_id, data_chamada
-                    FROM disciplina_chamadas
-                    WHERE ' . implode(' OR ', $conds) . '
-                    ORDER BY data_chamada ASC';
-            $statement = $this->db->prepare($sql);
-            foreach ($bind as $chave => $valor) {
-                $statement->bindValue(
-                    $chave,
-                    $valor,
-                    is_int($valor) ? PDO::PARAM_INT : PDO::PARAM_STR
-                );
-            }
-            $statement->execute();
-
-            foreach ($statement->fetchAll() as $row) {
-                $chave = trim((string)$row['codigo_disciplina']) . '|' . (int)$row['curso_id'];
-                $mapa[$chave][] = (string)$row['data_chamada'];
-            }
-        }
+        $mapa = $this->mapaPorLinhaChamada(
+            $rows,
+            $coletaId,
+            'SELECT id_turma, data_chamada
+             FROM turma_chamadas
+             WHERE id_turma IN (SELECT id_turma FROM turma_ultima_aula WHERE coleta_id = :coleta_id)
+             ORDER BY data_chamada ASC',
+            'SELECT codigo_disciplina, curso_id, data_chamada
+             FROM disciplina_chamadas
+             WHERE {pares}
+             ORDER BY data_chamada ASC',
+            'data_chamada'
+        );
 
         foreach ($rows as &$row) {
-            $chave = trim((string)($row['codigo_disciplina'] ?? '')) . '|' . (int)($row['curso_id'] ?? 0);
-            $row['datas_chamada'] = $mapa[$chave] ?? [];
+            $row['datas_chamada'] = $mapa[self::chaveLinhaChamada($row)] ?? [];
         }
         unset($row);
 
@@ -956,26 +1077,92 @@ class AnalyticsRepository
     }
 
     /**
+     * Professores da turma (turma_professores) nas linhas com id_turma; nas
+     * demais, todos os professores do código da disciplina.
+     *
      * @param list<array<string, mixed>> $rows
      * @return list<array<string, mixed>>
      */
     private function anexarProfessoresNasDisciplinas(array $rows): array
     {
         $codigos = [];
+        $idsTurma = [];
         foreach ($rows as $row) {
             $codigo = trim((string)($row['codigo_disciplina'] ?? ''));
-            if ($codigo !== '') {
+            $idTurma = (int)($row['id_turma'] ?? 0);
+            if ($idTurma > 0) {
+                $idsTurma[] = $idTurma;
+            } elseif ($codigo !== '') {
                 $codigos[] = $codigo;
             }
         }
         $mapa = $this->nomesProfessoresPorCodigo($codigos);
+        $porTurma = $this->nomesProfessoresPorTurmas($idsTurma);
         foreach ($rows as &$row) {
-            $codigo = trim((string)($row['codigo_disciplina'] ?? ''));
-            $row['professores'] = $mapa[$codigo] ?? '';
+            $idTurma = (int)($row['id_turma'] ?? 0);
+            $row['professores'] = $idTurma > 0
+                ? ($porTurma[$idTurma] ?? '')
+                : ($mapa[trim((string)($row['codigo_disciplina'] ?? ''))] ?? '');
         }
         unset($row);
 
         return $rows;
+    }
+
+    /**
+     * Nomes dos professores das turmas informadas (ordenados, separados por vírgula).
+     *
+     * @param list<int> $idsTurma
+     * @return array<int, string>
+     */
+    public function nomesProfessoresPorTurmas(array $idsTurma): array
+    {
+        $idsTurma = array_values(array_unique(array_filter(
+            array_map('intval', $idsTurma),
+            static fn (int $id): bool => $id > 0
+        )));
+        if ($idsTurma === []) {
+            return [];
+        }
+
+        $rows = [];
+        // Lotes abaixo do limite de 999 parâmetros do SQLite antigo.
+        foreach (array_chunk($idsTurma, 500) as $lote) {
+            $statement = $this->db->prepare(
+                'SELECT tp.id_turma, p.nome
+                 FROM turma_professores tp
+                 INNER JOIN professores p ON p.id = tp.professor_id
+                 WHERE tp.id_turma IN (' . implode(', ', array_fill(0, count($lote), '?')) . ')'
+            );
+            $statement->execute($lote);
+            array_push($rows, ...$statement->fetchAll());
+        }
+
+        return $this->agruparNomesPorTurma($rows);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $rows linhas com id_turma e nome
+     * @return array<int, string>
+     */
+    private function agruparNomesPorTurma(array $rows): array
+    {
+        $nomes = [];
+        foreach ($rows as $row) {
+            $nome = trim((string)($row['nome'] ?? ''));
+            if ($nome !== '') {
+                $nomes[(int)$row['id_turma']][$nome] = true;
+            }
+        }
+
+        $mapa = [];
+        foreach ($nomes as $idTurma => $lista) {
+            $lista = array_keys($lista);
+            sort($lista, SORT_STRING);
+            $mapa[$idTurma] = implode(', ', $lista);
+        }
+
+        return $mapa;
     }
 
     /**
@@ -1040,8 +1227,12 @@ class AnalyticsRepository
      * @param list<string>|null $codigos
      * @return array{0: string, 1: array<string, string>}
      */
-    private function appendCodigoDisciplinaFilter(string $sql, ?array $codigos, string $coluna): array
-    {
+    private function appendCodigoDisciplinaFilter(
+        string $sql,
+        ?array $codigos,
+        string $coluna,
+        ?string $colunaTurma = null
+    ): array {
         if ($codigos === null) {
             return [$sql, []];
         }
@@ -1056,7 +1247,46 @@ class AnalyticsRepository
 
         $sql .= ' AND ' . $coluna . ' IN (' . implode(', ', $placeholders) . ')';
 
+        if ($colunaTurma !== null) {
+            [$sqlTurma, $turmaParams] = $this->sqlFiltroTurmasPermitidas($colunaTurma, 'filtro_turma_');
+            $sql .= $sqlTurma;
+            $params += $turmaParams;
+        }
+
         return [$sql, $params];
+    }
+
+    /**
+     * Condição das turmas de restringirTurmas() (vazia sem restrição).
+     *
+     * @return array{0: string, 1: array<string, int>}
+     */
+    private function sqlFiltroTurmasPermitidas(string $colunaTurma, string $prefixo): array
+    {
+        if ($this->turmasPermitidas === null) {
+            return ['', []];
+        }
+
+        $placeholders = [];
+        $params = [];
+        foreach ($this->turmasPermitidas as $i => $idTurma) {
+            $key = $prefixo . $i;
+            $placeholders[] = ':' . $key;
+            $params[$key] = $idTurma;
+        }
+
+        return [
+            ' AND (' . $colunaTurma . ' IS NULL OR ' . $colunaTurma
+                . ' IN (' . implode(', ', $placeholders) . '))',
+            $params,
+        ];
+    }
+
+    private function turmaPermitida(?int $idTurma): bool
+    {
+        return $this->turmasPermitidas === null
+            || $idTurma === null
+            || in_array($idTurma, $this->turmasPermitidas, true);
     }
 
     /**
@@ -1082,15 +1312,18 @@ class AnalyticsRepository
             $params[$key] = (string)$codigo;
         }
 
+        [$sqlTurma, $turmaParams] = $this->sqlFiltroTurmasPermitidas('a_escopo.id_turma', 'escopo_turma_');
+
         $sql .= ' AND EXISTS (
                     SELECT 1 FROM alarmes a_escopo
                     WHERE a_escopo.coleta_id = ' . $aliasAlarmes . '.coleta_id
                       AND a_escopo.aluno_id = ' . $aliasAlarmes . '.aluno_id
                       AND a_escopo.curso_id = ' . $aliasAlarmes . '.curso_id
-                      AND a_escopo.codigo_disciplina IN (' . implode(', ', $placeholders) . ')
+                      AND a_escopo.codigo_disciplina IN (' . implode(', ', $placeholders) . ')'
+                      . $sqlTurma . '
                   )';
 
-        return [$sql, $params];
+        return [$sql, $params + $turmaParams];
     }
 
     /** @param array<string, int|string> $params */
@@ -1207,6 +1440,7 @@ class AnalyticsRepository
                        al.disciplina, al.visualizado, al.visualizado_em, al.visualizado_por,
                        al.contato_tipo, al.gerado_em, al.detalhe_json,
                        al.aluno_id, al.curso_id,
+                       al.id_turma, t.nome_turma,
                        a.nome AS aluno_nome, a.nome_social AS aluno_nome_social,
                        a.email AS aluno_email, a.login, a.matricula,
                        c.nome_curso,
@@ -1216,6 +1450,7 @@ class AnalyticsRepository
                 FROM alarmes al
                 INNER JOIN alunos a ON a.id = al.aluno_id
                 INNER JOIN cursos c ON c.id = al.curso_id
+                LEFT JOIN turmas t ON t.id_turma = al.id_turma
                 LEFT JOIN aluno_cursos ac ON ac.aluno_id = al.aluno_id AND ac.curso_id = al.curso_id
                 LEFT JOIN disciplina_grade g
                   ON g.codigo_disciplina = al.codigo_disciplina
@@ -1242,7 +1477,8 @@ class AnalyticsRepository
         [$sql, $discParams] = $this->appendCodigoDisciplinaFilter(
             $sql,
             $codigosDisciplina,
-            'al.codigo_disciplina'
+            'al.codigo_disciplina',
+            'al.id_turma'
         );
         }
 
@@ -1319,7 +1555,8 @@ class AnalyticsRepository
         [$sql, $discParams] = $this->appendCodigoDisciplinaFilter(
             $sql,
             $codigosDisciplina,
-            'codigo_disciplina'
+            'codigo_disciplina',
+            'id_turma'
         );
         }
 
@@ -1379,7 +1616,8 @@ class AnalyticsRepository
         [$sqlBase, $discParams] = $this->appendCodigoDisciplinaFilter(
             $sqlBase,
             $codigosDisciplina,
-            'codigo_disciplina'
+            'codigo_disciplina',
+            'id_turma'
         );
         }
 
@@ -1431,7 +1669,7 @@ class AnalyticsRepository
         }
 
         $select = $this->db->prepare(
-            'SELECT id, curso_id, codigo_disciplina, visualizado FROM alarmes WHERE id = :id LIMIT 1'
+            'SELECT id, curso_id, codigo_disciplina, id_turma, visualizado FROM alarmes WHERE id = :id LIMIT 1'
         );
         $select->execute(['id' => $alarmeId]);
         $alarme = $select->fetch();
@@ -1447,6 +1685,10 @@ class AnalyticsRepository
         if ($codigosDisciplinaPermitidos !== null) {
             $codigo = trim((string)($alarme['codigo_disciplina'] ?? ''));
             if ($codigo === '' || !in_array($codigo, $codigosDisciplinaPermitidos, true)) {
+                return false;
+            }
+            $idTurma = $alarme['id_turma'] !== null ? (int)$alarme['id_turma'] : null;
+            if (!$this->turmaPermitida($idTurma)) {
                 return false;
             }
         }
@@ -1525,6 +1767,9 @@ class AnalyticsRepository
                 $params[$key] = $codigo;
             }
             $sql .= ' AND codigo_disciplina IN (' . implode(', ', $placeholders) . ')';
+            [$sqlTurma, $turmaParams] = $this->sqlFiltroTurmasPermitidas('id_turma', 'turma_');
+            $sql .= $sqlTurma;
+            $params += $turmaParams;
         }
 
         $statement = $this->db->prepare($sql);
@@ -1559,6 +1804,7 @@ class AnalyticsRepository
             $placeholders[] = ':' . $key;
             $params[$key] = $codigo;
         }
+        [$sqlTurma, $turmaParams] = $this->sqlFiltroTurmasPermitidas('id_turma', 'turma_');
 
         $statement = $this->db->prepare(
             'SELECT 1
@@ -1567,10 +1813,11 @@ class AnalyticsRepository
                AND aluno_id = :aluno_id
                AND curso_id = :curso_id
                AND visualizado = 0
-               AND codigo_disciplina IN (' . implode(', ', $placeholders) . ')
+               AND codigo_disciplina IN (' . implode(', ', $placeholders) . ')'
+               . $sqlTurma . '
              LIMIT 1'
         );
-        $statement->execute($params);
+        $statement->execute($params + $turmaParams);
 
         return $statement->fetchColumn() !== false;
     }
@@ -1630,14 +1877,15 @@ class AnalyticsRepository
             foreach (array_values($codigosDisciplina) as $i => $_) {
                 $placeholders[] = ':disc_' . $i;
             }
+            [$sqlTurma, $discParams] = $this->sqlFiltroTurmasPermitidas('fd.id_turma', 'turma_');
             $sql .= ' AND EXISTS (
                         SELECT 1 FROM frequencia_disciplina fd
                         WHERE fd.coleta_id = fc.coleta_id
                           AND fd.aluno_id = fc.aluno_id
                           AND fd.curso_id = fc.curso_id
-                          AND fd.codigo_disciplina IN (' . implode(', ', $placeholders) . ')
+                          AND fd.codigo_disciplina IN (' . implode(', ', $placeholders) . ')'
+                          . $sqlTurma . '
                       )';
-            $discParams = [];
             foreach (array_values($codigosDisciplina) as $i => $codigo) {
                 $discParams['disc_' . $i] = $codigo;
             }
@@ -1784,6 +2032,9 @@ class AnalyticsRepository
                 $params[$key] = (string)$codigo;
             }
             $sql .= ' AND fd.codigo_disciplina IN (' . implode(', ', $placeholders) . ')';
+            [$sqlTurma, $turmaParams] = $this->sqlFiltroTurmasPermitidas('fd.id_turma', 'turma_');
+            $sql .= $sqlTurma;
+            $params += $turmaParams;
         }
 
         $sql .= ' ORDER BY todas_trancadas DESC, c.nome_curso ASC, a.nome ASC,

@@ -119,6 +119,7 @@ class IngressantesController extends Controller
             }
         } elseif (Auth::isProfessor()) {
             $codigosDisciplina = Auth::disciplinaCodigos();
+            $repo->restringirTurmas(Auth::turmaIds());
             $cursoExibido = 'Minhas disciplinas';
             if ($codigosDisciplina === []) {
                 $aviso = 'Nenhuma disciplina vinculada ao seu CPF.';

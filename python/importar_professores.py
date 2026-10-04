@@ -3,7 +3,8 @@
 
 Le o cache da consulta de matriculados e popula:
   - `cursos` (todos os cursos da matricula, nao so os com frequencia)
-  - `professores` e `disciplina_professores`
+  - `professores` e `disciplina_professores` (por codigo da disciplina)
+  - `turma_professores` (por turma; cria a turma em `turmas` se ainda nao existir)
 
 Uso:
     python3 importar_professores.py
@@ -194,31 +195,110 @@ def extrair_pares(
     return pares
 
 
+def extrair_turmas_docentes(
+    matriculas: dict[str, Any],
+) -> dict[int, dict[str, Any]]:
+    """Docentes de cada turma: id_turma -> {codigo, disciplina, nome_turma, docentes}.
+
+    docentes: cpf -> (nome, tipo_docente, email).
+    """
+    turmas: dict[int, dict[str, Any]] = {}
+    for registro in matriculas.values():
+        if not isinstance(registro, dict):
+            continue
+        for item in registro.get("disciplinas") or []:
+            if not isinstance(item, dict):
+                continue
+            codigo = str(item.get("cod_disciplina") or "").strip()
+            try:
+                id_turma = int(item.get("id_turma"))
+            except (TypeError, ValueError):
+                continue
+            if codigo == "":
+                continue
+
+            turma = turmas.setdefault(id_turma, {
+                "codigo_disciplina": codigo,
+                "disciplina": str(item.get("disciplina") or "").strip() or codigo,
+                "nome_turma": str(item.get("turma") or "").strip(),
+                "docentes": {},
+            })
+            for docente in item.get("docentes") or []:
+                if not isinstance(docente, dict):
+                    continue
+                cpf = normalizar_cpf(docente.get("cpf_docente"))
+                nome = str(docente.get("docente") or "").strip()
+                if cpf is None or nome == "":
+                    continue
+                turma["docentes"][cpf] = (
+                    nome,
+                    str(docente.get("tipo_docente") or "").strip() or None,
+                    str(docente.get("email_docente") or "").strip() or None,
+                )
+    return turmas
+
+
+def substituir_professores_turma(
+    cursor: Any,
+    id_turma: int,
+    turma: dict[str, Any],
+    professores: dict[str, int],
+) -> int:
+    """Garante a turma e substitui seus professores pelos da matricula atual."""
+    cursor.execute(
+        """
+        INSERT OR IGNORE INTO turmas (id_turma, codigo_disciplina, disciplina, nome_turma)
+        VALUES (?, ?, ?, ?)
+        """,
+        (id_turma, turma["codigo_disciplina"], turma["disciplina"], turma["nome_turma"]),
+    )
+    cursor.execute("DELETE FROM turma_professores WHERE id_turma = ?", (id_turma,))
+    for cpf, (_nome, tipo, _email) in turma["docentes"].items():
+        cursor.execute(
+            """
+            INSERT INTO turma_professores (id_turma, professor_id, tipo_docente)
+            VALUES (?, ?, ?)
+            """,
+            (id_turma, professores[cpf], tipo),
+        )
+    return len(turma["docentes"])
+
+
 def importar(matriculas: dict[str, Any]) -> dict[str, int]:
     """Persiste cursos, professores e vinculos no SQLite."""
     cursos = extrair_cursos(matriculas)
     pares = extrair_pares(matriculas)
+    turmas = extrair_turmas_docentes(matriculas)
     conn = conectar()
     cursor = conn.cursor()
 
     for nome_curso, curso_nivel in sorted(cursos.items()):
         upsert_curso(cursor, nome_curso, curso_nivel)
 
-    professores_ids: set[int] = set()
+    professores: dict[str, int] = {}
     vinculos = 0
 
     for codigo, disciplina, cpf, nome, tipo, email in pares:
         professor_id = upsert_professor(cursor, cpf, nome, email)
-        professores_ids.add(professor_id)
+        professores[cpf] = professor_id
         upsert_vinculo(cursor, codigo, disciplina, professor_id, tipo)
         vinculos += 1
+
+    vinculos_turma = 0
+    for id_turma, turma in turmas.items():
+        for cpf, (nome, _tipo, email) in turma["docentes"].items():
+            if cpf not in professores:
+                professores[cpf] = upsert_professor(cursor, cpf, nome, email)
+        vinculos_turma += substituir_professores_turma(cursor, id_turma, turma, professores)
 
     conn.commit()
     return {
         "cursos": len(cursos),
         "pares": len(pares),
-        "professores": len(professores_ids),
+        "professores": len(set(professores.values())),
         "vinculos": vinculos,
+        "turmas": len(turmas),
+        "vinculos_turma": vinculos_turma,
     }
 
 
@@ -246,6 +326,7 @@ def main() -> int:
         f"Professores importados: {resumo['professores']} "
         f"({resumo['vinculos']} vinculos disciplina/professor)."
     )
+    print(f"Turmas: {resumo['turmas']} ({resumo['vinculos_turma']} vinculos turma/professor).")
     return 0
 
 

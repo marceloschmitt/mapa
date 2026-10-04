@@ -16,10 +16,15 @@ Regras (parametros padrao entre parenteses):
     quinta, sexta e segunda = 3 dias seguidos); a partir de certo tamanho
     (4) a severidade e critica
   - faltas_3semanas: N semanas ISO consecutivas em que o aluno faltou em
-    todas as aulas previstas da disciplina (grade em disciplina_aulas);
-    a ultima falta da sequencia na janela de recencia (7 dias). Semana
-    incompleta (ainda ha aula futura na semana) nao conta. Sem grade,
-    a regra nao gera alarme para aquela disciplina.
+    todas as aulas previstas da disciplina; a ultima falta da sequencia
+    na janela de recencia (7 dias). Semana incompleta (ainda ha aula
+    futura na semana) nao conta. Sem grade, a regra nao gera alarme para
+    aquela disciplina.
+
+As aulas previstas (carencia e semanas) sao as da turma do aluno
+(turma_aulas, via frequencia_disciplina.id_turma). Sem turma identificada,
+ou turma sem datas, vale a grade da disciplina no curso (disciplina_aulas),
+que junta os dias de todas as turmas.
 
 Cada regra pode ser desligada no portal: sem a regra ativa, os alarmes
 abertos daquele tipo somem na proxima geracao.
@@ -205,12 +210,14 @@ def trazer_alarmes_tratados(cursor: Any, coleta_id: int) -> int:
         INSERT INTO alarmes (
             coleta_id, aluno_id, curso_id, codigo_disciplina, disciplina,
             tipo, severidade, mensagem, detalhe_json,
-            visualizado, visualizado_em, visualizado_por, contato_tipo, gerado_em
+            visualizado, visualizado_em, visualizado_por, contato_tipo, gerado_em,
+            id_turma
         )
         SELECT
             ?, a.aluno_id, a.curso_id, a.codigo_disciplina, a.disciplina,
             a.tipo, a.severidade, a.mensagem, a.detalhe_json,
-            a.visualizado, a.visualizado_em, a.visualizado_por, a.contato_tipo, a.gerado_em
+            a.visualizado, a.visualizado_em, a.visualizado_por, a.contato_tipo, a.gerado_em,
+            a.id_turma
         FROM alarmes a
         WHERE a.coleta_id = ?
           AND a.visualizado = 1
@@ -244,7 +251,8 @@ def trazer_alarmes_tratados(cursor: Any, coleta_id: int) -> int:
             visualizado_em = excluded.visualizado_em,
             visualizado_por = excluded.visualizado_por,
             contato_tipo = excluded.contato_tipo,
-            gerado_em = excluded.gerado_em
+            gerado_em = excluded.gerado_em,
+            id_turma = COALESCE(excluded.id_turma, alarmes.id_turma)
         """,
         (coleta_id, anterior, coleta_id, coleta_id),
     )
@@ -302,6 +310,7 @@ def inserir_alarme(
     severidade: str,
     mensagem: str,
     detalhe: dict[str, Any],
+    id_turma: int | None = None,
 ) -> None:
     """Insere um alarme preservando acao ja registrada em conflito.
 
@@ -316,19 +325,21 @@ def inserir_alarme(
         severidade: alto ou critico.
         mensagem: Texto curto.
         detalhe: Payload JSON.
+        id_turma: Turma do aluno na disciplina, se identificada.
     """
     cursor.execute(
         """
         INSERT INTO alarmes (
             coleta_id, aluno_id, curso_id, codigo_disciplina, disciplina,
-            tipo, severidade, mensagem, detalhe_json, gerado_em
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            tipo, severidade, mensagem, detalhe_json, gerado_em, id_turma
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'), ?)
         ON CONFLICT(coleta_id, aluno_id, curso_id, codigo_disciplina, tipo)
         DO UPDATE SET
             severidade = excluded.severidade,
             mensagem = excluded.mensagem,
             detalhe_json = excluded.detalhe_json,
             disciplina = COALESCE(excluded.disciplina, alarmes.disciplina),
+            id_turma = COALESCE(excluded.id_turma, alarmes.id_turma),
             gerado_em = datetime('now', 'localtime'),
             visualizado = alarmes.visualizado,
             visualizado_em = alarmes.visualizado_em,
@@ -345,6 +356,7 @@ def inserir_alarme(
             severidade,
             mensagem,
             json.dumps(detalhe, ensure_ascii=False),
+            id_turma,
         ),
     )
 
@@ -383,17 +395,30 @@ def gerar_percentual_baixo(
         """
         SELECT fd.aluno_id, fd.curso_id, fd.codigo_disciplina, fd.disciplina,
                fd.percentual_frequencia, fd.ausencias, fd.horarios,
+               fd.id_turma,
                fc.data_inicio_aulas,
-               (
-                   SELECT MIN(da.data_aula)
-                   FROM disciplina_aulas da
-                   WHERE da.codigo_disciplina = fd.codigo_disciplina
-                     AND da.curso_id = fd.curso_id
-                     AND (
-                         fc.data_inicio_aulas IS NULL
-                         OR TRIM(fc.data_inicio_aulas) = ''
-                         OR da.data_aula >= fc.data_inicio_aulas
-                     )
+               COALESCE(
+                   (
+                       SELECT MIN(ta.data_aula)
+                       FROM turma_aulas ta
+                       WHERE ta.id_turma = fd.id_turma
+                         AND (
+                             fc.data_inicio_aulas IS NULL
+                             OR TRIM(fc.data_inicio_aulas) = ''
+                             OR ta.data_aula >= fc.data_inicio_aulas
+                         )
+                   ),
+                   (
+                       SELECT MIN(da.data_aula)
+                       FROM disciplina_aulas da
+                       WHERE da.codigo_disciplina = fd.codigo_disciplina
+                         AND da.curso_id = fd.curso_id
+                         AND (
+                             fc.data_inicio_aulas IS NULL
+                             OR TRIM(fc.data_inicio_aulas) = ''
+                             OR da.data_aula >= fc.data_inicio_aulas
+                         )
+                   )
                ) AS primeira_aula
         FROM frequencia_disciplina fd
         LEFT JOIN frequencia_curso fc
@@ -458,6 +483,7 @@ def gerar_percentual_baixo(
                 "limite_critico": limite_critico,
                 "carencia_semanas": carencia,
             },
+            id_turma=row["id_turma"],
         )
         total += 1
 
@@ -507,7 +533,11 @@ def carregar_faltas_por_aluno(cursor: Any, coleta_id: int) -> dict[tuple[int, in
 def carregar_faltas_disciplina(
     cursor: Any,
     coleta_id: int,
-) -> tuple[dict[tuple[int, int, str], list[date]], dict[tuple[int, int, str], str]]:
+) -> tuple[
+    dict[tuple[int, int, str], list[date]],
+    dict[tuple[int, int, str], str],
+    dict[tuple[int, int, str], int],
+]:
     """Agrupa datas de falta por aluno/curso/disciplina.
 
     Args:
@@ -515,12 +545,14 @@ def carregar_faltas_disciplina(
         coleta_id: Coleta.
 
     Returns:
-        Tupla (mapa de datas, mapa de nomes de disciplina).
+        Tupla (mapa de datas, mapa de nomes de disciplina, mapa de turmas
+        identificadas).
     """
     cursor.execute(
         """
         SELECT fd.aluno_id, fd.curso_id, fd.codigo_disciplina, fd.data_falta,
-               COALESCE(f.disciplina, fd.codigo_disciplina) AS disciplina
+               COALESCE(f.disciplina, fd.codigo_disciplina) AS disciplina,
+               f.id_turma
         FROM faltas_dia fd
         LEFT JOIN frequencia_disciplina f
           ON f.coleta_id = fd.coleta_id
@@ -535,6 +567,7 @@ def carregar_faltas_disciplina(
     )
     mapa: dict[tuple[int, int, str], list[date]] = {}
     nomes: dict[tuple[int, int, str], str] = {}
+    turmas: dict[tuple[int, int, str], int] = {}
 
     for row in cursor.fetchall():
         chave = (
@@ -546,8 +579,21 @@ def carregar_faltas_disciplina(
         data = dia if isinstance(dia, date) else date.fromisoformat(str(dia)[:10])
         mapa.setdefault(chave, []).append(data)
         nomes[chave] = str(row["disciplina"])
+        if row["id_turma"] is not None:
+            turmas[chave] = int(row["id_turma"])
 
-    return mapa, nomes
+    return mapa, nomes, turmas
+
+
+def carregar_aulas_por_turma(cursor: Any) -> dict[int, set[date]]:
+    """Carrega datas de aula por turma (turma_aulas)."""
+    cursor.execute("SELECT id_turma, data_aula FROM turma_aulas")
+    mapa: dict[int, set[date]] = {}
+    for row in cursor.fetchall():
+        dia = row["data_aula"]
+        data = dia if isinstance(dia, date) else date.fromisoformat(str(dia)[:10])
+        mapa.setdefault(int(row["id_turma"]), set()).add(data)
+    return mapa
 
 
 def carregar_aulas_por_disciplina(
@@ -787,13 +833,17 @@ def gerar_faltas_3semanas(
     janela_dias = int(config["faltas_semanas_janela_dias"])
     severidade = str(config["faltas_semanas_severidade"])
 
-    faltas, nomes = carregar_faltas_disciplina(cursor, coleta_id)
+    faltas, nomes, turmas = carregar_faltas_disciplina(cursor, coleta_id)
+    aulas_por_turma = carregar_aulas_por_turma(cursor)
     aulas_por_disc = carregar_aulas_por_disciplina(cursor)
     total = 0
 
     for chave, datas in faltas.items():
         aluno_id, curso_id, codigo = chave
-        aulas = aulas_por_disc.get((curso_id, codigo), set())
+        id_turma = turmas.get(chave)
+        aulas = (aulas_por_turma.get(id_turma) if id_turma is not None else None) or aulas_por_disc.get(
+            (curso_id, codigo), set()
+        )
         resultado = encontrar_sequencia_3_semanas(
             datas,
             aulas,
@@ -837,6 +887,7 @@ def gerar_faltas_3semanas(
                 "ultima_falta": ultima.isoformat(),
                 "faltas_sequencia": [d.isoformat() for d in faltas_seq],
             },
+            id_turma=id_turma,
         )
         total += 1
 

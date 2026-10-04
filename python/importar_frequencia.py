@@ -210,6 +210,10 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
                 percentual = None
             else:
                 data_trancamento = None
+            try:
+                id_turma = int(disciplina.get("id_turma"))
+            except (TypeError, ValueError):
+                id_turma = None
 
             cursor.execute(
                 """
@@ -217,8 +221,8 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
                     coleta_id, aluno_id, curso_id,
                     codigo_disciplina, disciplina,
                     horarios, ausencias, presencas, percentual_frequencia,
-                    situacao, data_trancamento
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    situacao, data_trancamento, id_turma
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(coleta_id, aluno_id, curso_id, codigo_disciplina)
                 DO UPDATE SET
                     disciplina = excluded.disciplina,
@@ -227,7 +231,8 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
                     presencas = excluded.presencas,
                     percentual_frequencia = excluded.percentual_frequencia,
                     situacao = excluded.situacao,
-                    data_trancamento = excluded.data_trancamento
+                    data_trancamento = excluded.data_trancamento,
+                    id_turma = excluded.id_turma
                 """,
                 (
                     coleta_id,
@@ -241,6 +246,7 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
                     float(percentual) if percentual is not None else None,
                     situacao,
                     data_trancamento,
+                    id_turma,
                 ),
             )
             total_disciplinas += 1

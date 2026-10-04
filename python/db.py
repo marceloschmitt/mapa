@@ -150,6 +150,12 @@ def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
     _ensure_column(conn, "passe_livre_disciplina", "data_trancamento", "TEXT")
     _ensure_column(conn, "frequencia_disciplina", "situacao", "TEXT")
     _ensure_column(conn, "frequencia_disciplina", "data_trancamento", "TEXT")
+    _ensure_column(conn, "frequencia_disciplina", "id_turma", "INTEGER")
+    _ensure_column(conn, "alarmes", "id_turma", "INTEGER")
+    conn.execute(
+        "CREATE INDEX IF NOT EXISTS idx_frequencia_disciplina_turma "
+        "ON frequencia_disciplina(coleta_id, id_turma)"
+    )
     _ensure_column(conn, "efeito_contatos_alunos", "aulas_ate_corte", "INTEGER NOT NULL DEFAULT 0")
     _ensure_column(conn, "efeito_contatos_alunos", "faltas_ate_corte", "INTEGER NOT NULL DEFAULT 0")
     _migrar_datas_aula_csv(conn)
