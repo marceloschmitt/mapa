@@ -8,10 +8,17 @@ As URLs vem da configuracao da API (tabela configuracoes):
    ano_semestre_ingresso, status_discente). Salvo em
    resposta_alunos_massa_cadastro.json. Lido por importar_trancados.py e
    analisar_frequencia.py.
-2. api_url_alunos_massa_intervalo (~1 min): um registro por vinculo
+2. api_url_alunos_massa_intervalo: um registro por vinculo
    (aluno x curso) com status_discente, totais, disciplinas e
    ausencias_especiais (o campo so aparece quando ha dados). Salvo em
-   resposta_alunos_massa_intervalo.json. Lido por analisar_frequencia.py.
+   resposta_alunos_massa_intervalo.json. Lido por analisar_frequencia.py e
+   importar_chamadas.py.
+
+   Uma consulta por status (&status=ATIVO e &status=FORMANDO), ambas com o
+   periodo inteiro, juntadas no mesmo arquivo: so esses status entram na
+   frequencia, e a resposta sem filtro (todos os status, ~1 min) passava do
+   limite de 60 s do Cloudflare. Se uma delas falhar, o arquivo anterior e
+   mantido.
 
 Na URL do intervalo, {data_inicial} e {data_final} sao trocados pelas datas de
 frequencia_data_inicial / frequencia_data_final (DD-MM-AAAA), convertidas para
@@ -53,8 +60,10 @@ from paths import (
 
 PAGINA_CONFIG = "/index.php/configuracoes/api"
 
-# A resposta do intervalo leva cerca de 1 minuto para ~6.700 vinculos.
 TIMEOUT_SEGUNDOS = 600
+STATUS_INTERVALO = ("ATIVO", "FORMANDO")
+# O Cloudflare do IFRS devolve 504 acima de ~60 s.
+ALERTA_SEGUNDOS = 45
 TIMEOUT_CADASTRO_SEGUNDOS = 120
 TENTATIVAS = 3
 ESPERA_ENTRE_TENTATIVAS = 30
@@ -175,15 +184,25 @@ def consultar_intervalo(
     args: argparse.Namespace,
     tentativas: int,
 ) -> None:
-    """Frequencia por intervalo de todos → resposta_alunos_massa_intervalo.json."""
+    """Frequencia por intervalo (ATIVO e FORMANDO) → resposta_alunos_massa_intervalo.json."""
     data_inicial = data_iso(args.data_inicial or frequencia_data_inicial())
     data_final = data_iso(args.data_final or frequencia_data_final())
-    url = url_intervalo(config, data_inicial, data_final)
+    base = url_intervalo(config, data_inicial, data_final)
     print("Consulta em massa — frequencia por intervalo")
-    print(f"URL: {url}")
-    vinculos = consultar_com_tentativas(url, token, config, args.timeout, tentativas)
-    if not isinstance(vinculos, list):
-        raise ValueError("Resposta do intervalo inesperada (esperava lista de vinculos).")
+    vinculos: list[Any] = []
+    for status in STATUS_INTERVALO:
+        url = base + ("&" if "?" in base else "?") + f"status={status}"
+        print(f"URL: {url}")
+        inicio = time.time()
+        parte = consultar_com_tentativas(url, token, config, args.timeout, tentativas)
+        if not isinstance(parte, list):
+            raise ValueError(f"Resposta do intervalo ({status}) inesperada (esperava lista de vinculos).")
+        if time.time() - inicio > ALERTA_SEGUNDOS:
+            print(
+                f"Atencao: a consulta {status} passou de {ALERTA_SEGUNDOS}s; "
+                "perto do limite de 60 s do Cloudflare (HTTP 504)."
+            )
+        vinculos.extend(parte)
     salvar_json(vinculos, JSON_RESPOSTA_ALUNOS_MASSA)
     imprimir_resumo_intervalo(vinculos)
     print(f"Salvo em: {JSON_RESPOSTA_ALUNOS_MASSA}")

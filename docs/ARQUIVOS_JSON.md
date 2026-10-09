@@ -112,7 +112,9 @@ analisar_frequencia.py
 - **Conteúdo:** resposta crua da URL alunos em massa — frequência por intervalo
   (`api_url_alunos_massa_intervalo`, com `{data_inicial}` e `{data_final}`): um
   registro por vínculo com status, totais, disciplinas e `ausencias_especiais`
-  (inclui a data de trancamento de quem trancou no período atual).
+  (inclui a data de trancamento de disciplina no período atual). Só vínculos
+  `ATIVO` e `FORMANDO`: duas consultas (`&status=ATIVO`, `&status=FORMANDO`)
+  juntadas no mesmo arquivo.
 - **Usado por:** `analisar_frequencia.py` (fonte da frequência) e
   `importar_chamadas.py` (última aula ministrada por turma e por
   disciplina/curso; o campo `ultima_aula_ministrada` é por aluno, e a data da
