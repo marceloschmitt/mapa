@@ -8,7 +8,11 @@ Le os arquivos gravados por consulta_alunos_massa.py:
 - resposta_alunos_massa_cadastro.json: nome civil, nome social, e-mail e
   turma de entrada, que o intervalo nao traz;
 - resposta_matriculas.json (opcional): turma (id_turma) do aluno em cada
-  disciplina, casada por id_discente + codigo da disciplina.
+  disciplina, casada por id_discente + codigo da disciplina;
+- integrados_anual_AAAA.json (opcional): meses encerrados do ano letivo dos
+  integrados. Cada integrado ganha "frequencia_anual" (intervalo atual somado a
+  esses meses), usada por importar_frequencia.py nos percentuais. Os demais
+  campos continuam sendo so do intervalo da coleta.
 
 Frequencia/controle: apenas vinculos ATIVO ou FORMANDO; demais status
 (inclusive trancados) sao ignorados. Vinculos sem curso (alunos especiais)
@@ -31,6 +35,7 @@ from paths import (
     JSON_TABELA_FREQUENCIA,
     garantir_diretorios,
 )
+import integrados_anual
 from status_aluno import status_eh_controle
 from ausencias_especiais import (
     aplicar_situacao_trancamento,
@@ -252,9 +257,15 @@ def montar_resultado(
     vinculos: list[dict[str, Any]],
     cadastro: dict[str, Any],
     turmas: dict[ChaveTurma, int] | None = None,
+    inicio_anual: date | None = None,
+    anteriores: dict[integrados_anual.ChaveVinculo, list[dict[str, Any]]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Tabela de frequencia (um registro por vinculo ATIVO/FORMANDO com curso)."""
+    """Tabela de frequencia (um registro por vinculo ATIVO/FORMANDO com curso).
+
+    Integrados com meses encerrados em `anteriores` recebem "frequencia_anual".
+    """
     cursos = indexar_cursos(cadastro)
+    anteriores = anteriores or {}
     resultado: list[dict[str, Any]] = []
 
     for vinculo in vinculos:
@@ -300,6 +311,11 @@ def montar_resultado(
             "disciplinas": disciplinas,
             "data_inicio_aulas": data_inicio_contagem_aluno(vinculo.get("ausencias_especiais")),
         })
+        chave = integrados_anual.chave_vinculo(vinculo)
+        if inicio_anual is not None and integrados_anual.eh_integrado(vinculo) and chave in anteriores:
+            resultado[-1]["frequencia_anual"] = integrados_anual.somar(
+                vinculo, anteriores[chave], inicio_anual
+            )
 
     resultado.sort(key=lambda registro: registro["nome"])
     return resultado
@@ -318,11 +334,13 @@ def resumir(vinculos: list[dict[str, Any]], resultado: list[dict[str, Any]]) -> 
     alunos_com_frequencia = len({registro["login"] for registro in resultado})
     linhas = [d for registro in resultado for d in registro.get("disciplinas", [])]
     com_turma = sum(1 for d in linhas if d.get("id_turma") is not None)
+    anuais = sum(1 for registro in resultado if registro.get("frequencia_anual"))
     return (
         f"Vinculos no arquivo: {len(vinculos)}\n"
         f"Alunos com frequencia (ATIVO/FORMANDO): {alunos_com_frequencia}\n"
         f"Registros (aluno/curso): {len(resultado)}\n"
-        f"Linhas de disciplina: {len(linhas)} (com turma identificada: {com_turma})"
+        f"Linhas de disciplina: {len(linhas)} (com turma identificada: {com_turma})\n"
+        f"Integrados com frequencia anual: {anuais}"
     )
 
 
@@ -348,7 +366,18 @@ def main() -> int:
     else:
         print(f"Aviso: {JSON_RESPOSTA_MATRICULAS.name} nao encontrado; disciplinas sem turma.")
 
-    resultado = montar_resultado(vinculos, cadastro, turmas)
+    inicio_anual = None
+    anteriores: dict[integrados_anual.ChaveVinculo, list[dict[str, Any]]] = {}
+    try:
+        from api_auth import carregar_config_api
+
+        inicio_anual, anteriores, aviso = integrados_anual.carregar(carregar_config_api())
+        if aviso:
+            print(f"Aviso: {aviso}")
+    except Exception as error:  # noqa: BLE001
+        print(f"Aviso: frequencia anual dos integrados nao carregada ({error}).")
+
+    resultado = montar_resultado(vinculos, cadastro, turmas, inicio_anual, anteriores)
     garantir_diretorios()
     salvar_json(resultado, ARQUIVO_SAIDA_JSON)
 

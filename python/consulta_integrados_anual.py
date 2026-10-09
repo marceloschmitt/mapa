@@ -37,21 +37,16 @@ from consulta_alunos_massa import (
     salvar_json,
     url_intervalo,
 )
-from paths import DIR_JSON, garantir_diretorios
+from integrados_anual import caminho_arquivo, eh_integrado
+from paths import garantir_diretorios
 
 CHAVE_INICIO = "integrados_data_inicio"
-NIVEL_INTEGRADO = "N"
 MESES_POR_BLOCO = 2
 TIMEOUT_SEGUNDOS = 120
 TENTATIVAS = 2
 PAGINA_CONFIG = "/index.php/configuracoes/api"
 
 Periodo = tuple[date, date]
-
-
-def caminho_arquivo(inicio: date) -> Path:
-    """Arquivo do ano letivo que comeca em inicio."""
-    return DIR_JSON / f"integrados_anual_{inicio.year}.json"
 
 
 def fim_do_mes(dia: date, meses_adiante: int = 0) -> date:
@@ -104,10 +99,7 @@ def somente_integrados(vinculos: Any) -> list[dict[str, Any]]:
     """Vinculos de cursos integrados (curso_nivel = N)."""
     if not isinstance(vinculos, list):
         raise ValueError("Resposta do intervalo inesperada (esperava lista de vinculos).")
-    return [
-        v for v in vinculos
-        if isinstance(v, dict) and str(v.get("curso_nivel") or "").strip().upper() == NIVEL_INTEGRADO
-    ]
+    return [v for v in vinculos if isinstance(v, dict) and eh_integrado(v)]
 
 
 def chave_periodo(periodo: Periodo) -> str:

@@ -374,6 +374,8 @@ def gerar_percentual_baixo(
     - primeiro dia de aula da disciplina na grade; ou
     - se houver matricula atrasada, o primeiro dia de aula a partir do
       dia seguinte ao fim do intervalo de atraso.
+    Integrados com frequencia anual (frequencia_curso.frequencia_desde) contam
+    a carencia do inicio do ano letivo, nao do semestre.
 
     Args:
         cursor: Cursor SQLite.
@@ -397,6 +399,7 @@ def gerar_percentual_baixo(
                fd.percentual_frequencia, fd.ausencias, fd.horarios,
                fd.id_turma,
                fc.data_inicio_aulas,
+               fc.frequencia_desde,
                COALESCE(
                    (
                        SELECT MIN(ta.data_aula)
@@ -444,6 +447,12 @@ def gerar_percentual_baixo(
             primeira = date.fromisoformat(str(primeira_txt)[:10])
         except ValueError:
             continue
+        desde_txt = str(row["frequencia_desde"] or "").strip()
+        if desde_txt:
+            try:
+                primeira = min(primeira, date.fromisoformat(desde_txt[:10]))
+            except ValueError:
+                pass
 
         if referencia < primeira + timedelta(weeks=carencia):
             continue
@@ -479,6 +488,7 @@ def gerar_percentual_baixo(
                 "horarios": int(row["horarios"]),
                 "primeira_aula": str(primeira_txt),
                 "data_inicio_aluno": row["data_inicio_aulas"],
+                "frequencia_desde": row["frequencia_desde"],
                 "limite": limite,
                 "limite_critico": limite_critico,
                 "carencia_semanas": carencia,

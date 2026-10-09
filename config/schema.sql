@@ -254,6 +254,9 @@ CREATE TABLE IF NOT EXISTS frequencia_curso (
     percentual_frequencia REAL,
     -- Dia a partir do qual aulas contam (matricula atrasada: dia seguinte ao fim; senao NULL).
     data_inicio_aulas TEXT,
+    -- Integrados (anuais): inicio do ano letivo quando os numeros somam o ano
+    -- inteiro (integrados_anual_AAAA.json); NULL = so o intervalo da coleta.
+    frequencia_desde TEXT,
     FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE CASCADE,
     FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,

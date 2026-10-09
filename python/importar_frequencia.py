@@ -4,6 +4,11 @@
 Cria uma nova coleta e popula alunos, cursos, frequencia_disciplina
 e faltas_dia. O JSON permanece como cache da coleta.
 
+Integrados com "frequencia_anual" (analisar_frequencia.py) gravam os numeros do
+ano letivo em frequencia_curso e frequencia_disciplina, com
+frequencia_curso.frequencia_desde = inicio do ano. As faltas por dia
+(faltas_dia) continuam so as do intervalo da coleta.
+
 Uso:
     python3 importar_frequencia.py
 """
@@ -146,7 +151,13 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
         curso_id = upsert_curso(cursor, str(registro.get("nome_curso", "")))
         upsert_aluno_curso(cursor, aluno_id, curso_id, registro)
 
-        geral = registro.get("frequencia_geral")
+        anual = registro.get("frequencia_anual")
+        if not isinstance(anual, dict):
+            anual = {}
+        anual_disciplinas = anual.get("disciplinas") if isinstance(anual.get("disciplinas"), dict) else {}
+        frequencia_desde = str(anual.get("desde") or "").strip() or None
+
+        geral = anual.get("geral") if isinstance(anual.get("geral"), dict) else registro.get("frequencia_geral")
         if isinstance(geral, dict):
             percentual_curso = geral.get("percentual_frequencia_total")
             data_inicio = str(registro.get("data_inicio_aulas") or "").strip() or None
@@ -155,14 +166,15 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
                 INSERT INTO frequencia_curso (
                     coleta_id, aluno_id, curso_id,
                     horarios, ausencias, presencas, percentual_frequencia,
-                    data_inicio_aulas
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                    data_inicio_aulas, frequencia_desde
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 ON CONFLICT(coleta_id, aluno_id, curso_id) DO UPDATE SET
                     horarios = excluded.horarios,
                     ausencias = excluded.ausencias,
                     presencas = excluded.presencas,
                     percentual_frequencia = excluded.percentual_frequencia,
-                    data_inicio_aulas = excluded.data_inicio_aulas
+                    data_inicio_aulas = excluded.data_inicio_aulas,
+                    frequencia_desde = excluded.frequencia_desde
                 """,
                 (
                     coleta_id,
@@ -173,6 +185,7 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
                     int(geral.get("presencas_totais") or 0),
                     float(percentual_curso) if percentual_curso is not None else None,
                     data_inicio,
+                    frequencia_desde,
                 ),
             )
         else:
@@ -205,7 +218,10 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
             data_trancamento = (
                 str(disciplina.get("data_trancamento") or "").strip() or None
             )
-            percentual = disciplina.get("percentual_frequencia")
+            numeros = anual_disciplinas.get(codigo)
+            if not isinstance(numeros, dict):
+                numeros = disciplina
+            percentual = numeros.get("percentual_frequencia")
             if situacao:
                 percentual = None
             else:
@@ -240,9 +256,9 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
                     curso_id,
                     codigo,
                     nome_disc,
-                    int(disciplina.get("horarios") or 0),
-                    int(disciplina.get("ausencias") or 0),
-                    int(disciplina.get("presencas") or 0),
+                    int(numeros.get("horarios") or 0),
+                    int(numeros.get("ausencias") or 0),
+                    int(numeros.get("presencas") or 0),
                     float(percentual) if percentual is not None else None,
                     situacao,
                     data_trancamento,
