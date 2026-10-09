@@ -27,8 +27,9 @@ class PerdaVagaController extends Controller
 
         $porCurso = [];
         $totalAlunos = 0;
-        $totalReprovacoes = 0;
         $totalMatriculadosAtual = 0;
+        $totalCancelados = 0;
+        $totalPendentes = 0;
 
         if ($execucao !== null && $escopo['aviso'] === null) {
             $candidatos = $repo->candidatosPerdaVaga(
@@ -48,7 +49,6 @@ class PerdaVagaController extends Controller
                     $porCandidato[$cid] = [];
                 }
                 $porCandidato[$cid][] = $linha;
-                $totalReprovacoes++;
             }
 
             foreach ($candidatos as $candidato) {
@@ -64,6 +64,10 @@ class PerdaVagaController extends Controller
                 $totalAlunos++;
                 if (!empty($candidato['matriculado_periodo_atual'])) {
                     $totalMatriculadosAtual++;
+                } elseif (strtoupper(trim((string)($candidato['status_periodo_atual'] ?? ''))) === 'CANCELADO') {
+                    $totalCancelados++;
+                } else {
+                    $totalPendentes++;
                 }
             }
         }
@@ -81,8 +85,9 @@ class PerdaVagaController extends Controller
             'porCurso' => array_values($porCurso),
             'totalAlunos' => $totalAlunos,
             'totalCursos' => count($porCurso),
-            'totalReprovacoes' => $totalReprovacoes,
             'totalMatriculadosAtual' => $totalMatriculadosAtual,
+            'totalCancelados' => $totalCancelados,
+            'totalPendentes' => $totalPendentes,
             'cursosDisponiveis' => $cursosDisponiveis,
             'cursoSelecionado' => $cursoSelecionado,
             'cursoExibido' => $escopo['cursoExibido'],

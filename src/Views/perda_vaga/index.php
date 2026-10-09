@@ -3,7 +3,8 @@
 $porCurso = $porCurso ?? [];
 $totalAlunos = (int)($totalAlunos ?? 0);
 $totalCursos = (int)($totalCursos ?? 0);
-$totalReprovacoes = (int)($totalReprovacoes ?? 0);
+$totalCancelados = (int)($totalCancelados ?? 0);
+$totalPendentes = (int)($totalPendentes ?? 0);
 $semSeletorCurso = !empty($semSeletorCurso);
 $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
 $cursosDisponiveis = $cursosDisponiveis ?? [];
@@ -45,15 +46,16 @@ $podeGerarPerdaVaga = !empty($podeGerarPerdaVaga);
                 <span class="badge text-bg-secondary">
                     <?= $totalCursos ?> curso<?= $totalCursos === 1 ? '' : 's' ?>
                 </span>
-                <span class="badge text-bg-secondary">
-                    <?= $totalReprovacoes ?> reprovaç<?= $totalReprovacoes === 1 ? 'ão' : 'ões' ?>
+                <span class="badge text-bg-warning text-dark">
+                    <?= $matriculadosAtual ?> matriculado<?= $matriculadosAtual === 1 ? '' : 's' ?>
+                    em <?= htmlspecialchars($periodoRef, ENT_QUOTES, 'UTF-8') ?>
                 </span>
-                <?php if ($matriculadosAtual > 0): ?>
-                    <span class="badge text-bg-warning text-dark">
-                        <?= $matriculadosAtual ?> matriculado<?= $matriculadosAtual === 1 ? '' : 's' ?>
-                        em <?= htmlspecialchars($periodoRef, ENT_QUOTES, 'UTF-8') ?>
-                    </span>
-                <?php endif; ?>
+                <span class="badge text-bg-danger">
+                    <?= $totalCancelados ?> cancelado<?= $totalCancelados === 1 ? '' : 's' ?>
+                </span>
+                <span class="badge text-bg-light text-dark border">
+                    <?= $totalPendentes ?> pendente<?= $totalPendentes === 1 ? '' : 's' ?>
+                </span>
                 <span class="badge text-bg-light text-dark border">
                     Gerado em <?= htmlspecialchars((string)($execucao['executado_em'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
                 </span>
