@@ -22,9 +22,7 @@ class FrequenciaAnualController extends Controller
 
         $periodoAtual = $this->periodoAtual();
         $repo = new AnalyticsRepository();
-        $meta = $periodoAtual !== ''
-            ? $repo->metaPasseLivre($periodoAtual)
-            : null;
+        $meta = $repo->ultimaColeta();
 
         $cursosDisponiveis = $repo->listarCursos(null);
         $cursoSelecionado = $this->cursoSelecionado($cursosDisponiveis);
@@ -45,27 +43,18 @@ class FrequenciaAnualController extends Controller
         $linhas = [];
         $disciplinasPorLinha = [];
 
-        if ($periodoAtual !== '' && $meta !== null) {
-            $linhas = $repo->linhasPasseLivre(
-                $cursoIds,
-                null,
-                $filtroNome,
-                $periodoAtual
+        if ($meta !== null) {
+            $coletaId = (int)$meta['id'];
+            $linhas = $repo->linhasFrequenciaCorrente($coletaId, $cursoIds, $filtroNome);
+            $disciplinasPorLinha = $repo->disciplinasFrequenciaCorrente(
+                $coletaId,
+                array_map(static fn(array $l): int => (int)$l['aluno_id'], $linhas)
             );
-            $ids = array_map(
-                static fn(array $l): int => (int)$l['id'],
-                $linhas
-            );
-            $disciplinasPorLinha = $repo->disciplinasPasseLivre($ids);
         }
 
         $erro = Session::flash('erro');
-        if ($erro === null && $periodoAtual === '') {
-            $erro = 'Período letivo não configurado na API.';
-        } elseif ($erro === null && $meta === null) {
-            $erro = 'Nenhum dado de frequência para o semestre '
-                . $periodoAtual
-                . '. Aguarde a próxima coleta (sincroniza o semestre atual em passe_livre_*).';
+        if ($erro === null && $meta === null) {
+            $erro = 'Nenhuma coleta de frequência. Aguarde a próxima coleta.';
         }
 
         $this->render('frequencia_anual/index', [

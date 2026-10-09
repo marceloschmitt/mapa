@@ -87,7 +87,7 @@ analisar_frequencia.py
 - **Conteúdo:** versão já filtrada/normalizada dos dois arquivos da consulta em
   massa (só vínculos ATIVO/FORMANDO com curso).
 - **Telas que dependem dele (via BD):** Frequência, Alarmes, Disciplinas
-  trancadas, Frequência corrente / passe livre do semestre atual, Analytics.
+  trancadas, Frequência corrente, passe livre do semestre atual, Analytics.
 - É intermediário: existe só para os imports seguintes.
 - **Integrados:** quando há `integrados_anual_AAAA.json` válido, cada vínculo
   integrado ganha `frequencia_anual` (`desde`, `geral` e `disciplinas` por
@@ -152,9 +152,10 @@ Não rodam na coleta. Os resultados ficam no BD.
 | Meses encerrados dos integrados | Tela Configuração da API → Buscar meses encerrados, ou `consulta_integrados_anual.py` (log em `data/integrados_anual.log`) | Configuração (`integrados_data_inicio`, `frequencia_data_inicial`, URL de intervalo) + API | `integrados_anual_AAAA.json` | — | A cada troca de semestre dos integrados |
 | Perda de vaga | `gerar_perda_vaga.py` (tela Perda de vaga → Gerar análise, ou CLI) | `resposta_matriculas.json` + `resposta_matriculas_AAAA_S.json` dos 2 anteriores (cache) | `resposta_matriculas_AAAA_S.json` se faltar | `perda_vaga_*` | Após fechamento de semestre |
 
-O semestre **atual** do passe livre / frequência corrente não depende de
+O semestre **atual** do passe livre não depende de
 `gerar_passe_livre.py`: é atualizado pela coleta
-(`sincronizar_passe_livre_semestre_atual.py`).
+(`sincronizar_passe_livre_semestre_atual.py`). A tela Frequência corrente não
+usa essas tabelas: lê a última coleta (`frequencia_curso` e `frequencia_disciplina`).
 
 ---
 

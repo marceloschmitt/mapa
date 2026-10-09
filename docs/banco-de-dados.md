@@ -531,8 +531,11 @@ A cada coleta, `analisar_frequencia.py` soma esses meses ao intervalo atual e
 faltar ou não cobrir o período inteiro, a coleta avisa e o integrado fica só
 com o semestre (`frequencia_desde` nulo).
 
+A tela Frequência corrente lê a última coleta (`frequencia_curso` e
+`frequencia_disciplina`), então mostra o ano letivo dos integrados, marcados com `**`.
+
 Continuam só com o semestre: `faltas_dia` (regras de faltas consecutivas) e o
-passe livre / Frequência corrente (`passe_livre_*`).
+passe livre (`passe_livre_*`).
 
 ---
 

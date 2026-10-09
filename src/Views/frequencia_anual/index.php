@@ -20,6 +20,20 @@ $fmtPct = static function ($valor): string {
 
     return number_format((float)$valor, 1, ',', '.') . '%';
 };
+
+$fmtData = static function ($valor, string $formato = 'd/m/Y'): string {
+    $tempo = strtotime((string)($valor ?? ''));
+
+    return $tempo === false ? '' : date($formato, $tempo);
+};
+
+$desdeAnual = '';
+foreach ($linhas as $linhaAnual) {
+    $desdeAnual = $fmtData($linhaAnual['frequencia_desde'] ?? '');
+    if ($desdeAnual !== '') {
+        break;
+    }
+}
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
@@ -29,12 +43,13 @@ $fmtPct = static function ($valor): string {
             Percentuais de frequência do semestre atual
             <?php if ($periodoAtual !== ''): ?>
                 (<?= htmlspecialchars($periodoAtual, ENT_QUOTES, 'UTF-8') ?>)
-            <?php endif; ?>,
+            <?php endif; ?><?php if ($desdeAnual !== ''): ?>
+                e do ano letivo nos cursos integrados ao ensino médio<?php endif; ?>,
             atualizado a cada coleta. Clique na linha para ver as disciplinas.
             <?php if (is_array($meta)): ?>
-                Intervalo
-                <?= htmlspecialchars((string)$meta['data_inicial'], ENT_QUOTES, 'UTF-8') ?>
-                a <?= htmlspecialchars((string)$meta['data_final'], ENT_QUOTES, 'UTF-8') ?>.
+                Intervalo do semestre
+                <?= htmlspecialchars($fmtData($meta['data_inicial'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
+                a <?= htmlspecialchars($fmtData($meta['data_final'] ?? ''), ENT_QUOTES, 'UTF-8') ?>.
             <?php endif; ?>
         </p>
         <?php if (is_array($meta)): ?>
@@ -43,7 +58,7 @@ $fmtPct = static function ($valor): string {
                     <?= $totalAlunos ?> registro<?= $totalAlunos === 1 ? '' : 's' ?>
                 </span>
                 <span class="badge text-bg-light text-dark border">
-                    Gerado em <?= htmlspecialchars((string)($meta['gerado_em'] ?? ''), ENT_QUOTES, 'UTF-8') ?>
+                    Coleta de <?= htmlspecialchars($fmtData($meta['executada_em'] ?? '', 'd/m/Y H:i'), ENT_QUOTES, 'UTF-8') ?>
                 </span>
             </div>
         <?php endif; ?>
@@ -144,13 +159,15 @@ $fmtPct = static function ($valor): string {
                             $nome = $nomeSocial !== ''
                                 ? $nomeSocial
                                 : trim((string)($linha['nome'] ?? ''));
-                            $disciplinas = $disciplinasPorLinha[(int)$linha['id']] ?? [];
+                            $chave = $linha['aluno_id'] . '-' . $linha['curso_id'];
+                            $anualDesde = $fmtData($linha['frequencia_desde'] ?? '');
+                            $disciplinas = $disciplinasPorLinha[$chave] ?? [];
                             $payload = [
-                                'id' => (int)$linha['id'],
                                 'nome' => $nome,
                                 'matricula' => (string)($linha['matricula'] ?? ''),
                                 'curso' => (string)($linha['nome_curso'] ?? ''),
-                                'periodo' => (string)($linha['periodo'] ?? ($meta['periodo'] ?? '')),
+                                'periodo' => $periodoAtual,
+                                'anual_desde' => $anualDesde,
                                 'ingresso' => (string)($linha['ano_semestre_ingresso'] ?? ''),
                                 'frequencia' => $linha['frequencia'],
                                 'disciplinas' => array_map(
@@ -166,16 +183,16 @@ $fmtPct = static function ($valor): string {
                                     $disciplinas
                                 ),
                             ];
-                            $dadosLinhas[(int)$linha['id']] = $payload;
+                            $dadosLinhas[$chave] = $payload;
                             ?>
                             <tr class="linha-passe-livre"
                                 tabindex="0"
                                 role="button"
-                                data-id="<?= (int)$linha['id'] ?>">
+                                data-id="<?= htmlspecialchars($chave, ENT_QUOTES, 'UTF-8') ?>">
                                 <td class="text-end text-secondary pe-1"><?= $i + 1 ?></td>
                                 <td class="fw-semibold"><?= htmlspecialchars($nome, ENT_QUOTES, 'UTF-8') ?></td>
                                 <td><?= htmlspecialchars((string)($linha['matricula'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
-                                <td><?= htmlspecialchars((string)($linha['nome_curso'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
+                                <td><?= $anualDesde !== '' ? '** ' : '' ?><?= htmlspecialchars((string)($linha['nome_curso'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
                                 <td class="text-end">
                                     <code><?= htmlspecialchars($fmtPct($linha['frequencia'] ?? null), ENT_QUOTES, 'UTF-8') ?></code>
                                 </td>
@@ -186,6 +203,10 @@ $fmtPct = static function ($valor): string {
             </div>
             <p class="small text-secondary px-3 py-2 mb-0 border-top">
                 * A frequência é o percentual de presença em relação ao número de aulas ministradas.
+                <?php if ($desdeAnual !== ''): ?>
+                    <br>** Curso integrado ao ensino médio. Como o curso é anual, a frequência
+                    considera todo o ano letivo, desde <?= htmlspecialchars($desdeAnual, ENT_QUOTES, 'UTF-8') ?>.
+                <?php endif; ?>
             </p>
         </div>
     </div>
@@ -305,6 +326,8 @@ $fmtPct = static function ($valor): string {
             const ingresso = valorOu('---', dados.ingresso);
             const curso = valorOu('---', dados.curso);
             const periodo = valorOu('---', dados.periodo);
+            const anualDesde = String(dados.anual_desde || '').trim();
+            const rotuloPeriodo = anualDesde !== '' ? 'Ano letivo' : periodo;
 
             texto.textContent =
                 'Frequência do(a) aluno(a) '
@@ -315,8 +338,9 @@ $fmtPct = static function ($valor): string {
                 + ingresso
                 + ', no curso '
                 + curso
-                + ', no semestre letivo '
-                + periodo
+                + (anualDesde !== ''
+                    ? ', no ano letivo, desde ' + anualDesde
+                    : ', no semestre letivo ' + periodo)
                 + ':';
 
             tbody.innerHTML = '';
@@ -324,7 +348,7 @@ $fmtPct = static function ($valor): string {
             discs.forEach(function (d) {
                 const tr = document.createElement('tr');
                 tr.innerHTML =
-                    '<td>' + escapeHtml(periodo) + '</td>' +
+                    '<td>' + escapeHtml(rotuloPeriodo) + '</td>' +
                     '<td>' + (d.codigo
                         ? '<code>' + escapeHtml(d.codigo) + '</code>'
                         : '<span class="text-secondary">—</span>') + '</td>' +

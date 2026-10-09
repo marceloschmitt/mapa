@@ -96,10 +96,10 @@ chamada (frequência nula).
 ### `sincronizar_passe_livre_semestre_atual.py`
 Espelha o semestre corrente (`api_periodo_letivo`) nas tabelas
 `passe_livre_aluno_curso` / `passe_livre_disciplina`, a partir de
-`tabela_frequencia.json`. Permite que o relatório de frequência anual enxergue
-o semestre atual sem depender da geração manual de passe livre (que só cobre
-semestres anteriores). Também é chamado automaticamente após
-`analisar_frequencia.py` dentro do pipeline.
+`tabela_frequencia.json`, sem depender da geração manual de passe livre (que só
+cobre semestres anteriores). Também é chamado automaticamente após
+`analisar_frequencia.py` dentro do pipeline. A tela Frequência corrente não usa
+essa cópia: lê a última coleta (`frequencia_curso` e `frequencia_disciplina`).
 
 ### `importar_frequencia.py`
 Importa `tabela_frequencia.json` para o SQLite: cria uma nova coleta e popula

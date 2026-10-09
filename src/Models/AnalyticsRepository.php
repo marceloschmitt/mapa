@@ -2285,6 +2285,121 @@ class AnalyticsRepository
     }
 
     /**
+     * Alunos/cursos da coleta para a tela Frequencia corrente (ordem alfabetica).
+     * Inclui quem so tem disciplinas (sem aulas registradas: frequencia nula).
+     * Integrados com frequencia anual trazem frequencia_desde preenchido.
+     *
+     * @param list<int>|null $cursoIds
+     * @return list<array<string, mixed>>
+     */
+    public function linhasFrequenciaCorrente(int $coletaId, ?array $cursoIds = null, string $nome = ''): array
+    {
+        if ($cursoIds !== null && $cursoIds === []) {
+            return [];
+        }
+
+        $sql = 'SELECT v.aluno_id, v.curso_id, a.login, a.matricula, a.nome, a.nome_social,
+                       c.nome_curso, fc.percentual_frequencia AS frequencia, fc.frequencia_desde,
+                       ac.ano_semestre_ingresso
+                FROM (
+                    SELECT aluno_id, curso_id FROM frequencia_curso WHERE coleta_id = :coleta_curso
+                    UNION
+                    SELECT aluno_id, curso_id FROM frequencia_disciplina WHERE coleta_id = :coleta_disciplina
+                ) v
+                INNER JOIN alunos a ON a.id = v.aluno_id
+                INNER JOIN cursos c ON c.id = v.curso_id
+                LEFT JOIN frequencia_curso fc
+                  ON fc.coleta_id = :coleta_frequencia AND fc.aluno_id = v.aluno_id AND fc.curso_id = v.curso_id
+                LEFT JOIN aluno_cursos ac
+                  ON ac.aluno_id = v.aluno_id AND ac.curso_id = v.curso_id
+                WHERE 1 = 1';
+        $params = [
+            'coleta_curso' => $coletaId,
+            'coleta_disciplina' => $coletaId,
+            'coleta_frequencia' => $coletaId,
+        ];
+
+        [$sql, $cursoParams] = $this->appendCursoFilter($sql, $cursoIds, 'v.curso_id');
+
+        $nome = trim($nome);
+        if ($nome !== '') {
+            $sql .= ' AND (
+                        a.nome LIKE :nome_filtro COLLATE NOCASE
+                        OR IFNULL(a.nome_social, \'\') LIKE :nome_filtro_social COLLATE NOCASE
+                      )';
+            $padrao = '%' . str_replace(['%', '_'], '', $nome) . '%';
+            $params['nome_filtro'] = $padrao;
+            $params['nome_filtro_social'] = $padrao;
+        }
+
+        $statement = $this->db->prepare($sql);
+        $this->bindNamedParams($statement, $cursoParams);
+        $this->bindNamedParams($statement, $params);
+        $statement->execute();
+
+        return $this->ordenarAlfabeticoPt($statement->fetchAll(), static function (array $row): array {
+            $nomeSocial = trim((string)($row['nome_social'] ?? ''));
+            $nome = $nomeSocial !== ''
+                ? $nomeSocial
+                : trim((string)($row['nome'] ?? ''));
+
+            return [
+                $nome,
+                trim((string)($row['nome_curso'] ?? '')),
+                trim((string)($row['matricula'] ?? '')),
+            ];
+        });
+    }
+
+    /**
+     * Disciplinas da coleta por aluno/curso (chave "aluno_id-curso_id"), em ordem alfabetica.
+     *
+     * @param list<int> $alunoIds
+     * @return array<string, list<array<string, mixed>>>
+     */
+    public function disciplinasFrequenciaCorrente(int $coletaId, array $alunoIds): array
+    {
+        if ($alunoIds === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = ['coleta' => $coletaId];
+        foreach (array_values(array_unique($alunoIds)) as $i => $id) {
+            $key = 'aluno_' . $i;
+            $placeholders[] = ':' . $key;
+            $params[$key] = (int)$id;
+        }
+
+        $sql = 'SELECT fd.aluno_id, fd.curso_id, fd.codigo_disciplina,
+                       ' . $this->sqlNomeDisciplina('fd.disciplina', 'fd.codigo_disciplina', 'fd.curso_id') . ' AS disciplina,
+                       fd.percentual_frequencia AS frequencia, fd.situacao, fd.data_trancamento
+                FROM frequencia_disciplina fd
+                WHERE fd.coleta_id = :coleta
+                  AND fd.aluno_id IN (' . implode(', ', $placeholders) . ')';
+
+        $statement = $this->db->prepare($sql);
+        $this->bindNamedParams($statement, $params);
+        $statement->execute();
+
+        $mapa = [];
+        foreach ($statement->fetchAll() as $row) {
+            $mapa[$row['aluno_id'] . '-' . $row['curso_id']][] = $row;
+        }
+
+        foreach ($mapa as $chave => $linhas) {
+            $mapa[$chave] = $this->ordenarAlfabeticoPt($linhas, static function (array $row): array {
+                return [
+                    trim((string)($row['disciplina'] ?? '')),
+                    trim((string)($row['codigo_disciplina'] ?? '')),
+                ];
+            });
+        }
+
+        return $mapa;
+    }
+
+    /**
      * Metadados da carga de passe livre de um semestre.
      *
      * @return array<string, mixed>|null

@@ -106,5 +106,30 @@ verificar(
     $criticas
 );
 
+echo "== Frequência corrente\n";
+// Aluno 6 ainda sem aulas registradas: só disciplina, sem frequencia_curso.
+$insAluno->execute([6, 'a6', 'm6', 'Aluno 6']);
+$insDisc->execute([6, 2, null]);
+$corrente = [];
+foreach ($repo->linhasFrequenciaCorrente(1) as $linha) {
+    $corrente[(int)$linha['aluno_id']] = [$linha['frequencia'], $linha['frequencia_desde']];
+}
+ksort($corrente);
+verificar('lê a coleta: integrados com o ano, sem aulas com frequência nula', [
+    1 => [60.0, '2026-02-15'],
+    2 => [60.0, '2026-02-15'],
+    3 => [50.0, null],
+    4 => [50.0, null],
+    5 => [90.0, '2026-02-15'],
+    6 => [null, null],
+], $corrente);
+verificar('filtro de curso', [3, 4, 6], array_map(
+    static fn(array $l): int => (int)$l['aluno_id'],
+    $repo->linhasFrequenciaCorrente(1, [2])
+));
+$disciplinas = $repo->disciplinasFrequenciaCorrente(1, [1, 6]);
+verificar('disciplinas por aluno e curso', ['1-1', '6-2'], array_keys($disciplinas));
+verificar('percentual da disciplina', 60.0, $disciplinas['1-1'][0]['frequencia']);
+
 echo "\n{$total} verificações, {$falhas} falha(s).\n";
 exit($falhas > 0 ? 1 : 0);
