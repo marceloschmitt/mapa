@@ -14,6 +14,11 @@ $alarmeConfig = $alarmeConfig ?? [];
 $limiteFrequencia = (float)($alarmeConfig['frequencia_limite'] ?? 75);
 $rotuloLimite = View::rotuloLimite($limiteFrequencia);
 
+$anualDesde = \DateTimeImmutable::createFromFormat('!Y-m-d', (string)($frequenciaAnualDesde ?? ''));
+$notaAnual = $anualDesde !== false
+    ? '(anual) Cursos integrados: frequência do ano letivo, desde ' . $anualDesde->format('d/m/Y') . '.'
+    : '';
+
 $fusoHorario = new DateTimeZone('America/Sao_Paulo');
 $agora = new DateTimeImmutable('now', $fusoHorario);
 $hora = (int)$agora->format('G');
@@ -189,6 +194,9 @@ if ($coleta !== null) {
                     <div id="chartCursosWrap" class="chart-cursos-wrap">
                         <canvas id="chartCursos"></canvas>
                     </div>
+                    <?php if ($notaAnual !== ''): ?>
+                        <p class="small text-secondary mt-2 mb-0"><?= htmlspecialchars($notaAnual, ENT_QUOTES, 'UTF-8') ?></p>
+                    <?php endif; ?>
                 </div>
             </div>
         </div>
@@ -227,7 +235,10 @@ if ($coleta !== null) {
                     <span class="text-secondary fw-normal" id="criticasContador"></span>
                 <?php endif; ?>
             </h2>
-            <p class="small text-secondary mb-2">Cada linha é uma turma da disciplina no curso.</p>
+            <p class="small text-secondary mb-2">
+                Cada linha é uma turma da disciplina no curso.
+                <?= htmlspecialchars($notaAnual, ENT_QUOTES, 'UTF-8') ?>
+            </p>
             <div class="table-responsive">
                 <table class="table table-sm align-middle mb-0 small" id="tabelaCriticas">
                     <colgroup>
@@ -280,7 +291,12 @@ if ($coleta !== null) {
                                             </div>
                                         <?php endif; ?>
                                     </td>
-                                    <td><?= htmlspecialchars((string)$disc['nome_curso'], ENT_QUOTES, 'UTF-8') ?></td>
+                                    <td>
+                                        <?= htmlspecialchars((string)$disc['nome_curso'], ENT_QUOTES, 'UTF-8') ?>
+                                        <?php if (trim((string)($disc['frequencia_desde'] ?? '')) !== ''): ?>
+                                            <span class="text-secondary">(anual)</span>
+                                        <?php endif; ?>
+                                    </td>
                                     <td class="text-end text-nowrap"><?= htmlspecialchars((string)$disc['media'], ENT_QUOTES, 'UTF-8') ?></td>
                                     <td class="text-end text-nowrap"><?= (int)$disc['alunos'] ?></td>
                                     <td class="text-end text-nowrap"><?= (int)$disc['abaixo_limite'] ?></td>

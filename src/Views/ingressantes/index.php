@@ -9,6 +9,7 @@ $emailsZero = $emailsZero ?? [];
 $totalEmailsZero = count($emailsZero);
 $emailsZeroCsv = implode(', ', $emailsZero);
 $periodo = (string)($periodo ?? '');
+$periodoAnual = (string)($periodoAnual ?? '');
 $semSeletorCurso = !empty($semSeletorCurso);
 $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
 $cursosDisponiveis = $cursosDisponiveis ?? [];
@@ -32,6 +33,9 @@ $limiteFrequencia = (float)($alarmeConfig['frequencia_limite'] ?? 75);
         <p class="text-secondary mb-2">
             Alunos com ingresso em
             <strong><?= htmlspecialchars($periodo !== '' ? $periodo : '—', ENT_QUOTES, 'UTF-8') ?></strong>
+            <?php if ($periodoAnual !== ''): ?>
+                (integrados: <strong><?= htmlspecialchars($periodoAnual, ENT_QUOTES, 'UTF-8') ?></strong>, com frequência anual)
+            <?php endif; ?>
             e frequência do curso abaixo de <?= htmlspecialchars(View::rotuloLimite($limiteFrequencia), ENT_QUOTES, 'UTF-8') ?>%
             <?php if ($coleta !== null): ?>
                 (<?= htmlspecialchars(View::rotuloColeta($coleta), ENT_QUOTES, 'UTF-8') ?>).
@@ -134,6 +138,10 @@ $limiteFrequencia = (float)($alarmeConfig['frequencia_limite'] ?? 75);
                                     $percentualFmt = is_numeric($percentual)
                                         ? number_format((float)$percentual, 1, ',', '.') . '%'
                                         : '—';
+                                    $desde = \DateTimeImmutable::createFromFormat(
+                                        '!Y-m-d',
+                                        trim((string)($linha['frequencia_desde'] ?? ''))
+                                    );
                                     ?>
                                     <tr>
                                         <td class="fw-semibold"><?= htmlspecialchars($nome, ENT_QUOTES, 'UTF-8') ?></td>
@@ -142,6 +150,11 @@ $limiteFrequencia = (float)($alarmeConfig['frequencia_limite'] ?? 75);
                                         <td><?= $turma !== '' ? htmlspecialchars($turma, ENT_QUOTES, 'UTF-8') : '—' ?></td>
                                         <td class="text-end fw-semibold text-danger">
                                             <?= htmlspecialchars($percentualFmt, ENT_QUOTES, 'UTF-8') ?>
+                                            <?php if ($desde !== false): ?>
+                                                <div class="small fw-normal text-secondary">
+                                                    anual, desde <?= htmlspecialchars($desde->format('d/m/Y'), ENT_QUOTES, 'UTF-8') ?>
+                                                </div>
+                                            <?php endif; ?>
                                         </td>
                                     </tr>
                                 <?php endforeach; ?>

@@ -85,7 +85,8 @@ if (!function_exists('mapaPercentualFrequenciaAlarme')) {
             $detalhe = json_decode($raw, true);
             if (is_array($detalhe) && isset($detalhe['percentual_frequencia'])
                 && is_numeric($detalhe['percentual_frequencia'])) {
-                return number_format((float)$detalhe['percentual_frequencia'], 1, '.', '') . '%';
+                return number_format((float)$detalhe['percentual_frequencia'], 1, '.', '') . '%'
+                    . (!empty($detalhe['frequencia_desde']) ? ' (anual)' : '');
             }
         }
 

@@ -447,10 +447,12 @@ def gerar_percentual_baixo(
             primeira = date.fromisoformat(str(primeira_txt)[:10])
         except ValueError:
             continue
+        desde = None
         desde_txt = str(row["frequencia_desde"] or "").strip()
         if desde_txt:
             try:
-                primeira = min(primeira, date.fromisoformat(desde_txt[:10]))
+                desde = date.fromisoformat(desde_txt[:10])
+                primeira = min(primeira, desde)
             except ValueError:
                 pass
 
@@ -472,6 +474,8 @@ def gerar_percentual_baixo(
                 "carencia_semanas": carencia,
             },
         )
+        if desde is not None:
+            mensagem += f", no ano letivo desde {desde:%d/%m/%Y}"
         inserir_alarme(
             cursor,
             coleta_id=coleta_id,

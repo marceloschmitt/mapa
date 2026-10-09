@@ -75,6 +75,7 @@ class IngressantesController extends Controller
         $this->render('ingressantes/index', [
             'coleta' => $coleta,
             'periodo' => $periodo,
+            'periodoAnual' => AnalyticsRepository::periodoIngressoAnual($periodo),
             'porCurso' => array_values($porCurso),
             'totalAlunos' => count($alunosUnicos),
             'totalCursos' => count($porCurso),

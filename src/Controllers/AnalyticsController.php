@@ -80,6 +80,7 @@ class AnalyticsController extends Controller
         }
 
         $coletaId = (int)$coleta['id'];
+        $dadosBase['frequenciaAnualDesde'] = $repo->frequenciaAnualDesde($coletaId);
 
         // Professor sem disciplinas: nao vaza demais dados do campus, mas
         // mantem o comparativo de frequencia media por curso (como o admin).

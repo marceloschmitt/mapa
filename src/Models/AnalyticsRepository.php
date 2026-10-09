@@ -8,6 +8,18 @@ use PDO;
 
 class AnalyticsRepository
 {
+    /**
+     * Cursos com frequencia anual (integrados) na coleta: fa.frequencia_desde.
+     * Requer o parametro :coleta_anual e o alias f.curso_id na consulta.
+     */
+    private const SQL_FREQUENCIA_ANUAL_CURSO = 'LEFT JOIN (
+                SELECT curso_id, MIN(frequencia_desde) AS frequencia_desde
+                FROM frequencia_curso
+                WHERE coleta_id = :coleta_anual
+                  AND frequencia_desde IS NOT NULL
+                GROUP BY curso_id
+             ) fa ON fa.curso_id = f.curso_id';
+
     /** @var PDO */
     private $db;
 
@@ -68,6 +80,22 @@ class AnalyticsRepository
         $row = $statement->fetch();
 
         return $row !== false ? $row : null;
+    }
+
+    /**
+     * Inicio do ano letivo dos cursos com frequencia anual na coleta (AAAA-MM-DD), ou null.
+     */
+    public function frequenciaAnualDesde(int $coletaId): ?string
+    {
+        $statement = $this->db->prepare(
+            'SELECT MIN(frequencia_desde) FROM frequencia_curso
+             WHERE coleta_id = :coleta_id AND frequencia_desde IS NOT NULL'
+        );
+        $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $statement->execute();
+        $desde = $statement->fetchColumn();
+
+        return is_string($desde) && $desde !== '' ? $desde : null;
     }
 
     /** @return array<string, int|float> */
@@ -222,18 +250,21 @@ class AnalyticsRepository
         [$sql, $params] = $this->appendCursoFilter(
             'SELECT c.id AS curso_id,
                     c.nome_curso,
+                    fa.frequencia_desde,
                     ROUND(AVG(f.percentual_frequencia), 1) AS media
              FROM frequencia_disciplina f
              INNER JOIN cursos c ON c.id = f.curso_id
+             ' . self::SQL_FREQUENCIA_ANUAL_CURSO . '
              WHERE f.coleta_id = :coleta_id
                AND f.percentual_frequencia IS NOT NULL',
             $cursoIds,
             'f.curso_id'
         );
-        $sql .= ' GROUP BY c.id, c.nome_curso ORDER BY media ASC';
+        $sql .= ' GROUP BY c.id, c.nome_curso, fa.frequencia_desde ORDER BY media ASC';
 
         $statement = $this->db->prepare($sql);
         $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $statement->bindValue('coleta_anual', $coletaId, PDO::PARAM_INT);
         $this->bindCursoParams($statement, $params);
         $statement->execute();
 
@@ -241,7 +272,8 @@ class AnalyticsRepository
         $values = [];
         $ids = [];
         foreach ($statement->fetchAll() as $row) {
-            $labels[] = (string)$row['nome_curso'];
+            $labels[] = (string)$row['nome_curso']
+                . (trim((string)($row['frequencia_desde'] ?? '')) !== '' ? ' (anual)' : '');
             $values[] = (float)$row['media'];
             $ids[] = (int)$row['curso_id'];
         }
@@ -407,12 +439,14 @@ class AnalyticsRepository
             'SELECT f.codigo_disciplina, f.disciplina, f.curso_id, c.nome_curso,
                     f.id_turma, COALESCE(t.nome_turma, \'\') AS nome_turma,
                     g.semestre_oferta,
+                    fa.frequencia_desde,
                     ROUND(AVG(f.percentual_frequencia), 1) AS media,
                     COUNT(*) AS alunos,
                     SUM(CASE WHEN f.percentual_frequencia < :limite_frequencia THEN 1 ELSE 0 END)
                         AS abaixo_limite
              FROM frequencia_disciplina f
              INNER JOIN cursos c ON c.id = f.curso_id
+             ' . self::SQL_FREQUENCIA_ANUAL_CURSO . '
              LEFT JOIN turmas t ON t.id_turma = f.id_turma
              LEFT JOIN disciplina_grade g
                ON g.codigo_disciplina = f.codigo_disciplina
@@ -423,7 +457,7 @@ class AnalyticsRepository
             'f.curso_id'
         );
         $sql .= ' GROUP BY f.codigo_disciplina, f.disciplina, f.curso_id, c.id, c.nome_curso,
-                           f.id_turma, t.nome_turma, g.semestre_oferta
+                           f.id_turma, t.nome_turma, g.semestre_oferta, fa.frequencia_desde
              HAVING abaixo_limite > 0
              ORDER BY media ASC, abaixo_limite DESC, f.codigo_disciplina ASC, nome_turma ASC';
 
@@ -433,6 +467,7 @@ class AnalyticsRepository
 
         $statement = $this->db->prepare($sql);
         $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $statement->bindValue('coleta_anual', $coletaId, PDO::PARAM_INT);
         $statement->bindValue('limite_frequencia', $this->limiteFrequencia());
         $this->bindCursoParams($statement, $params);
         if ($limite !== null) {
@@ -1823,7 +1858,20 @@ class AnalyticsRepository
     }
 
     /**
-     * Ingressantes do periodo com frequencia do curso abaixo do limite configurado.
+     * Periodo de ingresso dos cursos anuais (integrados) no ano do periodo: 2026/2 -> 2026/0.
+     */
+    public static function periodoIngressoAnual(string $periodo): ?string
+    {
+        if (preg_match('/^(\d{4})\/\d$/', trim($periodo), $m) !== 1) {
+            return null;
+        }
+
+        return $m[1] . '/0';
+    }
+
+    /**
+     * Ingressantes do periodo (e integrados do ano, AAAA/0) com frequencia do
+     * curso abaixo do limite configurado.
      *
      * @param list<int>|null $cursoIds
      * @param list<string>|null $codigosDisciplina
@@ -1858,14 +1906,15 @@ class AnalyticsRepository
                        fc.percentual_frequencia,
                        fc.horarios,
                        fc.ausencias,
-                       fc.presencas
+                       fc.presencas,
+                       fc.frequencia_desde
                 FROM frequencia_curso fc
                 INNER JOIN alunos a ON a.id = fc.aluno_id
                 INNER JOIN cursos c ON c.id = fc.curso_id
                 INNER JOIN aluno_cursos ac
                         ON ac.aluno_id = fc.aluno_id AND ac.curso_id = fc.curso_id
                 WHERE fc.coleta_id = :coleta_id
-                  AND ac.ano_semestre_ingresso = :periodo
+                  AND ac.ano_semestre_ingresso IN (:periodo, :periodo_anual)
                   AND fc.percentual_frequencia IS NOT NULL
                   AND fc.percentual_frequencia < :limite_frequencia';
 
@@ -1900,6 +1949,11 @@ class AnalyticsRepository
         $statement = $this->db->prepare($sql);
         $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
         $statement->bindValue('periodo', $periodoIngresso, PDO::PARAM_STR);
+        $statement->bindValue(
+            'periodo_anual',
+            self::periodoIngressoAnual($periodoIngresso) ?? $periodoIngresso,
+            PDO::PARAM_STR
+        );
         $statement->bindValue('limite_frequencia', $this->limiteFrequencia());
         $this->bindNamedParams($statement, $cursoParams);
         $this->bindNamedParams($statement, $discParams);
