@@ -25,6 +25,7 @@ CHAVES_API = (
     "frequencia_data_inicial",
     "frequencia_data_final",
     "data_referencia",
+    "integrados_data_inicio",
 )
 
 

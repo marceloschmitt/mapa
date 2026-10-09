@@ -12,7 +12,18 @@ $periodoLetivo = (string)($config['periodo_letivo'] ?? '');
 $dataInicial = (string)($config['frequencia_data_inicial'] ?? '');
 $dataFinal = (string)($config['frequencia_data_final'] ?? '');
 $dataReferencia = (string)($config['data_referencia'] ?? 'hoje-2');
+$integradosInicio = (string)($config['integrados_data_inicio'] ?? '');
+$integradosAnual = $integradosAnual ?? null;
 $temClientSecret = !empty($temClientSecret);
+
+$formatarDataIso = static function (string $data): string {
+    $ts = strtotime($data);
+    return $ts !== false ? date('d/m/Y', $ts) : $data;
+};
+$formatarDataHora = static function (string $data): string {
+    $ts = strtotime($data);
+    return $ts !== false ? date('d/m/Y H:i', $ts) : $data;
+};
 
 if ($dataInicial === '') {
     $dataInicial = '01-01-2026';
@@ -143,6 +154,20 @@ if ($dataFinal === '') {
                 <div class="form-text"><code>hoje-2</code> ou data <code>DD-MM-AAAA</code>.</div>
             </div>
 
+            <div class="col-md-4">
+                <label for="integrados_data_inicio" class="form-label">Início do ano letivo dos integrados</label>
+                <input type="text"
+                       class="form-control"
+                       id="integrados_data_inicio"
+                       name="integrados_data_inicio"
+                       value="<?= htmlspecialchars($integradosInicio, ENT_QUOTES, 'UTF-8') ?>"
+                       placeholder="02-03-2026">
+                <div class="form-text">
+                    <code>DD-MM-AAAA</code>. Os integrados ao ensino médio são anuais: os meses entre esta data
+                    e a Data inicial são buscados à parte (quadro abaixo).
+                </div>
+            </div>
+
             <div class="col-12">
                 <label for="api_url_matriculados" class="form-label">URL matriculados <span class="text-danger">*</span></label>
                 <textarea class="form-control font-monospace"
@@ -214,6 +239,65 @@ if ($dataFinal === '') {
                 <button type="submit" class="btn btn-primary">Salvar configurações</button>
             </div>
         </form>
+    </div>
+</div>
+
+<div class="card border-0 shadow-sm mt-4">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-start gap-3">
+            <div>
+                <h2 class="h6 mb-1">Frequência anual dos integrados — meses encerrados</h2>
+                <p class="small text-secondary mb-0" style="max-width: 640px;">
+                    Busca na API a frequência dos integrados entre o início do ano letivo e a véspera da Data inicial,
+                    em blocos de até 2 meses. Roda fora da coleta e leva alguns minutos; repita só para pegar
+                    correções de chamadas antigas.
+                </p>
+            </div>
+            <form method="post" action="<?= htmlspecialchars(url('/configuracoes/api/integrados-anual'), ENT_QUOTES, 'UTF-8') ?>">
+                <button type="submit" class="btn btn-outline-primary btn-sm"
+                        <?= $integradosInicio === '' ? 'disabled title="Preencha e salve o início do ano letivo dos integrados."' : '' ?>>
+                    Buscar meses encerrados
+                </button>
+            </form>
+        </div>
+
+        <?php if ($integradosAnual === null): ?>
+            <p class="small text-secondary mb-0 mt-3">Nenhuma busca gravada para o ano configurado.</p>
+        <?php else: ?>
+            <p class="small mb-2 mt-3">
+                Última busca em <strong><?= htmlspecialchars($formatarDataHora($integradosAnual['executado_em']), ENT_QUOTES, 'UTF-8') ?></strong>,
+                cobrindo <?= htmlspecialchars($formatarDataIso($integradosAnual['data_inicial']), ENT_QUOTES, 'UTF-8') ?>
+                a <?= htmlspecialchars($formatarDataIso($integradosAnual['data_final']), ENT_QUOTES, 'UTF-8') ?>.
+            </p>
+            <?php if ($integradosAnual['erros'] !== []): ?>
+                <div class="alert alert-warning small py-2 mb-2">
+                    <?php foreach ($integradosAnual['erros'] as $erroBloco): ?>
+                        <div><?= htmlspecialchars($erroBloco, ENT_QUOTES, 'UTF-8') ?></div>
+                    <?php endforeach; ?>
+                </div>
+            <?php endif; ?>
+            <table class="table table-sm small mb-0" style="max-width: 640px;">
+                <thead class="table-light">
+                    <tr>
+                        <th>Período</th>
+                        <th class="text-end">Vínculos de integrados</th>
+                        <th>Consultado em</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    <?php foreach ($integradosAnual['blocos'] as $bloco): ?>
+                        <tr>
+                            <td>
+                                <?= htmlspecialchars($formatarDataIso($bloco['data_inicial']), ENT_QUOTES, 'UTF-8') ?>
+                                a <?= htmlspecialchars($formatarDataIso($bloco['data_final']), ENT_QUOTES, 'UTF-8') ?>
+                            </td>
+                            <td class="text-end"><?= (int)$bloco['vinculos'] ?></td>
+                            <td><?= htmlspecialchars($formatarDataHora($bloco['consultado_em']), ENT_QUOTES, 'UTF-8') ?></td>
+                        </tr>
+                    <?php endforeach; ?>
+                </tbody>
+            </table>
+        <?php endif; ?>
     </div>
 </div>
 

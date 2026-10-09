@@ -40,6 +40,7 @@ class AccessLogRepository
         '/usuarios/criar-professores' => 'Usuários — criar professores',
         '/configuracoes/ldap' => 'Configurações — LDAP',
         '/configuracoes/api' => 'Configurações — API',
+        '/configuracoes/api/integrados-anual' => 'Configurações — buscar integrados (ano)',
         '/configuracoes/email' => 'Configurações — e-mail',
         '/configuracoes/coordenacao' => 'Configurações — coordenação',
         '/configuracoes/feriados' => 'Configurações — feriados',

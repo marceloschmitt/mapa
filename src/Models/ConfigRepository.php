@@ -26,6 +26,7 @@ class ConfigRepository
     public const FREQUENCIA_DATA_INICIAL = 'frequencia_data_inicial';
     public const FREQUENCIA_DATA_FINAL = 'frequencia_data_final';
     public const DATA_REFERENCIA = 'data_referencia';
+    public const INTEGRADOS_DATA_INICIO = 'integrados_data_inicio';
 
     public const EMAIL_ENABLED = 'email_enabled';
     public const EMAIL_ALARMES_ENABLED = 'email_alarmes_enabled';
@@ -185,7 +186,8 @@ class ConfigRepository
      *   periodo_letivo: string,
      *   frequencia_data_inicial: string,
      *   frequencia_data_final: string,
-     *   data_referencia: string
+     *   data_referencia: string,
+     *   integrados_data_inicio: string
      * }
      */
     public function getApiConfig(): array
@@ -215,6 +217,7 @@ class ConfigRepository
             'frequencia_data_inicial' => $this->get(self::FREQUENCIA_DATA_INICIAL),
             'frequencia_data_final' => $this->get(self::FREQUENCIA_DATA_FINAL),
             'data_referencia' => $this->get(self::DATA_REFERENCIA, 'hoje-2'),
+            'integrados_data_inicio' => $this->get(self::INTEGRADOS_DATA_INICIO),
         ];
     }
 
@@ -231,6 +234,7 @@ class ConfigRepository
      *   frequencia_data_inicial: string,
      *   frequencia_data_final: string,
      *   data_referencia: string,
+     *   integrados_data_inicio: string,
      *   client_secret?: string|null
      * } $dados
      */
@@ -273,6 +277,11 @@ class ConfigRepository
             self::DATA_REFERENCIA,
             $dados['data_referencia'],
             'Data de referência dos alarmes (hoje-2 ou DD-MM-AAAA)'
+        );
+        $this->set(
+            self::INTEGRADOS_DATA_INICIO,
+            $dados['integrados_data_inicio'],
+            'Início do ano letivo dos cursos integrados (DD-MM-AAAA)'
         );
 
         if (array_key_exists('client_secret', $dados)

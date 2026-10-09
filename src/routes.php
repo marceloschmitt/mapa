@@ -66,6 +66,7 @@ return static function (Router $router): void {
     $router->post('/configuracoes/ldap', [LdapConfigController::class, 'save']);
     $router->get('/configuracoes/api', [ApiConfigController::class, 'form']);
     $router->post('/configuracoes/api', [ApiConfigController::class, 'save']);
+    $router->post('/configuracoes/api/integrados-anual', [ApiConfigController::class, 'buscarIntegradosAnual']);
     $router->get('/configuracoes/email', [EmailConfigController::class, 'form']);
     $router->post('/configuracoes/email', [EmailConfigController::class, 'save']);
     $router->get('/configuracoes/coordenacao', [CoordenacaoConfigController::class, 'form']);
