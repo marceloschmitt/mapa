@@ -272,8 +272,8 @@ class AnalyticsRepository
         $values = [];
         $ids = [];
         foreach ($statement->fetchAll() as $row) {
-            $labels[] = (string)$row['nome_curso']
-                . (trim((string)($row['frequencia_desde'] ?? '')) !== '' ? ' (anual)' : '');
+            $labels[] = (trim((string)($row['frequencia_desde'] ?? '')) !== '' ? '* ' : '')
+                . (string)$row['nome_curso'];
             $values[] = (float)$row['media'];
             $ids[] = (int)$row['curso_id'];
         }

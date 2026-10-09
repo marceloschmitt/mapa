@@ -94,7 +94,7 @@ echo "== Painel\n";
 verificar('início do ano letivo na coleta', '2026-02-15', $repo->frequenciaAnualDesde(1));
 $porCurso = $repo->frequenciaPorCurso(1);
 sort($porCurso['labels']);
-verificar('rótulo (anual) só no integrado', ['Integrado (anual)', 'Superior'], $porCurso['labels']);
+verificar('asterisco só no integrado', ['* Integrado', 'Superior'], $porCurso['labels']);
 $criticas = [];
 foreach ($repo->disciplinasCriticas(1, null) as $row) {
     $criticas[(string)$row['nome_curso']] = $row['frequencia_desde'];
