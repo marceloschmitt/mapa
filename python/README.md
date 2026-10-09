@@ -76,6 +76,20 @@ Comportamentos observados no endpoint `alunos` (set/2026):
   no modo mensal `frequencias` vem sempre `null` (testado `2026/1`, `2026/2`,
   `2026/0`, `2026`, sem período). No modo intervalo funcionam normalmente.
   O EJA integrado vem com nível `T` e funciona no mensal.
+- O endpoint de intervalo não filtra por nível; aceita `&status=ATIVO`. Para os
+  integrados, a frequência por disciplina é presenças / horários × 100 com 2
+  casas e a do curso, inteira (ambas arredondando meio para cima).
+
+**Frequência anual dos integrados:** a coleta consulta só o semestre. Os
+meses encerrados do ano letivo (de `integrados_data_inicio` até a véspera de
+`frequencia_data_inicial`) são buscados sob demanda pela tela Configuração da
+API → "Buscar meses encerrados" (`consulta_integrados_anual.py`) e gravados em
+`integrados_anual_AAAA.json`. A cada coleta, `analisar_frequencia.py` os soma
+ao semestre e `importar_frequencia.py` grava o resultado no banco
+(`frequencia_curso.frequencia_desde` = início do ano). Rode a busca de novo a
+cada troca de semestre dos integrados. Faltas consecutivas e passe livre
+continuam com o semestre. Detalhes em
+[`docs/banco-de-dados.md`](../docs/banco-de-dados.md#frequência-anual-dos-integrados).
 - Ausências abonadas não contam como falta (fora dos totais); justificadas contam
   em `percentual_frequencia_total` e na FREQUÊNCIA GLOBAL do modo mensal.
 
@@ -87,9 +101,9 @@ Comportamentos observados no endpoint `alunos` (set/2026):
 |---|----------|-----------|----|------|
 | 0 | `consulta_alunos_massa.py` | Consulta em massa (sem login), respostas cruas: cadastro e frequência por intervalo. | BD (`configuracoes` API) | `resposta_alunos_massa_cadastro.json`, `resposta_alunos_massa_intervalo.json` |
 | 1 | `consulta_inicial.py` | Matriculados do período corrente + 2 anteriores | BD (`configuracoes` API) | `resposta_matriculas.json`, `resposta_matriculas_AAAA_S.json` |
-| 2 | `analisar_frequencia.py` | Frequência (ATIVO/FORMANDO), com a turma do aluno em cada disciplina | `resposta_alunos_massa_intervalo.json`, `resposta_alunos_massa_cadastro.json`, `resposta_matriculas.json` | `tabela_frequencia.json` |
+| 2 | `analisar_frequencia.py` | Frequência (ATIVO/FORMANDO), com a turma do aluno em cada disciplina; integrados com o ano letivo somado | `resposta_alunos_massa_intervalo.json`, `resposta_alunos_massa_cadastro.json`, `resposta_matriculas.json`, `integrados_anual_AAAA.json` (opcional) | `tabela_frequencia.json` |
 | 2b | `sincronizar_passe_livre_semestre_atual.py` | Espelha o semestre atual (`api_periodo_letivo`) em `passe_livre_*` para frequência anual | `tabela_frequencia.json` | BD (`passe_livre_aluno_curso`, `passe_livre_disciplina`) |
-| 3 | `importar_frequencia.py` | Nova coleta no SQLite (alunos, frequência, faltas) | `tabela_frequencia.json`, `config/consultas.json` | BD (`coletas`, `alunos`, `frequencia_disciplina`, `faltas_dia`, …) |
+| 3 | `importar_frequencia.py` | Nova coleta no SQLite (alunos, frequência, faltas) | `tabela_frequencia.json`, `config/consultas.json` | BD (`coletas`, `alunos`, `frequencia_curso`, `frequencia_disciplina`, `faltas_dia`, …) |
 | 4 | `importar_trancados.py` | Alunos TRANCADO / TRANC. AUTOMÁTICO | `resposta_alunos_massa_cadastro.json` | BD (`alunos_trancados`) |
 | 5 | `importar_professores.py` | Cursos, docentes e vínculos por disciplina e por turma | `resposta_matriculas.json` | BD (`cursos`, `professores`, `disciplina_professores`, `turma_professores`) |
 | 6 | `importar_grade.py` | Turmas e datas de aula a partir de `turno_turma` | `resposta_matriculas.json` | BD (`turmas`, `turma_aulas`, `disciplina_grade`, `disciplina_aulas`) |
@@ -116,6 +130,8 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 | `periodo_letivo.py` | Períodos AAAA/S: validação, semestre anterior, sufixo de cache |
 | `turno_turma.py` | Expande intervalos de aula (usado por `importar_grade.py`) |
 | `ausencias_especiais.py` | Disciplinas trancadas/canceladas (`ausencias_especiais`), usado por `analisar_frequencia.py` e `gerar_passe_livre.py` |
+| `integrados_anual.py` | Valida `integrados_anual_AAAA.json` e soma os meses encerrados à frequência dos integrados (usado por `analisar_frequencia.py`) |
+| `consulta_integrados_anual.py` | Manual (Configuração da API → Buscar meses encerrados): meses encerrados do ano letivo dos integrados → `integrados_anual_AAAA.json`; log em `data/integrados_anual.log` |
 | `gerar_perda_vaga.py` | Manual (tela Perda de vaga → Gerar análise): candidatos a perda de vaga (2 semestres anteriores) → BD; usa `resposta_matriculas_AAAA_S.json` como cache |
 | `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência **mensal** (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`), sem JSON. Trancadas (`ausencias_especiais`) → `situacao`; % total do curso = valor da API. Não apaga o semestre atual. Opção `--semestres N` (padrão 3). |
 | `sincronizar_passe_livre_semestre_atual.py` | Coleta: grava o semestre de `api_periodo_letivo` (datas da frequência) em `passe_livre_*` a partir de `tabela_frequencia.json`. |
@@ -129,11 +145,15 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 Usam bancos SQLite temporários criados a partir do `schema.sql`; não tocam em `data/mapa.db`, não leem o `.env` e não chamam a API. Rodar na raiz do projeto:
 
 ```bash
-python3 -m unittest discover -v python/tests   # regras por turma no pipeline
+python3 -m unittest discover -v python/tests   # regras por turma e frequência anual no pipeline
 php tests/php/turmas_test.php                  # escopo do professor, críticas por turma, e-mail de chamada
+php tests/php/frequencia_anual_test.php        # integrados nos ingressantes e no painel
 ```
 
 | Arquivo | O que cobre |
 |---------|-------------|
 | `python/tests/test_turmas.py` | `id_turma` vindo das matrículas; turmas e professores da grade; chamada da turma (maior data entre os alunos) e herança do histórico quando a disciplina tem uma só turma no curso; alarme de 3 semanas com as aulas da turma; efeito dos contatos parando na última chamada da turma |
+| `python/tests/test_integrados_anual.py` | Busca dos meses encerrados (`consulta_integrados_anual.py`, API simulada): blocos de até 2 meses, só integrados, `&status=ATIVO`, nova tentativa mês a mês, versão anterior mantida quando um bloco falha |
+| `python/tests/test_frequencia_anual.py` | Soma do ano letivo (`integrados_anual.py`): arredondamento como a API, disciplinas casadas pela matrícula no componente, arquivo ausente ou com buraco; só integrados ganham `frequencia_anual`; importação grava o ano e `frequencia_desde` (faltas por dia seguem do semestre); alarme com carência do início do ano e mensagem "no ano letivo" |
 | `tests/php/turmas_test.php` | Turmas do usuário professor; alarmes, contagens e marcação restritos às turmas dele (sem turma identificada continua visível); disciplinas críticas uma linha por turma com os professores da turma; chave de envio do e-mail de chamada por turma, reconhecendo o envio antigo por disciplina |
+| `tests/php/frequencia_anual_test.php` | Ingressantes do semestre mais integrados do ano (AAAA/0) com `frequencia_desde`; rótulo "(anual)" no gráfico por curso e nas disciplinas críticas; início do ano letivo da coleta |

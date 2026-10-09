@@ -76,6 +76,12 @@ identificar a turma (`id_turma`) do aluno em cada disciplina, casando
 disciplinas saem sem turma e as etapas seguintes usam os dados por
 disciplina/curso.
 
+Integrados (`curso_nivel = N`): se `integrados_anual_AAAA.json` cobrir os
+meses encerrados do ano letivo (ver `integrados_anual.py`), cada registro
+integrado ganha `frequencia_anual` com o intervalo atual somado a esses meses.
+Os demais campos continuam sendo só do intervalo da coleta. Sem o arquivo, ou
+com o período incompleto, imprime um aviso e segue com o semestre.
+
 Diferenças em relação à tabela que era montada a partir da consulta individual
 por login (comparação de 01/10/2026): entram vínculos que a consulta individual
 perdia (frequência ou cursos vazios, ex.: Meio Ambiente Subsequente e mestrados)
@@ -92,8 +98,13 @@ semestres anteriores). Também é chamado automaticamente após
 
 ### `importar_frequencia.py`
 Importa `tabela_frequencia.json` para o SQLite: cria uma nova coleta e popula
-`alunos`, `frequencia_disciplina` (com `id_turma`), `faltas_dia`, entre
-outras. O JSON permanece como cache daquela coleta.
+`alunos`, `frequencia_curso`, `frequencia_disciplina` (com `id_turma`),
+`faltas_dia`, entre outras. O JSON permanece como cache daquela coleta.
+
+Registros com `frequencia_anual` (integrados) gravam os números do ano letivo
+em `frequencia_curso` e `frequencia_disciplina`, com
+`frequencia_curso.frequencia_desde` = início do ano. `faltas_dia` continua só
+com as faltas do intervalo da coleta.
 
 ### `importar_trancados.py`
 Lê `resposta_alunos_massa_cadastro.json` (consulta em massa), seleciona os
@@ -144,6 +155,11 @@ A carência e as semanas consecutivas usam as aulas da turma do aluno
 (`turma_aulas`); sem turma identificada, as da disciplina no curso
 (`disciplina_aulas`).
 
+Integrados com frequência anual (`frequencia_curso.frequencia_desde`): o
+percentual é o do ano letivo, a carência conta do início do ano e a mensagem
+termina com ", no ano letivo desde DD/MM/AAAA" (vale também para os e-mails).
+As regras de faltas consecutivas seguem com as faltas do semestre.
+
 Depois deste passo, `executar_coleta.py` ainda dispara três scripts PHP
 (fora do escopo deste diretório): envio de e-mails de chamadas em atraso e
 de alarmes para alunos/staff.
@@ -192,6 +208,16 @@ Faz o parse do campo `turno_turma` retornado pelo SIGAA (códigos de
 dia-da-semana + intervalo de datas) e expande cada intervalo nas datas
 efetivas de aula. Usado por `importar_grade.py`.
 
+### `integrados_anual.py`
+Frequência anual dos integrados. Lê `integrados_anual_AAAA.json` e só o aceita
+se os blocos cobrirem, sem buracos, de `integrados_data_inicio` até a véspera
+de `frequencia_data_inicial` (`carregar`). Soma os meses encerrados ao intervalo
+atual (`somar`): disciplinas casadas por `id_matricula_componente` (ou código),
+só as que o aluno tem no intervalo atual; o total do curso soma os totais de
+todos os períodos. Percentuais como a API: presenças / horários × 100,
+arredondando meio para cima (2 casas na disciplina, inteiro no curso). Usado por
+`analisar_frequencia.py`.
+
 ### `ausencias_especiais.py`
 Utilitários para o campo `ausencias_especiais.trancamento_cancelamento` da
 API: extrai o mapa código→data de trancamento/cancelamento de disciplina e
@@ -220,6 +246,17 @@ em `passe_livre_*` (não gera JSON), marca disciplinas trancadas via
 cargo de `sincronizar_passe_livre_semestre_atual.py`, que reaproveita
 `gravar_banco` e `validar_periodo` deste script). Acionado pela tela Passe
 livre → gerar.
+
+### `consulta_integrados_anual.py`
+Busca na API os meses encerrados do ano letivo dos integrados
+(`curso_nivel = N`): de `integrados_data_inicio` até a véspera de
+`frequencia_data_inicial`, na URL de frequência por intervalo com
+`&status=ATIVO`, em blocos de até 2 meses (limite de 60 s do Cloudflare). Se
+um bloco falhar, tenta mês a mês; se ainda faltar algum mês, mantém a versão
+anterior do bloco (se houver) e registra o erro. Guarda só os vínculos
+integrados em `integrados_anual_AAAA.json`. Acionado pela tela Configuração da
+API → "Buscar meses encerrados" (somente administradores; log em
+`data/integrados_anual.log`). Rodar a cada troca de semestre dos integrados.
 
 ### `gerar_efeito_contatos.py`
 Compara a taxa de faltas dos alunos contatados no semestre (e-mail automático
@@ -261,6 +298,8 @@ remove prefixos de iniciais que o Moodle cola no início do nome.
 | `periodo_letivo.py` | Módulo de apoio | Períodos AAAA/S: validação e semestres anteriores |
 | `turno_turma.py` | Módulo de apoio | Expande intervalos de aula do SIGAA |
 | `ausencias_especiais.py` | Módulo de apoio | Trancamento/cancelamento de disciplina (API) |
+| `integrados_anual.py` | Módulo de apoio | Soma os meses encerrados à frequência dos integrados |
+| `consulta_integrados_anual.py` | Manual (tela Configuração da API) | Busca os meses encerrados do ano letivo dos integrados |
 | `gerar_perda_vaga.py` | Manual (tela Perda de vaga) | Candidatos a perda de vaga |
 | `gerar_passe_livre.py` | Manual | Passe livre a partir da frequência mensal |
 | `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos) | Faltas antes e depois do contato com o aluno |

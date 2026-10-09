@@ -6,8 +6,10 @@ administrador quiser. Descrição dos scripts em
 [ARQUIVOS_PYTHON.md](ARQUIVOS_PYTHON.md); ordem do pipeline em
 [python/README.md](../python/README.md).
 
-As telas PHP não leem nenhum JSON de `data/json/`: tudo o que aparece no
-portal vem do SQLite. Os JSON são entrada/cache dos scripts Python.
+As telas PHP não leem JSON de `data/json/` para os dados de frequência: tudo o
+que aparece no portal vem do SQLite. Os JSON são entrada/cache dos scripts
+Python. A única exceção é o resumo de `integrados_anual_AAAA.json` na tela
+Configuração da API.
 
 `AAAA_S` = período letivo com `/` trocado por `_` (ex.: `2026/1` → `2026_1`).
 "Período atual" = `api_periodo_letivo` (Configurações → API).
@@ -23,6 +25,8 @@ portal vem do SQLite. Os JSON são entrada/cache dos scripts Python.
 | `tabela_frequencia.json` | `analisar_frequencia.py` | `sincronizar_passe_livre_semestre_atual.py`, `importar_frequencia.py` | **Periódico** |
 | `resposta_alunos_massa_cadastro.json` | `consulta_alunos_massa.py` | `importar_trancados.py`, `analisar_frequencia.py` | **Periódico** |
 | `resposta_alunos_massa_intervalo.json` | `consulta_alunos_massa.py` | `analisar_frequencia.py`, `importar_chamadas.py` | **Periódico** |
+| `integrados_anual_AAAA.json` | `consulta_integrados_anual.py` (tela Configuração da API → Buscar meses encerrados) | `analisar_frequencia.py`, tela Configuração da API (resumo) | **Sob demanda** (a cada troca de semestre) |
+
 \* Usa o arquivo como **cache**: se existir, não consulta a API para aquele
 período (a menos que rode com `--forcar`).
 
@@ -49,6 +53,8 @@ consulta_inicial.py
   │                                        │                              disciplina_grade, disciplina_aulas
   │                                        └─> importar_chamadas.py     (turma de cada aluno)
   └─ resposta_matriculas_AAAA_S.json           (cache de gerar_perda_vaga.py)
+
+integrados_anual_AAAA.json (sob demanda) ──> analisar_frequencia.py (integrados: soma o ano letivo)
 
 analisar_frequencia.py
   └─ tabela_frequencia.json ───────────────┬─> sincronizar_passe_livre_semestre_atual.py → passe_livre_* (período atual)
@@ -83,6 +89,12 @@ analisar_frequencia.py
 - **Telas que dependem dele (via BD):** Frequência, Alarmes, Disciplinas
   trancadas, Frequência corrente / passe livre do semestre atual, Analytics.
 - É intermediário: existe só para os imports seguintes.
+- **Integrados:** quando há `integrados_anual_AAAA.json` válido, cada vínculo
+  integrado ganha `frequencia_anual` (`desde`, `geral` e `disciplinas` por
+  código) com o intervalo atual somado aos meses encerrados. Só
+  `importar_frequencia.py` usa esse campo; os demais (`frequencia_geral`,
+  `disciplinas`, `dias_falta`) continuam sendo do intervalo da coleta, e é
+  deles que o passe livre do semestre atual lê.
 
 ### `resposta_alunos_massa_cadastro.json` (consulta em massa)
 - **Conteúdo:** resposta crua da URL alunos em massa — cadastro
@@ -108,6 +120,24 @@ analisar_frequencia.py
 - **Telas que dependem dele (via BD):** Chamadas e, via
   `tabela_frequencia.json`, as de frequência.
 
+### `integrados_anual_AAAA.json` (sob demanda)
+- **Conteúdo:** meses encerrados do ano letivo dos integrados
+  (`curso_nivel = N`), de `integrados_data_inicio` até a véspera de
+  `frequencia_data_inicial`. `AAAA` é o ano do início. Consultado na URL de
+  frequência por intervalo, com `&status=ATIVO`, em blocos de até 2 meses (o
+  Cloudflare corta respostas acima de 60 s); se um bloco falhar, tenta mês a
+  mês. Guarda só os vínculos integrados:
+  `{data_inicial, data_final, executado_em, erros, blocos: [{data_inicial, data_final, consultado_em, vinculos}]}`.
+- **Quando gerar:** a cada troca de semestre dos integrados (quando
+  `frequencia_data_inicial` muda), ou para corrigir frequência lançada depois
+  no SIGAA. Bloco que falhar mantém a versão anterior do mesmo período, se
+  houver, e fica listado em `erros`.
+- **Usado por:** `analisar_frequencia.py`, só se os blocos cobrirem o período
+  inteiro sem buracos; senão a coleta avisa e os integrados ficam só com o
+  semestre.
+- **Telas que dependem dele (via BD):** Ingressantes, Alarmes e Analytics
+  (percentual anual dos integrados).
+
 ---
 
 ## 3. Tarefas sob demanda (administrador)
@@ -117,6 +147,7 @@ Não rodam na coleta. Os resultados ficam no BD.
 | Tarefa | Como roda | Lê | Grava (JSON) | Grava (BD) | Quando rodar |
 |---|---|---|---|---|---|
 | Passe livre (semestres anteriores) | Tela Passe livre → gerar, ou `gerar_passe_livre.py` | `resposta_matriculas.json` (logins ATIVO/FORMANDO; senão última coleta no BD) + API mensal aluno por aluno | — | `passe_livre_aluno_curso`, `passe_livre_disciplina` | Início de semestre, ou quando houver correção de frequência no SIGAA |
+| Meses encerrados dos integrados | Tela Configuração da API → Buscar meses encerrados, ou `consulta_integrados_anual.py` (log em `data/integrados_anual.log`) | Configuração (`integrados_data_inicio`, `frequencia_data_inicial`, URL de intervalo) + API | `integrados_anual_AAAA.json` | — | A cada troca de semestre dos integrados |
 | Perda de vaga | `gerar_perda_vaga.py` (tela Perda de vaga → Gerar análise, ou CLI) | `resposta_matriculas.json` + `resposta_matriculas_AAAA_S.json` dos 2 anteriores (cache) | `resposta_matriculas_AAAA_S.json` se faltar | `perda_vaga_*` | Após fechamento de semestre |
 
 O semestre **atual** do passe livre / frequência corrente não depende de
@@ -135,3 +166,7 @@ O semestre **atual** do passe livre / frequência corrente não depende de
    (`tipo_frequencia=mensal`) devolve `frequencias: null` para cursos
    integrados (`curso_nivel = N`). Ver "Documentação da API" em
    [python/README.md](../python/README.md).
+3. **Frequência anual dos integrados desatualizada:** `integrados_anual_AAAA.json`
+   não é refeito pela coleta. Ao trocar `frequencia_data_inicial` (novo
+   semestre), rode de novo "Buscar meses encerrados"; até lá a coleta avisa que
+   o arquivo não cobre o período e os integrados ficam só com o semestre.

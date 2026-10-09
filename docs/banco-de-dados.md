@@ -34,6 +34,9 @@ erDiagram
     usuarios ||--o{ usuario_cursos : vincula
     cursos ||--o{ usuario_cursos : autorizado
     coletas ||--o{ frequencia_disciplina : contem
+    coletas ||--o{ frequencia_curso : contem
+    alunos ||--o{ frequencia_curso : possui
+    cursos ||--o{ frequencia_curso : agrupa
     coletas ||--o{ faltas_dia : contem
     coletas ||--o{ alarmes : gera
     alunos ||--o{ frequencia_disciplina : possui
@@ -137,6 +140,19 @@ erDiagram
         INTEGER id_turma FK
     }
 
+    frequencia_curso {
+        INTEGER id PK
+        INTEGER coleta_id FK
+        INTEGER aluno_id FK
+        INTEGER curso_id FK
+        INTEGER horarios
+        INTEGER ausencias
+        INTEGER presencas
+        REAL percentual_frequencia
+        TEXT data_inicio_aulas
+        TEXT frequencia_desde
+    }
+
     faltas_dia {
         INTEGER id PK
         INTEGER coleta_id FK
@@ -218,6 +234,11 @@ Chave/valor para parâmetros sensíveis do sistema (não ficam no `.env`).
 | `ldap_bind_dn` | DN do bind administrativo (opcional) |
 | `ldap_bind_password` | Senha do bind (nunca exibida no formulário) |
 | `ldap_user_attribute` | Atributo de login (`sAMAccountName`, `uid`, etc.) |
+
+**Chave da frequência anual** (tela `/configuracoes/api`, só administrador):
+`integrados_data_inicio` — início do ano letivo dos cursos integrados
+(`DD-MM-AAAA`). Vazia, os integrados ficam só com o semestre. Ver
+[Frequência anual dos integrados](#frequência-anual-dos-integrados).
 
 **Chaves das regras de alarme** (tela `/configuracoes/alarmes`, só administrador).
 Lidas pelo portal e por `python/gerar_alarmes.py` — sem elas valem os padrões da
@@ -468,6 +489,51 @@ Snapshot de frequência por disciplina em uma coleta.
 **Índices:** `idx_freq_percentual` em `percentual_frequencia`; `idx_frequencia_disciplina_turma` em `(coleta_id, id_turma)`.  
 **ON DELETE CASCADE** nas FKs para `coletas`, `alunos` e `cursos`.
 
+Nos integrados com frequência anual (`frequencia_curso.frequencia_desde`
+preenchido), `horarios`, `ausencias`, `presencas` e `percentual_frequencia`
+somam o ano letivo (ver [Frequência anual dos integrados](#frequência-anual-dos-integrados)).
+
+---
+
+### `frequencia_curso`
+
+Totais de frequência do aluno no curso em uma coleta.
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `id` | INTEGER | sim (PK) | Identificador |
+| `coleta_id` | INTEGER | sim (FK) | → `coletas.id` |
+| `aluno_id` | INTEGER | sim (FK) | → `alunos.id` |
+| `curso_id` | INTEGER | sim (FK) | → `cursos.id` |
+| `horarios` | INTEGER | sim | Horários no curso |
+| `ausencias` | INTEGER | sim | Ausências |
+| `presencas` | INTEGER | sim | Presenças |
+| `percentual_frequencia` | REAL | não | Percentual do curso (inteiro, como a API) |
+| `data_inicio_aulas` | TEXT | não | Matrícula atrasada: dia a partir do qual as aulas contam (ISO); nulo = desde o início |
+| `frequencia_desde` | TEXT | não | Integrados: início do ano letivo (ISO) quando os números somam o ano; nulo = só o intervalo da coleta |
+
+**Unique:** `(coleta_id, aluno_id, curso_id)`.  
+**ON DELETE CASCADE** nas FKs.
+
+#### Frequência anual dos integrados
+
+Os cursos integrados (`cursos.curso_nivel = N`, ingresso `AAAA/0`) são anuais,
+mas a coleta consulta só o intervalo do semestre (`frequencia_data_inicial` a
+`frequencia_data_final`). Os meses encerrados do ano letivo (de
+`integrados_data_inicio` até a véspera de `frequencia_data_inicial`) ficam em
+`data/json/integrados_anual_AAAA.json`, gerado sob demanda pela tela
+Configuração da API → "Buscar meses encerrados"
+(`python/consulta_integrados_anual.py`).
+
+A cada coleta, `analisar_frequencia.py` soma esses meses ao intervalo atual e
+`importar_frequencia.py` grava o resultado em `frequencia_curso` e
+`frequencia_disciplina`, com `frequencia_desde` = início do ano. Se o arquivo
+faltar ou não cobrir o período inteiro, a coleta avisa e o integrado fica só
+com o semestre (`frequencia_desde` nulo).
+
+Continuam só com o semestre: `faltas_dia` (regras de faltas consecutivas) e o
+passe livre / Frequência corrente (`passe_livre_*`).
+
 ---
 
 ### `faltas_dia`
@@ -525,6 +591,9 @@ Sinais de risco de evasão gerados a partir da coleta.
 | `frequencia_disciplina.coleta_id` | `coletas.id` | N:1 | CASCADE |
 | `frequencia_disciplina.aluno_id` | `alunos.id` | N:1 | CASCADE |
 | `frequencia_disciplina.curso_id` | `cursos.id` | N:1 | CASCADE |
+| `frequencia_curso.coleta_id` | `coletas.id` | N:1 | CASCADE |
+| `frequencia_curso.aluno_id` | `alunos.id` | N:1 | CASCADE |
+| `frequencia_curso.curso_id` | `cursos.id` | N:1 | CASCADE |
 | `faltas_dia.coleta_id` | `coletas.id` | N:1 | CASCADE |
 | `faltas_dia.aluno_id` | `alunos.id` | N:1 | CASCADE |
 | `faltas_dia.curso_id` | `cursos.id` | N:1 | CASCADE |
@@ -558,7 +627,7 @@ o valor padrão de cada parâmetro:
 
 | Tipo | Critério | Escopo típico |
 |------|----------|---------------|
-| `percentual_baixo` | Frequência abaixo do limite (75%) na disciplina, após a carência (3 semanas) da primeira aula da turma do aluno (`turma_aulas`; sem turma, `disciplina_aulas`); abaixo do limite crítico (50%) a severidade é `critico` | Por disciplina (com a turma) |
+| `percentual_baixo` | Frequência abaixo do limite (75%) na disciplina, após a carência (3 semanas) da primeira aula da turma do aluno (`turma_aulas`; sem turma, `disciplina_aulas`); abaixo do limite crítico (50%) a severidade é `critico`. Integrados com frequência anual: percentual do ano letivo, carência contada de `frequencia_desde` e mensagem terminada em ", no ano letivo desde DD/MM/AAAA" | Por disciplina (com a turma) |
 | `faltas_4dias` | Mínimo de dias úteis seguidos de falta (3) tocando a janela de dias úteis recentes (4); a partir de certo tamanho (4) vira `critico` | Por aluno/curso (agregado) |
 | `faltas_3semanas` | N semanas ISO consecutivas em que o aluno faltou em **todas** as aulas previstas da sua turma (`turma_aulas`; sem turma, `disciplina_aulas`); semana incompleta não conta; última falta dentro da janela de recência (7 dias); severidade configurável (`critico`) | Por disciplina (com a turma) |
 

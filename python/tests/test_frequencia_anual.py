@@ -17,6 +17,8 @@ from unittest import mock
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
 
 import analisar_frequencia  # noqa: E402
+import gerar_alarmes  # noqa: E402
+import importar_frequencia  # noqa: E402
 import integrados_anual as ia  # noqa: E402
 from db import garantir_schema  # noqa: E402
 
@@ -171,12 +173,97 @@ class AnalisarTest(unittest.TestCase):
         self.assertNotIn("frequencia_anual", resultado[0])
 
 
+def banco() -> sqlite3.Connection:
+    conn = sqlite3.connect(":memory:")
+    conn.row_factory = sqlite3.Row
+    conn.execute("PRAGMA foreign_keys = ON")
+    garantir_schema(conn)
+    return conn
+
+
 class SchemaTest(unittest.TestCase):
     def test_coluna_frequencia_desde(self):
-        conn = sqlite3.connect(":memory:")
-        garantir_schema(conn)
+        conn = banco()
+        self.addCleanup(conn.close)
         colunas = {linha[1] for linha in conn.execute("PRAGMA table_info(frequencia_curso)")}
         self.assertIn("frequencia_desde", colunas)
+
+
+class ImportarTest(unittest.TestCase):
+    def importar(self, nivel: str) -> sqlite3.Connection:
+        atual = vinculo([disciplina("MAT", 10, 20, 2)], nivel=nivel)
+        atual["disciplinas"][0]["ausencias"] = ["10/08/2026", "11/08/2026"]
+        anteriores = {("aluno1", "2026000001"): [vinculo([disciplina("MAT", 10, 40, 10)])]}
+        registros = analisar_frequencia.montar_resultado([atual], {}, {}, INICIO, anteriores)
+        conn = banco()
+        self.addCleanup(conn.close)
+
+        def criar_coleta(cursor, _total):
+            cursor.execute("INSERT INTO coletas (id) VALUES (1)")
+            return 1
+
+        # criar_coleta le as datas pelo db.conectar (banco real); aqui fica so em memoria.
+        with mock.patch.object(importar_frequencia, "conectar", return_value=conn), \
+                mock.patch.object(importar_frequencia, "criar_coleta", criar_coleta):
+            importar_frequencia.importar(registros)
+        return conn
+
+    def test_integrado_grava_o_ano_letivo(self):
+        conn = self.importar("N")
+        curso = conn.execute(
+            "SELECT horarios, ausencias, percentual_frequencia, frequencia_desde FROM frequencia_curso"
+        ).fetchone()
+        self.assertEqual(tuple(curso), (60, 12, 80.0, "2026-02-15"))
+        disc = conn.execute(
+            "SELECT horarios, ausencias, presencas, percentual_frequencia FROM frequencia_disciplina"
+        ).fetchone()
+        self.assertEqual(tuple(disc), (60, 12, 48, 80.0))
+        self.assertEqual(conn.execute("SELECT COUNT(*) FROM faltas_dia").fetchone()[0], 2)
+
+    def test_outros_niveis_ficam_com_o_semestre(self):
+        conn = self.importar("G")
+        curso = conn.execute("SELECT horarios, frequencia_desde FROM frequencia_curso").fetchone()
+        self.assertEqual(tuple(curso), (20, None))
+        self.assertEqual(conn.execute("SELECT horarios FROM frequencia_disciplina").fetchone()[0], 20)
+
+
+class AlarmePercentualAnualTest(unittest.TestCase):
+    """Semestre comeca em 03/08; em 10/08 a carencia de 3 semanas so passou para o ano letivo."""
+
+    CONFIG = {
+        "frequencia_ativo": True,
+        "frequencia_limite": 75,
+        "frequencia_limite_critico": 50,
+        "frequencia_carencia_semanas": 3,
+        "frequencia_mensagem": "Frequência {percentual}% (abaixo de {limite}%)",
+    }
+
+    def test_carencia_e_mensagem_do_ano_letivo(self):
+        conn = banco()
+        self.addCleanup(conn.close)
+        cur = conn.cursor()
+        cur.execute("INSERT INTO coletas (id) VALUES (1)")
+        cur.execute("INSERT INTO cursos (id, nome_curso) VALUES (1, 'Integrado')")
+        cur.executemany("INSERT INTO alunos (id, login, matricula, nome) VALUES (?, ?, ?, ?)",
+                        [(1, "a1", "1", "Anual"), (2, "a2", "2", "Semestre")])
+        cur.execute("INSERT INTO disciplina_aulas (codigo_disciplina, curso_id, data_aula) "
+                    "VALUES ('MAT', 1, '2026-08-03')")
+        for aluno, desde in ((1, "2026-02-15"), (2, None)):
+            cur.execute("INSERT INTO frequencia_curso (coleta_id, aluno_id, curso_id, frequencia_desde) "
+                        "VALUES (1, ?, 1, ?)", (aluno, desde))
+            cur.execute(
+                "INSERT INTO frequencia_disciplina (coleta_id, aluno_id, curso_id, codigo_disciplina, disciplina, "
+                "horarios, ausencias, presencas, percentual_frequencia) VALUES (1, ?, 1, 'MAT', 'Mat', 40, 20, 20, 50)",
+                (aluno,),
+            )
+
+        total = gerar_alarmes.gerar_percentual_baixo(cur, 1, date(2026, 8, 10), self.CONFIG)
+
+        self.assertEqual(total, 1)
+        alarme = cur.execute("SELECT aluno_id, mensagem, detalhe_json FROM alarmes").fetchone()
+        self.assertEqual(alarme["aluno_id"], 1)
+        self.assertEqual(alarme["mensagem"], "Frequência 50.0% (abaixo de 75%), no ano letivo desde 15/02/2026")
+        self.assertEqual(json.loads(alarme["detalhe_json"])["frequencia_desde"], "2026-02-15")
 
 
 if __name__ == "__main__":
