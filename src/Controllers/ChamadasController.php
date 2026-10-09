@@ -153,19 +153,17 @@ class ChamadasController extends Controller
             $porCurso[$curso] = $itens;
         }
 
-        $nomeArquivo = 'chamadas-atrasadas-1-semestre-' . date('Y-m-d') . '.pdf';
+        $nomeArquivo = 'chamadas-pendentes-ingressantes-' . date('Y-m-d') . '.pdf';
 
         $pdf = new \Mapa\Lib\SimplePdf(true);
         $larguras = [95.0, 280.0, 220.0, 120.0];
 
-        $pdf->documentTitle(
-            'Relatório para ser utilizado na primeira semana de aula (apenas disciplinas do primeiro semestre)'
-        );
+        $pdf->documentTitle('Chamadas pendentes da turma de ingressantes');
         $pdf->spacer(10);
 
         if ($porCurso === []) {
             $pdf->setFontSize(11);
-            $pdf->sectionTitle($larguras, 'Nenhuma disciplina atrasada do 1o semestre para exportar.');
+            $pdf->sectionTitle($larguras, 'Nenhuma chamada pendente nas turmas de ingressantes.');
         }
 
         $primeiro = true;

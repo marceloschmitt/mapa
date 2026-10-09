@@ -246,14 +246,18 @@ $renderLinhas = static function (
                             das quais <?= (int)($atrasadasComEmail ?? 0) ?> já tiveram e-mail enviado<?php endif; ?>.
                         </p>
                     </div>
+                    <?php $dicaExportar = 'Disciplinas do 1º semestre do curso; não inclui os cursos integrados ao ensino médio.'; ?>
                     <?php if ($atrasadasPrimeiroSemestre > 0): ?>
                         <a class="btn btn-outline-danger btn-sm"
-                           href="<?= htmlspecialchars($urlExportar, ENT_QUOTES, 'UTF-8') ?>">
-                            Exportar PDF 1º semestre (<?= $atrasadasPrimeiroSemestre ?>)
+                           href="<?= htmlspecialchars($urlExportar, ENT_QUOTES, 'UTF-8') ?>"
+                           title="<?= htmlspecialchars($dicaExportar, ENT_QUOTES, 'UTF-8') ?>">
+                            PDF: chamadas pendentes da turma de ingressantes
+                            (<?= $atrasadasPrimeiroSemestre ?> turma<?= $atrasadasPrimeiroSemestre === 1 ? '' : 's' ?>)
                         </a>
                     <?php else: ?>
-                        <button type="button" class="btn btn-outline-danger btn-sm" disabled>
-                            Exportar PDF 1º semestre (0)
+                        <button type="button" class="btn btn-outline-danger btn-sm" disabled
+                                title="<?= htmlspecialchars($dicaExportar, ENT_QUOTES, 'UTF-8') ?>">
+                            PDF: chamadas pendentes da turma de ingressantes (nenhuma)
                         </button>
                     <?php endif; ?>
                 </div>

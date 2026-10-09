@@ -31,7 +31,7 @@ class AccessLogRepository
         '/passe-livre/pdf' => 'Passe livre — PDF',
         '/passe-livre/conferencia' => 'Passe livre — conferência',
         '/chamadas' => 'Chamadas',
-        '/chamadas/exportar-atrasadas-1-semestre' => 'Chamadas — exportar',
+        '/chamadas/exportar-atrasadas-1-semestre' => 'Chamadas — PDF ingressantes',
         '/efeito-contatos' => 'Efeito dos contatos',
         '/efeito-contatos/gerar' => 'Efeito dos contatos — gerar',
         '/usuarios' => 'Usuários',
