@@ -145,6 +145,7 @@ def mapa_todas_reprovadas(
             "nome_social": str(registro.get("nome_social") or "").strip() or None,
             "email": str(registro.get("email") or "").strip() or None,
             "nome_curso": chave[1],
+            "status": str(registro.get("status") or "").strip(),
             "disciplinas": discs,
         }
     return saida
@@ -401,7 +402,8 @@ def main(argv: list[str] | None = None) -> int:
             "disciplinas_a": a["disciplinas"],
             "disciplinas_b": b["disciplinas"],
             "matriculado_periodo_atual": matriculado,
-            "status_periodo_atual": (atual or {}).get("status") or None,
+            # A API devolve o status atual do aluno em qualquer semestre consultado.
+            "status_periodo_atual": (atual or {}).get("status") or b["status"] or a["status"] or None,
         })
 
     print(

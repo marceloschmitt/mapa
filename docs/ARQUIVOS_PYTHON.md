@@ -228,7 +228,9 @@ Usado por `analisar_frequencia.py` (coleta) e `gerar_passe_livre.py`.
 ### `gerar_perda_vaga.py`
 Lê os matriculados dos dois semestres anteriores ao período atual (com a
 situação de cada disciplina) e grava no SQLite os alunos que reprovaram em
-todas as disciplinas em ambos os semestres (candidatos a perda de vaga). Usa
+todas as disciplinas em ambos os semestres (candidatos a perda de vaga), com
+qualquer status. Para cada um grava se está matriculado no período atual e o
+status atual do aluno (a API devolve o status de hoje em qualquer semestre). Usa
 `resposta_matriculas_AAAA_S.json` como cache — a coleta os mantém atualizados —
 e só consulta a API se o arquivo faltar ou com `--forcar`. Acionado pela tela
 Perda de vaga → Gerar análise (somente administradores; log em

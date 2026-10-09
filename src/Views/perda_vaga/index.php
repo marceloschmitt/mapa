@@ -149,6 +149,14 @@ $podeGerarPerdaVaga = !empty($podeGerarPerdaVaga);
                                         <?php endif; ?>
                                     </span>
                                 </div>
+                            <?php elseif (!empty($candidato['status_periodo_atual'])): ?>
+                                <div class="mt-1">
+                                    <span class="badge <?= strtoupper(trim((string)$candidato['status_periodo_atual'])) === 'CANCELADO'
+                                        ? 'text-bg-danger'
+                                        : 'text-bg-light text-dark border' ?>">
+                                        <?= htmlspecialchars((string)$candidato['status_periodo_atual'], ENT_QUOTES, 'UTF-8') ?>
+                                    </span>
+                                </div>
                             <?php endif; ?>
                         </div>
                     </div>
