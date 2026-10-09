@@ -93,14 +93,6 @@ perdia (frequência ou cursos vazios, ex.: Meio Ambiente Subsequente e mestrados
 e as disciplinas aparecem como a API devolve, inclusive as que ainda não têm
 chamada (frequência nula).
 
-### `sincronizar_passe_livre_semestre_atual.py`
-Espelha o semestre corrente (`api_periodo_letivo`) nas tabelas
-`passe_livre_aluno_curso` / `passe_livre_disciplina`, a partir de
-`tabela_frequencia.json`, sem depender da geração manual de passe livre (que só
-cobre semestres anteriores). Também é chamado automaticamente após
-`analisar_frequencia.py` dentro do pipeline. A tela Frequência corrente não usa
-essa cópia: lê a última coleta (`frequencia_curso` e `frequencia_disciplina`).
-
 ### `importar_frequencia.py`
 Importa `tabela_frequencia.json` para o SQLite: cria uma nova coleta e popula
 `alunos`, `frequencia_curso`, `frequencia_disciplina` (com `id_turma`),
@@ -247,10 +239,8 @@ Cruza os alunos `ATIVO`/`FORMANDO` do semestre atual com a frequência
 **mensal** (`frequencia_periodo`) dos semestres anteriores (padrão: 3,
 ajustável via `--semestres`), consultando a API aluno por aluno. Grava direto
 em `passe_livre_*` (não gera JSON), marca disciplinas trancadas via
-`ausencias_especiais.py` e não apaga os dados do semestre atual (que ficam a
-cargo de `sincronizar_passe_livre_semestre_atual.py`, que reaproveita
-`gravar_banco` e `validar_periodo` deste script). Acionado pela tela Passe
-livre → gerar.
+`ausencias_especiais.py` e só apaga os semestres que regenera. Acionado pela
+tela Passe livre → gerar.
 
 ### `consulta_integrados_anual.py`
 Busca na API os meses encerrados do ano letivo dos integrados
@@ -287,7 +277,6 @@ remove prefixos de iniciais que o Moodle cola no início do nome.
 | `consulta_alunos_massa.py` | Pipeline (0) | Consulta em massa (cadastro + intervalo), respostas cruas |
 | `consulta_inicial.py` | Pipeline (1) | Lista matriculados do período corrente + anteriores |
 | `analisar_frequencia.py` | Pipeline (2) | Monta a tabela de frequência a partir da consulta em massa |
-| `sincronizar_passe_livre_semestre_atual.py` | Pipeline (2b) | Espelha o semestre atual em `passe_livre_*` |
 | `importar_frequencia.py` | Pipeline (3) | Grava frequência/faltas no SQLite |
 | `importar_trancados.py` | Pipeline (4) | Grava alunos trancados no SQLite |
 | `importar_professores.py` | Pipeline (5) | Grava cursos, professores e vínculos por disciplina e por turma |

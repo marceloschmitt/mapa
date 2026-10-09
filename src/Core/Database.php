@@ -107,6 +107,7 @@ class Database
         self::ensureColumn('efeito_contatos_alunos', 'aulas_ate_corte', 'INTEGER NOT NULL DEFAULT 0');
         self::ensureColumn('efeito_contatos_alunos', 'faltas_ate_corte', 'INTEGER NOT NULL DEFAULT 0');
         self::migrarPasseLivreAtestadosEstrutura();
+        self::removerPasseLivrePeriodoAtual();
         self::migrarDatasAulaCsvParaTabela();
         // Tabelas descontinuadas: removidas de bancos antigos.
         self::$connection->exec('DROP TABLE IF EXISTS disciplina_carga_horaria');
@@ -522,6 +523,40 @@ class Database
         }
 
         self::$connection->exec('PRAGMA foreign_keys = ON');
+    }
+
+    /**
+     * Passe livre guarda só semestres anteriores. Remove a cópia do período atual
+     * que a coleta gravava (sincronizar_passe_livre_semestre_atual.py, descontinuado);
+     * linhas com atestado são preservadas.
+     */
+    private static function removerPasseLivrePeriodoAtual(): void
+    {
+        $filtro = "periodo = (SELECT TRIM(valor) FROM configuracoes WHERE chave = 'api_periodo_letivo')
+                   AND id NOT IN (
+                       SELECT passe_livre_aluno_curso_id FROM passe_livre_atestados
+                       WHERE passe_livre_aluno_curso_id IS NOT NULL
+                   )";
+        $existe = self::$connection->query(
+            'SELECT 1 FROM passe_livre_aluno_curso WHERE ' . $filtro . ' LIMIT 1'
+        )->fetchColumn();
+        if ($existe === false) {
+            return;
+        }
+
+        self::$connection->exec('BEGIN');
+        try {
+            self::$connection->exec(
+                'DELETE FROM passe_livre_disciplina WHERE aluno_curso_id IN (
+                    SELECT id FROM passe_livre_aluno_curso WHERE ' . $filtro . '
+                 )'
+            );
+            self::$connection->exec('DELETE FROM passe_livre_aluno_curso WHERE ' . $filtro);
+            self::$connection->exec('COMMIT');
+        } catch (\Throwable $e) {
+            self::$connection->exec('ROLLBACK');
+            throw $e;
+        }
     }
 
     private static function migrateUsuariosTable(): void

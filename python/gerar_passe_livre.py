@@ -539,8 +539,7 @@ def upsert_curso(cursor: Any, nome_curso: str) -> int:
 def limpar_passe_livre(periodos: list[str] | None = None) -> None:
     """Remove dados de passe livre.
 
-    Se periodos for informado, apaga so esses semestres (preserva os demais,
-    inclusive o semestre atual sincronizado pela coleta).
+    Se periodos for informado, apaga so esses semestres (preserva os demais).
     """
     conn = conectar()
     cursor = conn.cursor()

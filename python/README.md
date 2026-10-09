@@ -8,7 +8,6 @@ executar_coleta.py
   ├─ 0. consulta_alunos_massa.py
   ├─ 1. consulta_inicial.py
   ├─ 2. analisar_frequencia.py
-  ├─ 2b. sincronizar_passe_livre_semestre_atual.py
   ├─ 3. importar_frequencia.py
   ├─ 4. importar_trancados.py
   ├─ 5. importar_professores.py
@@ -102,7 +101,6 @@ continuam com o semestre. Detalhes em
 | 0 | `consulta_alunos_massa.py` | Consulta em massa (sem login), respostas cruas: cadastro e frequência por intervalo (só ATIVO e FORMANDO, uma consulta por status). | BD (`configuracoes` API) | `resposta_alunos_massa_cadastro.json`, `resposta_alunos_massa_intervalo.json` |
 | 1 | `consulta_inicial.py` | Matriculados do período corrente + 2 anteriores | BD (`configuracoes` API) | `resposta_matriculas.json`, `resposta_matriculas_AAAA_S.json` |
 | 2 | `analisar_frequencia.py` | Frequência (ATIVO/FORMANDO), com a turma do aluno em cada disciplina; integrados com o ano letivo somado | `resposta_alunos_massa_intervalo.json`, `resposta_alunos_massa_cadastro.json`, `resposta_matriculas.json`, `integrados_anual_AAAA.json` (opcional) | `tabela_frequencia.json` |
-| 2b | `sincronizar_passe_livre_semestre_atual.py` | Espelha o semestre atual (`api_periodo_letivo`) em `passe_livre_*` | `tabela_frequencia.json` | BD (`passe_livre_aluno_curso`, `passe_livre_disciplina`) |
 | 3 | `importar_frequencia.py` | Nova coleta no SQLite (alunos, frequência, faltas) | `tabela_frequencia.json`, `config/consultas.json` | BD (`coletas`, `alunos`, `frequencia_curso`, `frequencia_disciplina`, `faltas_dia`, …) |
 | 4 | `importar_trancados.py` | Alunos TRANCADO / TRANC. AUTOMÁTICO | `resposta_alunos_massa_cadastro.json` | BD (`alunos_trancados`) |
 | 5 | `importar_professores.py` | Cursos, docentes e vínculos por disciplina e por turma | `resposta_matriculas.json` | BD (`cursos`, `professores`, `disciplina_professores`, `turma_professores`) |
@@ -133,8 +131,7 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 | `integrados_anual.py` | Valida `integrados_anual_AAAA.json` e soma os meses encerrados à frequência dos integrados (usado por `analisar_frequencia.py`) |
 | `consulta_integrados_anual.py` | Manual (Configuração da API → Buscar meses encerrados): meses encerrados do ano letivo dos integrados → `integrados_anual_AAAA.json`; log em `data/integrados_anual.log` |
 | `gerar_perda_vaga.py` | Manual (tela Perda de vaga → Gerar análise): candidatos a perda de vaga (2 semestres anteriores) → BD; usa `resposta_matriculas_AAAA_S.json` como cache |
-| `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência **mensal** (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`), sem JSON. Trancadas (`ausencias_especiais`) → `situacao`; % total do curso = valor da API. Não apaga o semestre atual. Opção `--semestres N` (padrão 3). |
-| `sincronizar_passe_livre_semestre_atual.py` | Coleta: grava o semestre de `api_periodo_letivo` (datas da frequência) em `passe_livre_*` a partir de `tabela_frequencia.json`. |
+| `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência **mensal** (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`), sem JSON. Trancadas (`ausencias_especiais`) → `situacao`; % total do curso = valor da API. Só apaga os semestres que regenera. Opção `--semestres N` (padrão 3). |
 | `importar_emails_professores.py` | Manual: e-mails dos professores a partir de CSV do Moodle (`data/Users.csv`) |
 | `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos → Gerar análise): faltas antes e depois do contato, com as aulas e a última chamada da turma do aluno → BD (`efeito_contatos_*`) |
 
