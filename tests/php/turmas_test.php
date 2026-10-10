@@ -178,5 +178,16 @@ verificar(
     $servico->envioRegistrado(['T1|2026-09-21' => $envioAntigo], $linhaTurma)
 );
 
+echo "== Destinatários do e-mail de chamada\n";
+$pdo->exec("UPDATE professores SET email = CASE id WHEN 1 THEN 'ana@x.br' ELSE 'bruno@x.br' END");
+$emailsTurma = new ReflectionMethod(ChamadaEmailService::class, 'emailsProfessoresTurma');
+$emailsTurma->setAccessible(true);
+verificar('só o professor da turma', ['bruno@x.br'], $emailsTurma->invoke($servico, 2));
+$emailsDisciplina = new ReflectionMethod(ChamadaEmailService::class, 'emailsProfessores');
+$emailsDisciplina->setAccessible(true);
+$todos = $emailsDisciplina->invoke($servico, 'POA-X01');
+sort($todos);
+verificar('todos os professores da disciplina', ['ana@x.br', 'bruno@x.br'], $todos);
+
 echo "\n{$total} verificações, {$falhas} falha(s).\n";
 exit($falhas > 0 ? 1 : 0);

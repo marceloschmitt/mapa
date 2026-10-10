@@ -289,7 +289,7 @@ class ChamadaEmailService
     private function filtrarEmails(array $rows): array
     {
         $emails = [];
-        foreach ($statement->fetchAll() as $row) {
+        foreach ($rows as $row) {
             $email = trim((string)($row['email'] ?? ''));
             if ($email !== '' && filter_var($email, FILTER_VALIDATE_EMAIL)) {
                 $emails[$email] = true;
