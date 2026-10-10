@@ -73,6 +73,8 @@ class DisciplinasTrancadasController extends Controller
             'totalAlunos' => count($alunosUnicos),
             'totalCursos' => count($cursosUnicos),
             'totalRegistros' => count($linhas),
+            'porSemana' => $this->trancamentosPorSemana($linhas),
+            'porQuantidade' => $this->alunosPorQuantidade($porAluno),
             'totalTodasTrancadas' => count(array_filter(
                 $porAluno,
                 static fn(array $grupo): bool => $grupo['todas_trancadas']
@@ -132,6 +134,84 @@ class DisciplinasTrancadasController extends Controller
             'cursoExibido' => $cursoExibido,
             'aviso' => $aviso,
         ];
+    }
+
+    /**
+     * Disciplinas trancadas por semana (segunda a domingo), da primeira à última
+     * semana com trancamento; semanas sem trancamento entram com zero. Alunos
+     * contam uma vez por semana (aluno + curso), mesmo trancando várias disciplinas.
+     *
+     * @param list<array<string, mixed>> $linhas
+     * @return array{labels: list<string>, disciplinas: list<int>, alunos: list<int>, sem_data: int}
+     */
+    public function trancamentosPorSemana(array $linhas): array
+    {
+        $disciplinasPorSegunda = [];
+        $alunosPorSegunda = [];
+        $semData = 0;
+        foreach ($linhas as $linha) {
+            $data = \DateTimeImmutable::createFromFormat(
+                '!d/m/Y',
+                trim((string)($linha['data_trancamento'] ?? ''))
+            );
+            if ($data === false) {
+                $semData++;
+                continue;
+            }
+            $segunda = $data->modify('monday this week')->format('Y-m-d');
+            $disciplinasPorSegunda[$segunda] = ($disciplinasPorSegunda[$segunda] ?? 0) + 1;
+            $chaveAluno = (string)($linha['aluno_id'] ?? '') . '|' . (string)($linha['curso_id'] ?? '');
+            $alunosPorSegunda[$segunda][$chaveAluno] = true;
+        }
+
+        $labels = [];
+        $disciplinas = [];
+        $alunos = [];
+        if ($disciplinasPorSegunda !== []) {
+            ksort($disciplinasPorSegunda);
+            $semana = new \DateTimeImmutable((string)array_key_first($disciplinasPorSegunda));
+            $ultima = new \DateTimeImmutable((string)array_key_last($disciplinasPorSegunda));
+            while ($semana <= $ultima) {
+                $chave = $semana->format('Y-m-d');
+                $labels[] = $semana->format('d/m') . '–' . $semana->modify('+6 days')->format('d/m');
+                $disciplinas[] = $disciplinasPorSegunda[$chave] ?? 0;
+                $alunos[] = count($alunosPorSegunda[$chave] ?? []);
+                $semana = $semana->modify('+7 days');
+            }
+        }
+
+        return [
+            'labels' => $labels,
+            'disciplinas' => $disciplinas,
+            'alunos' => $alunos,
+            'sem_data' => $semData,
+        ];
+    }
+
+    /**
+     * Quantos alunos (aluno + curso) trancaram 1, 2, 3... disciplinas, de 1 até o
+     * maior número encontrado; quantidades sem aluno entram com zero.
+     *
+     * @param array<string, array{disciplinas: list<array<string, string>>}> $porAluno
+     * @return array{labels: list<string>, values: list<int>}
+     */
+    public function alunosPorQuantidade(array $porAluno): array
+    {
+        $porQuantidade = [];
+        foreach ($porAluno as $grupo) {
+            $n = count($grupo['disciplinas']);
+            $porQuantidade[$n] = ($porQuantidade[$n] ?? 0) + 1;
+        }
+
+        $labels = [];
+        $values = [];
+        $maior = $porQuantidade === [] ? 0 : max(array_keys($porQuantidade));
+        for ($n = 1; $n <= $maior; $n++) {
+            $labels[] = (string)$n;
+            $values[] = $porQuantidade[$n] ?? 0;
+        }
+
+        return ['labels' => $labels, 'values' => $values];
     }
 
     /**

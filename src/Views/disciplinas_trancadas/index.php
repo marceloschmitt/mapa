@@ -7,6 +7,8 @@ $totalAlunos = (int)($totalAlunos ?? 0);
 $totalCursos = (int)($totalCursos ?? 0);
 $totalRegistros = (int)($totalRegistros ?? 0);
 $totalTodasTrancadas = (int)($totalTodasTrancadas ?? 0);
+$porSemana = $porSemana ?? ['labels' => [], 'disciplinas' => [], 'alunos' => [], 'sem_data' => 0];
+$porQuantidade = $porQuantidade ?? ['labels' => [], 'values' => []];
 $semSeletorCurso = !empty($semSeletorCurso);
 $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
 $cursosDisponiveis = $cursosDisponiveis ?? [];
@@ -93,6 +95,197 @@ $mostrarBadgeCurso = $semSeletorCurso;
             primeiro na lista, em vermelho.
         </div>
     </div>
+<?php endif; ?>
+
+<?php if ($porSemana['labels'] !== []): ?>
+    <?php $semData = (int)$porSemana['sem_data']; ?>
+    <div class="row g-4 mb-4">
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h2 class="h6 mb-3">Disciplinas trancadas por semana</h2>
+                    <p class="small text-secondary mb-2">
+                        Pela data de trancamento, de segunda a domingo.
+                        <?php if ($semData > 0): ?>
+                            <?= $semData ?> sem data de trancamento não entra<?= $semData === 1 ? '' : 'm' ?> no gráfico.
+                        <?php endif; ?>
+                    </p>
+                    <div style="position: relative; width: 100%; height: 240px;">
+                        <canvas id="chartTrancadasSemana"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h2 class="h6 mb-3">Alunos que trancaram por semana</h2>
+                    <p class="small text-secondary mb-2">
+                        Alunos com ao menos uma disciplina trancada na semana. Quem trancou
+                        em semanas diferentes conta em cada uma delas.
+                    </p>
+                    <div style="position: relative; width: 100%; height: 240px;">
+                        <canvas id="chartAlunosTrancaramSemana"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h2 class="h6 mb-3">Quantidade de alunos por disciplinas trancadas</h2>
+                    <div style="position: relative; width: 100%; height: 300px;">
+                        <canvas id="chartAlunosPorQuantidade"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+        <div class="col-lg-6">
+            <div class="card border-0 shadow-sm h-100">
+                <div class="card-body">
+                    <h2 class="h6 mb-3">Percentual de alunos por quantidade de disciplinas trancadas</h2>
+                    <div style="position: relative; width: 100%; height: 300px;">
+                        <canvas id="chartAlunosPorQuantidadePizza"></canvas>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    <script src="https://cdn.jsdelivr.net/npm/chart.js@4.4.1/dist/chart.umd.min.js"></script>
+    <script>
+    (function () {
+        const porSemana = <?= json_encode(
+            [
+                'labels' => $porSemana['labels'],
+                'disciplinas' => $porSemana['disciplinas'],
+                'alunos' => $porSemana['alunos'],
+            ],
+            JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
+        ) ?>;
+        const porQuantidade = <?= json_encode(
+            $porQuantidade,
+            JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
+        ) ?>;
+
+        const valorNaBarra = {
+            id: 'valorNaBarra',
+            afterDatasetsDraw(chart) {
+                const ctx = chart.ctx;
+                ctx.save();
+                ctx.font = '600 11px system-ui, sans-serif';
+                ctx.fillStyle = '#212529';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'bottom';
+                chart.getDatasetMeta(0).data.forEach((barra, i) => {
+                    const valor = chart.data.datasets[0].data[i];
+                    if (valor > 0) {
+                        ctx.fillText(String(valor), barra.x, barra.y - 2);
+                    }
+                });
+                ctx.restore();
+            }
+        };
+
+        function grafico(id, rotulos, rotulo, valores, cor, corBorda, girarRotulos, tituloX = '') {
+            new Chart(document.getElementById(id), {
+                type: 'bar',
+                data: {
+                    labels: rotulos,
+                    datasets: [{
+                        label: rotulo,
+                        data: valores,
+                        backgroundColor: cor,
+                        borderColor: corBorda,
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: { legend: { display: false } },
+                    scales: {
+                        x: {
+                            ticks: girarRotulos
+                                ? { maxRotation: 60, minRotation: 45, autoSkip: false, font: { size: 10 } }
+                                : { autoSkip: false, font: { size: 10 } },
+                            title: { display: tituloX !== '', text: tituloX, font: { size: 11 } }
+                        },
+                        y: { beginAtZero: true, grace: '12%', ticks: { precision: 0 } }
+                    }
+                },
+                plugins: [valorNaBarra]
+            });
+        }
+
+        grafico('chartTrancadasSemana', porSemana.labels, 'Disciplinas trancadas',
+            porSemana.disciplinas, 'rgba(242, 140, 40, 0.8)', '#f28c28', true);
+        grafico('chartAlunosTrancaramSemana', porSemana.labels, 'Alunos que trancaram',
+            porSemana.alunos, 'rgba(13, 110, 253, 0.7)', '#0d6efd', true);
+        grafico('chartAlunosPorQuantidade', porQuantidade.labels, 'Alunos',
+            porQuantidade.values, 'rgba(111, 66, 193, 0.7)', '#6f42c1', false,
+            'Disciplinas trancadas pelo aluno');
+
+        const fatias = porQuantidade.labels
+            .map((n, i) => ({ n: Number(n), alunos: porQuantidade.values[i] }))
+            .filter((f) => f.alunos > 0);
+        const totalAlunos = fatias.reduce((soma, f) => soma + f.alunos, 0);
+        const percentual = (alunos) => (100 * alunos / totalAlunos)
+            .toLocaleString('pt-BR', { maximumFractionDigits: 1 }) + '%';
+        const coresPizza = ['#6f42c1', '#0d6efd', '#20c997', '#f28c28', '#dc3545',
+            '#ffc107', '#6610f2', '#198754', '#d63384', '#6c757d'];
+
+        const percentualNaFatia = {
+            id: 'percentualNaFatia',
+            afterDatasetsDraw(chart) {
+                const ctx = chart.ctx;
+                ctx.save();
+                ctx.font = '600 11px system-ui, sans-serif';
+                ctx.fillStyle = '#fff';
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                chart.getDatasetMeta(0).data.forEach((fatia, i) => {
+                    if (fatias[i].alunos / totalAlunos < 0.05) {
+                        return;
+                    }
+                    const pos = fatia.tooltipPosition();
+                    ctx.fillText(percentual(fatias[i].alunos), pos.x, pos.y);
+                });
+                ctx.restore();
+            }
+        };
+
+        const canvasPizza = document.getElementById('chartAlunosPorQuantidadePizza');
+        const legendaAoLado = canvasPizza.parentNode.clientWidth >= 480;
+        if (totalAlunos > 0) {
+            new Chart(canvasPizza, {
+                type: 'pie',
+                data: {
+                    labels: fatias.map((f) => f.n + ' disciplina' + (f.n === 1 ? '' : 's')
+                        + ': ' + f.alunos + ' aluno' + (f.alunos === 1 ? '' : 's')
+                        + ' (' + percentual(f.alunos) + ')'),
+                    datasets: [{
+                        data: fatias.map((f) => f.alunos),
+                        backgroundColor: fatias.map((f, i) => coresPizza[i % coresPizza.length]),
+                        borderColor: '#fff',
+                        borderWidth: 1
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: {
+                            position: legendaAoLado ? 'right' : 'bottom',
+                            labels: { boxWidth: 12, font: { size: 11 } }
+                        },
+                        tooltip: { callbacks: { label: (item) => item.label } }
+                    }
+                },
+                plugins: [percentualNaFatia]
+            });
+        }
+    })();
+    </script>
 <?php endif; ?>
 
 <?php if ($coleta !== null && empty($erro) && empty($avisoCoordenador) && $porAluno === []): ?>
