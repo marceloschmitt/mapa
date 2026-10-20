@@ -133,7 +133,7 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 | `gerar_perda_vaga.py` | Manual (tela Perda de vaga → Gerar análise): candidatos a perda de vaga (2 semestres anteriores) → BD; usa `resposta_matriculas_AAAA_S.json` como cache |
 | `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência **mensal** (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`), sem JSON. Trancadas (`ausencias_especiais`) → `situacao`; % total do curso = valor da API. Só apaga os semestres que regenera. Opção `--semestres N` (padrão 3). |
 | `importar_emails_professores.py` | Manual: e-mails dos professores a partir de CSV do Moodle (`data/Users.csv`) |
-| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos → Gerar análise): faltas antes e depois do contato, com as aulas e a última chamada da turma do aluno → BD (`efeito_contatos_*`) |
+| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos → Gerar análise): faltas semana a semana em torno do contato (contatados) e do alarme crítico ainda sem contato (comparação), com as aulas e a última chamada da turma do aluno → BD (`efeito_contatos_*`). Opções `--semanas` (padrão 2) e `--min-aulas` (padrão 3). |
 
 ---
 
@@ -145,13 +145,15 @@ Usam bancos SQLite temporários criados a partir do `schema.sql`; não tocam em 
 python3 -m unittest discover -v python/tests   # regras por turma e frequência anual no pipeline
 php tests/php/turmas_test.php                  # escopo do professor, críticas por turma, e-mail de chamada
 php tests/php/frequencia_anual_test.php        # integrados nos ingressantes e no painel
+php tests/php/efeito_contatos_test.php         # números da tela Efeito dos contatos
 ```
 
 | Arquivo | O que cobre |
 |---------|-------------|
-| `python/tests/test_turmas.py` | `id_turma` vindo das matrículas; turmas e professores da grade; chamada da turma (maior data entre os alunos) e herança do histórico quando a disciplina tem uma só turma no curso; alarme de 3 semanas com as aulas da turma; efeito dos contatos parando na última chamada da turma |
+| `python/tests/test_turmas.py` | `id_turma` vindo das matrículas; turmas e professores da grade; chamada da turma (maior data entre os alunos) e herança do histórico quando a disciplina tem uma só turma no curso; alarme de 3 semanas com as aulas da turma; efeito dos contatos parando na última chamada da turma, semanas em torno da referência e quem entra como contatado ou comparação |
 | `python/tests/test_consulta_alunos_massa.py` | Intervalo em massa dividido por status: URLs com `&status=ATIVO` e `&status=FORMANDO` do período inteiro, respostas juntadas no mesmo arquivo, arquivo anterior mantido se uma falhar |
 | `python/tests/test_integrados_anual.py` | Busca dos meses encerrados (`consulta_integrados_anual.py`, API simulada): blocos de até 2 meses, só integrados, `&status=ATIVO`, nova tentativa mês a mês, versão anterior mantida quando um bloco falha |
 | `python/tests/test_frequencia_anual.py` | Soma do ano letivo (`integrados_anual.py`): arredondamento como a API, disciplinas casadas pela matrícula no componente, arquivo ausente ou com buraco; só integrados ganham `frequencia_anual`; importação grava o ano e `frequencia_desde` (faltas por dia seguem do semestre); alarme com carência do início do ano e mensagem "no ano letivo" |
 | `tests/php/turmas_test.php` | Turmas do usuário professor; alarmes, contagens e marcação restritos às turmas dele (sem turma identificada continua visível); disciplinas críticas uma linha por turma com os professores da turma; chave de envio do e-mail de chamada por turma, reconhecendo o envio antigo por disciplina |
 | `tests/php/frequencia_anual_test.php` | Ingressantes do semestre mais integrados do ano (AAAA/0) com `frequencia_desde`; asterisco nos cursos integrados no gráfico por curso e nas disciplinas críticas; início do ano letivo da coleta |
+| `tests/php/efeito_contatos_test.php` | Efeito dos contatos: médias de todos os analisados (não só de quem melhorou), melhoraram/iguais/pioraram, frequência no limite, canais, janela × até o corte, efeito líquido com intervalo de 95% e curva semanal só com os analisados |

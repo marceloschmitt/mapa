@@ -256,13 +256,17 @@ API → "Buscar meses encerrados" (somente administradores; log em
 `data/integrados_anual.log`). Rodar a cada troca de semestre dos integrados.
 
 ### `gerar_efeito_contatos.py`
-Compara a taxa de faltas dos alunos contatados no semestre (e-mail automático
-em `alarme_emails` e contatos registrados na tela de alarmes) antes e depois
-do contato. Conta as aulas da turma do aluno (`turma_aulas`) até a última
-chamada da turma (`turma_ultima_aula`); sem turma identificada, usa a grade e
-a última chamada da disciplina no curso. Só lê o banco e grava em
-`efeito_contatos_*`. Acionado pela tela Efeito dos contatos → Gerar análise
-(opções `--janela` e `--min-aulas`).
+Grava, para cada aluno, as aulas e faltas semana a semana em torno de uma
+data de referência: o 1º e o 2º contato do semestre (e-mail automático em
+`alarme_emails` e contatos registrados na tela de alarmes) e, como grupo de
+comparação, o dia do primeiro alarme crítico dos alunos que ainda não tinham
+recebido contato (a série para antes do contato, se ele vier depois). A tela
+compara a queda de faltas dos contatados com a da comparação. Conta as aulas
+da turma do aluno (`turma_aulas`) até a última chamada da turma
+(`turma_ultima_aula`); sem turma identificada, usa a grade e a última chamada
+da disciplina no curso. Só lê o banco e grava em `efeito_contatos_*`.
+Acionado pela tela Efeito dos contatos → Gerar análise (opções `--semanas` e
+`--min-aulas`).
 
 ### `importar_emails_professores.py`
 Atualiza os e-mails dos professores a partir de um CSV exportado do Moodle
@@ -298,5 +302,5 @@ remove prefixos de iniciais que o Moodle cola no início do nome.
 | `consulta_integrados_anual.py` | Manual (tela Configuração da API) | Busca os meses encerrados do ano letivo dos integrados |
 | `gerar_perda_vaga.py` | Manual (tela Perda de vaga) | Candidatos a perda de vaga |
 | `gerar_passe_livre.py` | Manual | Passe livre a partir da frequência mensal |
-| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos) | Faltas antes e depois do contato com o aluno |
+| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos) | Faltas semana a semana em torno do contato, com grupo de comparação |
 | `importar_emails_professores.py` | Manual | Atualiza e-mails de professores via CSV |

@@ -457,10 +457,11 @@ CREATE TABLE IF NOT EXISTS perda_vaga_reprovacoes (
 CREATE INDEX IF NOT EXISTS idx_perda_vaga_reprovacoes_candidato
     ON perda_vaga_reprovacoes(candidato_id);
 
--- Efeito dos contatos (manual, python/gerar_efeito_contatos.py): taxa de faltas
--- dos alunos contatados antes do primeiro contato, antes do ultimo e depois do ultimo
--- (N dias seguintes e, em *_ate_corte, do dia seguinte ate a data dos dados).
+-- Efeito dos contatos (manual, python/gerar_efeito_contatos.py): faltas semana a
+-- semana em torno de uma data de referencia, para os alunos contatados e para um
+-- grupo de comparacao (alarme critico ainda sem contato).
 -- Um contato = um dia com algum contato (e-mail automatico ou registro na tela de alarmes).
+-- janela_dias = semanas antes x depois comparadas na tela (multiplo de 7).
 -- total_eventos = alunos/curso contatados.
 CREATE TABLE IF NOT EXISTS efeito_contatos_execucoes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -473,29 +474,40 @@ CREATE TABLE IF NOT EXISTS efeito_contatos_execucoes (
     executado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
--- canais_ultimo: canais do dia do ultimo contato, separados por virgula.
-CREATE TABLE IF NOT EXISTS efeito_contatos_alunos (
+-- Uma serie semanal por aluno/curso e referencia.
+-- grupo 'contatado': data_referencia = dia do 1o contato (referencia 'primeiro') e,
+-- com dois ou mais contatos, tambem do 2o (referencia 'segundo').
+-- grupo 'comparacao': aluno com alarme critico ainda sem contato, data_referencia =
+-- dia do primeiro alarme critico (referencia 'primeiro'). Com contato depois, a serie
+-- para na ultima semana inteira antes dele.
+-- canais: canais do dia da referencia, separados por virgula (vazio na comparacao).
+CREATE TABLE IF NOT EXISTS efeito_contatos_series (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     execucao_id INTEGER NOT NULL,
     aluno_id INTEGER NOT NULL,
     curso_id INTEGER NOT NULL,
-    total_contatos INTEGER NOT NULL,
-    primeiro_contato TEXT NOT NULL,
-    ultimo_contato TEXT NOT NULL,
-    canais_ultimo TEXT NOT NULL DEFAULT '',
-    aulas_antes_primeiro INTEGER NOT NULL DEFAULT 0,
-    faltas_antes_primeiro INTEGER NOT NULL DEFAULT 0,
-    aulas_antes_ultimo INTEGER NOT NULL DEFAULT 0,
-    faltas_antes_ultimo INTEGER NOT NULL DEFAULT 0,
-    aulas_depois_ultimo INTEGER NOT NULL DEFAULT 0,
-    faltas_depois_ultimo INTEGER NOT NULL DEFAULT 0,
-    aulas_ate_corte INTEGER NOT NULL DEFAULT 0,
-    faltas_ate_corte INTEGER NOT NULL DEFAULT 0,
+    grupo TEXT NOT NULL CHECK (grupo IN ('contatado', 'comparacao')),
+    referencia TEXT NOT NULL CHECK (referencia IN ('primeiro', 'segundo')),
+    data_referencia TEXT NOT NULL,
+    total_contatos INTEGER NOT NULL DEFAULT 0,
+    canais TEXT NOT NULL DEFAULT '',
     FOREIGN KEY (execucao_id) REFERENCES efeito_contatos_execucoes(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_efeito_contatos_alunos_execucao
-    ON efeito_contatos_alunos(execucao_id, curso_id);
+CREATE INDEX IF NOT EXISTS idx_efeito_contatos_series_execucao
+    ON efeito_contatos_series(execucao_id, referencia, curso_id);
+
+-- Aulas e faltas da serie por semana relativa a referencia: -1 = 7 dias antes,
+-- 1 = 7 dias depois (o dia da referencia nao entra). Semanas sem aula nao sao gravadas.
+CREATE TABLE IF NOT EXISTS efeito_contatos_semanas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    serie_id INTEGER NOT NULL,
+    semana INTEGER NOT NULL,
+    aulas INTEGER NOT NULL,
+    faltas INTEGER NOT NULL,
+    FOREIGN KEY (serie_id) REFERENCES efeito_contatos_series(id) ON DELETE CASCADE,
+    UNIQUE (serie_id, semana)
+);
 
 -- Passe livre: percentual de frequencia do semestre anterior (carga manual).
 -- Um aluno em dois cursos aparece em duas linhas.

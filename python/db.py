@@ -131,6 +131,17 @@ def _migrar_datas_aula_csv(conn: sqlite3.Connection) -> None:
         )
 
 
+def _descartar_efeito_contatos_antigo(conn: sqlite3.Connection) -> None:
+    """Analise no formato de janelas fixas (efeito_contatos_alunos): apaga para gerar de novo."""
+    antiga = conn.execute(
+        "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'efeito_contatos_alunos'"
+    ).fetchone()
+    if antiga is None:
+        return
+    conn.execute("DELETE FROM efeito_contatos_execucoes")
+    conn.execute("DROP TABLE efeito_contatos_alunos")
+
+
 def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
     """Executa config/schema.sql e migracoes leves de colunas."""
     conn = conexao or conectar()
@@ -157,8 +168,7 @@ def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
         "CREATE INDEX IF NOT EXISTS idx_frequencia_disciplina_turma "
         "ON frequencia_disciplina(coleta_id, id_turma)"
     )
-    _ensure_column(conn, "efeito_contatos_alunos", "aulas_ate_corte", "INTEGER NOT NULL DEFAULT 0")
-    _ensure_column(conn, "efeito_contatos_alunos", "faltas_ate_corte", "INTEGER NOT NULL DEFAULT 0")
+    _descartar_efeito_contatos_antigo(conn)
     _migrar_datas_aula_csv(conn)
     # Tabelas descontinuadas: removidas de bancos antigos.
     conn.execute("DROP TABLE IF EXISTS disciplina_carga_horaria")

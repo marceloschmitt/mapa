@@ -1,13 +1,24 @@
 #!/usr/bin/env python3
-"""Efeito dos contatos: faltas antes e depois do contato com o aluno (manual).
+"""Efeito dos contatos: faltas semana a semana em torno do contato com o aluno (manual).
 
-So alunos/curso contatados no semestre atual (e-mail automatico em
-alarme_emails; contatos registrados na tela de alarmes). Um contato = um dia
-com algum contato, qualquer que seja o canal. Para cada aluno grava o numero
-de contatos e a taxa de faltas (faltas / aulas) nas janelas de N dias antes do
-primeiro contato, antes do ultimo e depois do ultimo (com um so contato, as
-duas primeiras coincidem), e do dia seguinte ao ultimo contato ate a data de
-corte dos dados.
+So alunos/curso do semestre atual. Um contato = um dia com algum contato,
+qualquer que seja o canal (e-mail automatico em alarme_emails; contatos
+registrados na tela de alarmes). Para cada aluno grava uma serie semanal de
+aulas e faltas em torno de uma data de referencia:
+
+- contatados: o dia do primeiro contato (referencia "primeiro") e, com dois
+  ou mais contatos, tambem o do segundo ("segundo");
+- comparacao: alunos com alarme critico que ainda nao tinham recebido
+  contato, alinhados no dia em que o alarme critico apareceu ("primeiro").
+  Se o contato vier depois, a serie para na ultima semana inteira antes dele.
+
+O alarme dispara no pico de faltas, e depois do pico as faltas tendem a cair
+sozinhas: a comparacao mostra quanto da queda dos contatados aconteceria de
+qualquer forma.
+
+Semana -1 = os 7 dias antes da referencia; semana 1 = os 7 dias seguintes (o
+dia da referencia nao entra). A tela soma as semanas que quiser (-N a -1
+contra 1 a N, ou ate a data de corte).
 
 As aulas vem da turma do aluno (turma_aulas), limitadas a ultima chamada
 registrada da turma (turma_ultima_aula): dias sem chamada lancada nao contam,
@@ -19,7 +30,7 @@ Nao faz parte da coleta: le so o banco e pode levar alguns minutos.
 
 Uso:
     python3 gerar_efeito_contatos.py
-    python3 gerar_efeito_contatos.py --janela 21 --min-aulas 4
+    python3 gerar_efeito_contatos.py --semanas 3 --min-aulas 4
 """
 
 from __future__ import annotations
@@ -30,14 +41,17 @@ import time
 from bisect import bisect_left, bisect_right
 from collections import defaultdict
 from datetime import date, timedelta
+from statistics import mean
 from typing import Any
 
 from db import conectar, fechar
 
 CANAL_AUTOMATICO = "email_automatico"
 CANAL_NAO_INFORMADO = "nao_informado"
-JANELAS = ("antes_primeiro", "antes_ultimo", "depois_ultimo", "ate_corte")
-SEM_FIM = "9999-12-31"
+REFERENCIAS = ("primeiro", "segundo")
+GRUPOS = ("contatado", "comparacao")
+# Semanas gravadas antes da referencia (a tela mostra a tendencia anterior).
+SEMANAS_ANTES = 6
 
 Par = tuple[int, int]
 
@@ -131,34 +145,92 @@ def carregar_contatos(cursor: Any, primeira_id: int) -> dict[Par, dict[date, set
     return contatos
 
 
-def montar_registros(
+def carregar_alarmes_criticos(cursor: Any, primeira_id: int) -> dict[Par, date]:
+    """Dia da coleta em que cada aluno/curso teve o primeiro alarme critico no semestre."""
+    saida: dict[Par, date] = {}
+    for row in cursor.execute(
+        """
+        SELECT a.aluno_id, a.curso_id, MIN(c.executada_em)
+        FROM alarmes a
+        JOIN coletas c ON c.id = a.coleta_id
+        WHERE a.coleta_id >= ?
+          AND a.severidade = 'critico'
+        GROUP BY a.aluno_id, a.curso_id
+        """,
+        (primeira_id,),
+    ).fetchall():
+        dia = data_local(row[2])
+        if dia is not None:
+            saida[(int(row[0]), int(row[1]))] = dia
+    return saida
+
+
+def semanas_da_serie(
+    referencia: date,
+    corte: date,
+    ate: date | None = None,
+) -> list[tuple[int, str, str]]:
+    """(semana, inicio, fim) de SEMANAS_ANTES semanas antes da referencia ate o corte.
+
+    Depois da referencia, com `ate`, so semanas que terminam ate esse dia.
+    """
+    semanas: list[tuple[int, str, str]] = []
+    seis_dias = timedelta(days=6)
+    for semana in range(-SEMANAS_ANTES, 0):
+        inicio = referencia + timedelta(days=7 * semana)
+        semanas.append((semana, inicio.isoformat(), (inicio + seis_dias).isoformat()))
+
+    semana = 1
+    inicio = referencia + timedelta(days=1)
+    while inicio <= corte:
+        fim = inicio + seis_dias
+        if ate is not None and fim > ate:
+            break
+        semanas.append((semana, inicio.isoformat(), fim.isoformat()))
+        semana += 1
+        inicio += timedelta(days=7)
+    return semanas
+
+
+def montar_series(
     contatos: dict[Par, dict[date, set[str]]],
-    janela: int,
+    alarmes_criticos: dict[Par, date],
+    corte: date,
 ) -> list[dict[str, Any]]:
-    """Um registro por aluno/curso contatado, com as tres janelas de comparacao."""
-    registros: list[dict[str, Any]] = []
-    um_dia = timedelta(days=1)
-    tamanho = timedelta(days=janela)
-    for par, dias in contatos.items():
-        if not dias:
-            continue
-        primeiro = min(dias)
-        ultimo = max(dias)
-        registros.append({
+    """Series dos contatados (1o e 2o contato) e da comparacao.
+
+    Comparacao = alarme critico sem contato ate o dia do alarme; quem recebe
+    contato depois entra ate a semana anterior ao contato.
+    """
+    series: list[dict[str, Any]] = []
+
+    def nova(par: Par, grupo: str, referencia: str, dia: date, total: int, canais: str,
+             ate: date | None = None) -> None:
+        series.append({
             "par": par,
-            "total": len(dias),
-            "primeiro": primeiro,
-            "ultimo": ultimo,
-            "canais_ultimo": ",".join(sorted(dias[ultimo])),
-            "janelas": {
-                "antes_primeiro": ((primeiro - tamanho).isoformat(), (primeiro - um_dia).isoformat()),
-                "antes_ultimo": ((ultimo - tamanho).isoformat(), (ultimo - um_dia).isoformat()),
-                "depois_ultimo": ((ultimo + um_dia).isoformat(), (ultimo + tamanho).isoformat()),
-                "ate_corte": ((ultimo + um_dia).isoformat(), SEM_FIM),
-            },
-            "contagem": {nome: [0, 0] for nome in JANELAS},
+            "grupo": grupo,
+            "referencia": referencia,
+            "data": dia,
+            "total": total,
+            "canais": canais,
+            "semanas": semanas_da_serie(dia, corte, ate),
+            "contagem": {},
         })
-    return registros
+
+    for par, dias in contatos.items():
+        datas = sorted(dias)
+        for referencia, dia in zip(REFERENCIAS, datas):
+            nova(par, "contatado", referencia, dia, len(datas), ",".join(sorted(dias[dia])))
+
+    for par, alarme in alarmes_criticos.items():
+        dias = contatos.get(par)
+        primeiro = min(dias) if dias else None
+        if primeiro is not None and primeiro <= alarme:
+            continue
+        ate = primeiro - timedelta(days=1) if primeiro is not None else None
+        nova(par, "comparacao", "primeiro", alarme, 0, "", ate)
+
+    return series
 
 
 def carregar_aulas(cursor: Any, inicio: date) -> dict[tuple[str, int], list[str]]:
@@ -279,12 +351,12 @@ def contar_janela(
     return planejadas + extras, len(faltas_janela)
 
 
-def calcular_janelas(
+def calcular_semanas(
     cursor: Any,
-    registros: list[dict[str, Any]],
+    series: list[dict[str, Any]],
     semestre: dict[str, Any],
 ) -> int:
-    """Preenche (aulas, faltas) de cada janela em cada registro.
+    """Preenche (aulas, faltas) de cada semana de cada serie (so semanas com aula).
 
     Usa a ultima coleta em que o aluno aparece (quem saiu do curso no meio do
     semestre continua na analise com os dados que havia).
@@ -304,10 +376,12 @@ def calcular_janelas(
     ).fetchall():
         ultima_coleta[(int(row[0]), int(row[1]))] = int(row[2])
 
-    registro_por_par: dict[Par, dict[str, Any]] = {r["par"]: r for r in registros}
+    series_por_par: dict[Par, list[dict[str, Any]]] = defaultdict(list)
+    for serie in series:
+        series_por_par[serie["par"]].append(serie)
 
     pares_por_coleta: dict[int, set[Par]] = defaultdict(set)
-    for par in registro_por_par:
+    for par in series_por_par:
         coleta_id = ultima_coleta.get(par)
         if coleta_id is not None:
             pares_por_coleta[coleta_id].add(par)
@@ -316,7 +390,6 @@ def calcular_janelas(
     ultimas = carregar_ultimas_chamadas(cursor, primeira_id)
     aulas_turma = carregar_aulas_turma(cursor, semestre["inicio"])
     ultimas_turma = carregar_ultimas_chamadas_turma(cursor, primeira_id)
-    sem_dados = 0
 
     for coleta_id in sorted(pares_por_coleta):
         pares = pares_por_coleta[coleta_id]
@@ -368,31 +441,32 @@ def calcular_janelas(
                     continue
                 limite = min(ultima, corte_iso)
                 faltas_disc = faltas.get((par, codigo), set())
-                registro = registro_por_par[par]
-                for nome, (inicio, fim) in registro["janelas"].items():
-                    aulas_janela, faltas_janela = contar_janela(
-                        datas_aula, faltas_disc, inicio, min(fim, limite)
-                    )
-                    registro["contagem"][nome][0] += aulas_janela
-                    registro["contagem"][nome][1] += faltas_janela
+                for serie in series_por_par[par]:
+                    for semana, inicio, fim in serie["semanas"]:
+                        aulas_semana, faltas_semana = contar_janela(
+                            datas_aula, faltas_disc, inicio, min(fim, limite)
+                        )
+                        if aulas_semana:
+                            contagem = serie["contagem"].setdefault(semana, [0, 0])
+                            contagem[0] += aulas_semana
+                            contagem[1] += faltas_semana
 
-    for par in registro_por_par:
-        if par not in ultima_coleta:
-            sem_dados += 1
-    return sem_dados
+    return sum(1 for par in series_por_par if par not in ultima_coleta)
 
 
 def gravar(
     cursor: Any,
     semestre: dict[str, Any],
-    janela: int,
+    semanas: int,
     min_aulas: int,
-    registros: list[dict[str, Any]],
+    series: list[dict[str, Any]],
 ) -> int:
     """Substitui a analise anterior pela nova."""
-    cursor.execute("DELETE FROM efeito_contatos_alunos")
+    cursor.execute("DELETE FROM efeito_contatos_semanas")
+    cursor.execute("DELETE FROM efeito_contatos_series")
     cursor.execute("DELETE FROM efeito_contatos_execucoes")
     corte = semestre["cortes"].get(semestre["ultima_id"])
+    contatados = sum(1 for s in series if s["grupo"] == "contatado" and s["referencia"] == "primeiro")
     cursor.execute(
         """
         INSERT INTO efeito_contatos_execucoes (
@@ -403,86 +477,104 @@ def gravar(
             semestre["ultima_id"],
             semestre["inicio"].isoformat(),
             corte.isoformat() if corte else "",
-            janela,
+            7 * semanas,
             min_aulas,
-            len(registros),
+            contatados,
         ),
     )
     execucao_id = int(cursor.lastrowid)
-    cursor.executemany(
-        """
-        INSERT INTO efeito_contatos_alunos (
-            execucao_id, aluno_id, curso_id, total_contatos,
-            primeiro_contato, ultimo_contato, canais_ultimo,
-            aulas_antes_primeiro, faltas_antes_primeiro,
-            aulas_antes_ultimo, faltas_antes_ultimo,
-            aulas_depois_ultimo, faltas_depois_ultimo,
-            aulas_ate_corte, faltas_ate_corte
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        """,
-        [
+
+    linhas: list[tuple[int, int, int, int]] = []
+    for serie in series:
+        cursor.execute(
+            """
+            INSERT INTO efeito_contatos_series (
+                execucao_id, aluno_id, curso_id, grupo, referencia,
+                data_referencia, total_contatos, canais
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+            """,
             (
                 execucao_id,
-                r["par"][0],
-                r["par"][1],
-                r["total"],
-                r["primeiro"].isoformat(),
-                r["ultimo"].isoformat(),
-                r["canais_ultimo"],
-                *r["contagem"]["antes_primeiro"],
-                *r["contagem"]["antes_ultimo"],
-                *r["contagem"]["depois_ultimo"],
-                *r["contagem"]["ate_corte"],
-            )
-            for r in registros
-        ],
+                serie["par"][0],
+                serie["par"][1],
+                serie["grupo"],
+                serie["referencia"],
+                serie["data"].isoformat(),
+                serie["total"],
+                serie["canais"],
+            ),
+        )
+        serie_id = int(cursor.lastrowid)
+        linhas.extend(
+            (serie_id, semana, aulas, faltas)
+            for semana, (aulas, faltas) in sorted(serie["contagem"].items())
+        )
+    cursor.executemany(
+        "INSERT INTO efeito_contatos_semanas (serie_id, semana, aulas, faltas) VALUES (?, ?, ?, ?)",
+        linhas,
     )
     return execucao_id
 
 
-def imprimir_resumo(registros: list[dict[str, Any]], min_aulas: int) -> None:
-    """Quantos melhoraram em cada grupo (um contato / dois ou mais)."""
-    comparacoes = [
-        ("Um contato", lambda r: r["total"] == 1, "antes_primeiro"),
-        ("2+ contatos, desde o primeiro", lambda r: r["total"] > 1, "antes_primeiro"),
-        ("2+ contatos, desde o ultimo", lambda r: r["total"] > 1, "antes_ultimo"),
-    ]
-    print("\n                                              Janela seguinte     Ate o corte")
-    print("Grupo                           Alunos  Contatos  Anal.  Melh.  Anal.  Melh.")
-    for rotulo, filtro, antes in comparacoes:
-        lista = [r for r in registros if filtro(r)]
-        colunas: list[int] = []
-        for depois in ("depois_ultimo", "ate_corte"):
-            analisados = melhoraram = 0
-            for r in lista:
-                aulas_a, faltas_a = r["contagem"][antes]
-                aulas_d, faltas_d = r["contagem"][depois]
-                if aulas_a < min_aulas or aulas_d < min_aulas:
-                    continue
-                analisados += 1
-                if faltas_d * aulas_a < faltas_a * aulas_d:
-                    melhoraram += 1
-            colunas += [analisados, melhoraram]
-        contatos = sum(r["total"] for r in lista)
-        print(
-            f"{rotulo:<31} {len(lista):>6}  {contatos:>8}  "
-            + "  ".join(f"{valor:>5}" for valor in colunas)
-        )
+def taxas_antes_depois(
+    serie: dict[str, Any],
+    semanas: int,
+    min_aulas: int,
+) -> tuple[float, float] | None:
+    """Taxas de faltas (%) nas N semanas antes e nas N depois; None sem aulas suficientes."""
+    aulas_antes = faltas_antes = aulas_depois = faltas_depois = 0
+    for semana, (aulas, faltas) in serie["contagem"].items():
+        if -semanas <= semana <= -1:
+            aulas_antes += aulas
+            faltas_antes += faltas
+        elif 1 <= semana <= semanas:
+            aulas_depois += aulas
+            faltas_depois += faltas
+    if aulas_antes < min_aulas or aulas_depois < min_aulas:
+        return None
+    return 100 * faltas_antes / aulas_antes, 100 * faltas_depois / aulas_depois
+
+
+def imprimir_resumo(series: list[dict[str, Any]], semanas: int, min_aulas: int) -> None:
+    """Media das taxas de faltas antes e depois, por referencia e grupo."""
+    print(f"\nFaltas nas {semanas} semanas antes x {semanas} depois (media dos alunos analisados)")
+    print("Referencia  Grupo        Alunos  Anal.   Antes  Depois  Variacao")
+    for referencia in REFERENCIAS:
+        for grupo in GRUPOS:
+            lista = [s for s in series if s["referencia"] == referencia and s["grupo"] == grupo]
+            if not lista:
+                continue
+            taxas = [t for t in (taxas_antes_depois(s, semanas, min_aulas) for s in lista) if t]
+            if taxas:
+                antes = mean(t[0] for t in taxas)
+                depois = mean(t[1] for t in taxas)
+                numeros = f"{antes:6.1f}%  {depois:5.1f}%  {depois - antes:+6.1f} p.p."
+            else:
+                numeros = "     -       -         -"
+            print(f"{referencia:<11} {grupo:<12} {len(lista):>6}  {len(taxas):>5}  {numeros}")
 
 
 def main(argv: list[str] | None = None) -> int:
     """Ponto de entrada."""
     parser = argparse.ArgumentParser(description="Efeito dos contatos nas faltas.")
-    parser.add_argument("--janela", type=int, default=14, help="Dias antes e depois do contato (padrao 14).")
+    parser.add_argument(
+        "--semanas",
+        type=int,
+        default=2,
+        help="Semanas antes e depois comparadas na tela (padrao 2).",
+    )
     parser.add_argument(
         "--min-aulas",
         type=int,
         default=3,
-        help="Minimo de aulas em cada janela para o aluno entrar na conta (padrao 3).",
+        help="Minimo de aulas antes e depois para o aluno entrar na conta (padrao 3).",
     )
     args = parser.parse_args(argv)
-    if args.janela < 1 or args.min_aulas < 1:
-        print("Erro: --janela e --min-aulas devem ser positivos.", file=sys.stderr)
+    if not 1 <= args.semanas <= SEMANAS_ANTES or args.min_aulas < 1:
+        print(
+            f"Erro: --semanas deve ficar entre 1 e {SEMANAS_ANTES} e --min-aulas ser positivo.",
+            file=sys.stderr,
+        )
         return 1
 
     inicio_execucao = time.monotonic()
@@ -493,23 +585,27 @@ def main(argv: list[str] | None = None) -> int:
         if semestre is None:
             print("Erro: nenhuma coleta no banco.", file=sys.stderr)
             return 1
+        corte = semestre["cortes"].get(semestre["ultima_id"]) or date.today()
 
         print("Efeito dos contatos")
         print(f"Semestre desde {semestre['inicio']:%d/%m/%Y}; coletas {semestre['primeira_id']} a {semestre['ultima_id']}")
-        print(f"Janela: {args.janela} dias antes e depois; minimo {args.min_aulas} aulas em cada")
+        print(f"Comparacao: {args.semanas} semanas antes x depois; minimo {args.min_aulas} aulas em cada lado")
 
         contatos = carregar_contatos(cursor, semestre["primeira_id"])
-        registros = montar_registros(contatos, args.janela)
+        alarmes_criticos = carregar_alarmes_criticos(cursor, semestre["primeira_id"])
+        series = montar_series(contatos, alarmes_criticos, corte)
+        comparacao = sum(1 for s in series if s["grupo"] == "comparacao")
         print(
-            f"Alunos/curso contatados: {len(registros)}; "
-            f"contatos (dias): {sum(r['total'] for r in registros)}"
+            f"Alunos/curso contatados: {len(contatos)}; "
+            f"contatos (dias): {sum(len(d) for d in contatos.values())}; "
+            f"comparacao (alarme critico sem contato): {comparacao}"
         )
 
-        sem_dados = calcular_janelas(cursor, registros, semestre)
+        sem_dados = calcular_semanas(cursor, series, semestre)
         if sem_dados:
             print(f"Sem frequencia no semestre (ignorados): {sem_dados}")
 
-        execucao_id = gravar(cursor, semestre, args.janela, args.min_aulas, registros)
+        execucao_id = gravar(cursor, semestre, args.semanas, args.min_aulas, series)
         conn.commit()
     except Exception as error:  # noqa: BLE001
         conn.rollback()
@@ -518,7 +614,7 @@ def main(argv: list[str] | None = None) -> int:
     finally:
         fechar()
 
-    imprimir_resumo(registros, args.min_aulas)
+    imprimir_resumo(series, args.semanas, args.min_aulas)
     print(f"\nExecucao #{execucao_id} gravada em {time.monotonic() - inicio_execucao:.0f}s.")
     print("Tela: /index.php/efeito-contatos")
     return 0

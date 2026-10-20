@@ -104,8 +104,7 @@ class Database
             'CREATE INDEX IF NOT EXISTS idx_frequencia_disciplina_turma
              ON frequencia_disciplina(coleta_id, id_turma)'
         );
-        self::ensureColumn('efeito_contatos_alunos', 'aulas_ate_corte', 'INTEGER NOT NULL DEFAULT 0');
-        self::ensureColumn('efeito_contatos_alunos', 'faltas_ate_corte', 'INTEGER NOT NULL DEFAULT 0');
+        self::descartarEfeitoContatosAntigo();
         self::migrarPasseLivreAtestadosEstrutura();
         self::removerPasseLivrePeriodoAtual();
         self::migrarDatasAulaCsvParaTabela();
@@ -392,6 +391,20 @@ class Database
         self::$connection->exec(
             'ALTER TABLE ' . $table . ' ADD COLUMN ' . $column . ' ' . $definition
         );
+    }
+
+    /** Análise no formato de janelas fixas (efeito_contatos_alunos): apaga para gerar de novo. */
+    private static function descartarEfeitoContatosAntigo(): void
+    {
+        $antiga = self::$connection->query(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'efeito_contatos_alunos'"
+        )->fetchColumn();
+        if ($antiga === false) {
+            return;
+        }
+
+        self::$connection->exec('DELETE FROM efeito_contatos_execucoes');
+        self::$connection->exec('DROP TABLE efeito_contatos_alunos');
     }
 
     /** Migra CSV legado disciplina_grade.datas_aula → disciplina_aulas (uma vez). */

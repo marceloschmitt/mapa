@@ -56,9 +56,26 @@ class EfeitoContatosController extends Controller
             }
         }
 
+        $referencia = $this->opcao('ref', ['primeiro', 'segundo']);
+        $depois = $this->opcao('depois', ['janela', 'corte']);
+        $limiteFrequencia = $analytics->limiteFrequencia();
+        $semanas = max(1, intdiv((int)($execucao['janela_dias'] ?? 14), 7));
+
         $resumo = null;
+        $serie = null;
         if ($execucao !== null && $aviso === null) {
-            $resumo = $repo->resumo((int)$execucao['id'], (int)$execucao['min_aulas'], $cursoIds);
+            $execucaoId = (int)$execucao['id'];
+            $minAulas = (int)$execucao['min_aulas'];
+            $resumo = $repo->resumo(
+                $execucaoId,
+                $referencia,
+                $semanas,
+                $depois,
+                $minAulas,
+                100 - $limiteFrequencia,
+                $cursoIds
+            );
+            $serie = $repo->serieSemanal($execucaoId, $referencia, $semanas, $minAulas, $cursoIds);
         }
 
         $podeGerar = Auth::isAdmin();
@@ -72,6 +89,12 @@ class EfeitoContatosController extends Controller
         $this->render('efeito_contatos/index', [
             'execucao' => $execucao,
             'resumo' => $resumo,
+            'serie' => $serie,
+            'referencia' => $referencia,
+            'depois' => $depois,
+            'semanas' => $semanas,
+            'limiteFrequencia' => $limiteFrequencia,
+            'minAlunos' => EfeitoContatosRepository::MIN_ALUNOS,
             'rotulosCanal' => self::ROTULOS_CANAL,
             'cursosDisponiveis' => $cursosDisponiveis,
             'cursoSelecionado' => $cursoSelecionado,
@@ -106,6 +129,18 @@ class EfeitoContatosController extends Controller
             session_write_close();
         }
         $this->redirect('/efeito-contatos');
+    }
+
+    /**
+     * Valor do parâmetro GET se for um dos permitidos; senão o primeiro.
+     *
+     * @param list<string> $permitidos
+     */
+    private function opcao(string $parametro, array $permitidos): string
+    {
+        $pedido = trim((string)($_GET[$parametro] ?? ''));
+
+        return in_array($pedido, $permitidos, true) ? $pedido : $permitidos[0];
     }
 
     /**
