@@ -20,3 +20,4 @@ Veja **[INSTALL.md](INSTALL.md)** (clone, `.env`, `EMAIL_SEND` em produção, pr
 - [Banco de dados](docs/banco-de-dados.md)
 - [Servidor local](docs/servidor-local.md) / [Apache](docs/servidor-apache.md)
 - [Pipeline Python](python/README.md)
+- [Efeito dos contatos](docs/efeito-contatos.md) — como medimos a eficácia dos alertas
