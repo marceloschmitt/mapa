@@ -98,7 +98,7 @@ continuam com o semestre. Detalhes em
 
 | # | Programa | O que faz | Lê | Gera |
 |---|----------|-----------|----|------|
-| 0 | `consulta_alunos_massa.py` | Consulta em massa (sem login), respostas cruas: cadastro e frequência por intervalo (só ATIVO e FORMANDO, uma consulta por status). | BD (`configuracoes` API) | `resposta_alunos_massa_cadastro.json`, `resposta_alunos_massa_intervalo.json` |
+| 0 | `consulta_alunos_massa.py` | Consulta em massa (sem login), respostas cruas: cadastro e frequência por intervalo (ATIVO e FORMANDO, mês a mês, fundidos como nos integrados). | BD (`configuracoes` API) | `resposta_alunos_massa_cadastro.json`, `resposta_alunos_massa_intervalo.json` |
 | 1 | `consulta_inicial.py` | Matriculados do período corrente + 2 anteriores | BD (`configuracoes` API) | `resposta_matriculas.json`, `resposta_matriculas_AAAA_S.json` |
 | 2 | `analisar_frequencia.py` | Frequência (ATIVO/FORMANDO), com a turma do aluno em cada disciplina; integrados com o ano letivo somado | `resposta_alunos_massa_intervalo.json`, `resposta_alunos_massa_cadastro.json`, `resposta_matriculas.json`, `integrados_anual_AAAA.json` (opcional) | `tabela_frequencia.json` |
 | 3 | `importar_frequencia.py` | Nova coleta no SQLite (alunos, frequência, faltas) | `tabela_frequencia.json`, `config/consultas.json` | BD (`coletas`, `alunos`, `frequencia_curso`, `frequencia_disciplina`, `faltas_dia`, …) |
@@ -150,7 +150,7 @@ php tests/php/frequencia_anual_test.php        # integrados nos ingressantes e n
 | Arquivo | O que cobre |
 |---------|-------------|
 | `python/tests/test_turmas.py` | `id_turma` vindo das matrículas; turmas e professores da grade; chamada da turma (maior data entre os alunos) e herança do histórico quando a disciplina tem uma só turma no curso; alarme de 3 semanas com as aulas da turma; efeito dos contatos parando na última chamada da turma |
-| `python/tests/test_consulta_alunos_massa.py` | Intervalo em massa dividido por status: URLs com `&status=ATIVO` e `&status=FORMANDO` do período inteiro, respostas juntadas no mesmo arquivo, arquivo anterior mantido se uma falhar |
+| `python/tests/test_consulta_alunos_massa.py` | Intervalo em massa por status e mês: URLs mensais ATIVO/FORMANDO, fusão somando contadores e recalculando %, arquivo anterior mantido se um mês falhar |
 | `python/tests/test_integrados_anual.py` | Busca dos meses encerrados (`consulta_integrados_anual.py`, API simulada): blocos de até 2 meses, só integrados, `&status=ATIVO`, nova tentativa mês a mês, versão anterior mantida quando um bloco falha |
 | `python/tests/test_frequencia_anual.py` | Soma do ano letivo (`integrados_anual.py`): arredondamento como a API, disciplinas casadas pela matrícula no componente, arquivo ausente ou com buraco; só integrados ganham `frequencia_anual`; importação grava o ano e `frequencia_desde` (faltas por dia seguem do semestre); alarme com carência do início do ano e mensagem "no ano letivo" |
 | `tests/php/turmas_test.php` | Turmas do usuário professor; alarmes, contagens e marcação restritos às turmas dele (sem turma identificada continua visível); disciplinas críticas uma linha por turma com os professores da turma; chave de envio do e-mail de chamada por turma, reconhecendo o envio antigo por disciplina |

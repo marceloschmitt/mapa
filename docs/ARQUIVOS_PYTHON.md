@@ -34,15 +34,14 @@ configurados na tela Configuração da API (nada de URL no código):
    `/sig/sigaa/alunos/desempenho/frequencia/intervalo?data_inicial={data_inicial}&data_final={data_final}`).
    `{data_inicial}` e `{data_final}` são trocados pelas datas da configuração
    em `AAAA-MM-DD`. Um registro por vínculo, com `status_discente`, totais,
-   disciplinas e `ausencias_especiais`. São duas consultas do período inteiro,
-   uma com `&status=ATIVO` e outra com `&status=FORMANDO` (os únicos status que
-   entram na frequência), juntadas em `resposta_alunos_massa_intervalo.json`,
-   lido por `analisar_frequencia.py` e `importar_chamadas.py`. Sem o filtro
-   (todos os status) a resposta passava dos 60 s do Cloudflare do IFRS (HTTP
-   504). Em 09/10/2026, de 25/07 a 31/12: ATIVO em 40 s, FORMANDO em 4 s. Se uma
-   consulta passar de 45 s, o log avisa que está perto do limite; se o ATIVO
-   voltar a dar 504 no fim do semestre, a saída é quebrá-lo por período e somar
-   as contagens.
+   disciplinas e `ausencias_especiais`. Para cada status (`ATIVO` e `FORMANDO`,
+   os únicos que entram na frequência) o semestre é consultado **mês a mês**
+   (o período inteiro com ATIVO passa dos 60 s do Cloudflare — HTTP 504). Os
+   blocos são fundidos somando horários/faltas/presenças e recalculando o
+   percentual (como nos integrados anuais); dias de falta, última aula e
+   `ausencias_especiais` são unidos. O resultado vai para
+   `resposta_alunos_massa_intervalo.json`, lido por `analisar_frequencia.py` e
+   `importar_chamadas.py`. Se um mês falhar, o arquivo anterior é mantido.
 
 Cada arquivo só é substituído quando a sua chamada dá certo; em falha, o
 anterior é mantido e a coleta é interrompida (a frequência não pode ser
