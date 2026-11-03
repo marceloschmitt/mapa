@@ -2285,6 +2285,83 @@ class AnalyticsRepository
     }
 
     /**
+     * Logins marcados com auxílio estudantil (mapa login => true).
+     *
+     * @return array<string, true>
+     */
+    public function loginsComAuxilio(): array
+    {
+        $statement = $this->db->query('SELECT login FROM alunos_auxilio_estudantil');
+        $mapa = [];
+        foreach ($statement->fetchAll() as $row) {
+            $login = trim((string)($row['login'] ?? ''));
+            if ($login !== '') {
+                $mapa[$login] = true;
+            }
+        }
+
+        return $mapa;
+    }
+
+    public function temAuxilio(string $login): bool
+    {
+        $login = trim($login);
+        if ($login === '') {
+            return false;
+        }
+        $statement = $this->db->prepare(
+            'SELECT 1 FROM alunos_auxilio_estudantil WHERE login = :login LIMIT 1'
+        );
+        $statement->execute(['login' => $login]);
+
+        return (bool)$statement->fetchColumn();
+    }
+
+    public function marcarAuxilio(string $login, int $usuarioId): void
+    {
+        $login = trim($login);
+        if ($login === '') {
+            return;
+        }
+        $statement = $this->db->prepare(
+            'INSERT INTO alunos_auxilio_estudantil (login, marcado_por)
+             VALUES (:login, :marcado_por)
+             ON CONFLICT(login) DO UPDATE SET
+               marcado_em = datetime(\'now\', \'localtime\'),
+               marcado_por = excluded.marcado_por'
+        );
+        $statement->execute([
+            'login' => $login,
+            'marcado_por' => $usuarioId > 0 ? $usuarioId : null,
+        ]);
+    }
+
+    public function desmarcarAuxilio(string $login): void
+    {
+        $login = trim($login);
+        if ($login === '') {
+            return;
+        }
+        $statement = $this->db->prepare(
+            'DELETE FROM alunos_auxilio_estudantil WHERE login = :login'
+        );
+        $statement->execute(['login' => $login]);
+    }
+
+    /** Alterna a marcação; devolve o estado final (true = marcado). */
+    public function alternarAuxilio(string $login, int $usuarioId): bool
+    {
+        if ($this->temAuxilio($login)) {
+            $this->desmarcarAuxilio($login);
+
+            return false;
+        }
+        $this->marcarAuxilio($login, $usuarioId);
+
+        return true;
+    }
+
+    /**
      * Alunos/cursos da coleta para a tela Frequencia corrente (ordem alfabetica).
      * Inclui quem so tem disciplinas (sem aulas registradas: frequencia nula).
      * Integrados com frequencia anual trazem frequencia_desde preenchido.
@@ -2292,8 +2369,12 @@ class AnalyticsRepository
      * @param list<int>|null $cursoIds
      * @return list<array<string, mixed>>
      */
-    public function linhasFrequenciaCorrente(int $coletaId, ?array $cursoIds = null, string $nome = ''): array
-    {
+    public function linhasFrequenciaCorrente(
+        int $coletaId,
+        ?array $cursoIds = null,
+        string $nome = '',
+        bool $somenteAuxilio = false
+    ): array {
         if ($cursoIds !== null && $cursoIds === []) {
             return [];
         }
@@ -2330,6 +2411,13 @@ class AnalyticsRepository
             $padrao = '%' . str_replace(['%', '_'], '', $nome) . '%';
             $params['nome_filtro'] = $padrao;
             $params['nome_filtro_social'] = $padrao;
+        }
+
+        if ($somenteAuxilio) {
+            $sql .= ' AND EXISTS (
+                        SELECT 1 FROM alunos_auxilio_estudantil ax
+                        WHERE ax.login = a.login
+                      )';
         }
 
         $statement = $this->db->prepare($sql);

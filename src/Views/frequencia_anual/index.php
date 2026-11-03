@@ -6,9 +6,13 @@ $totalAlunos = (int)($totalAlunos ?? 0);
 $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
 $cursosDisponiveis = $cursosDisponiveis ?? [];
 $filtroNome = (string)($filtroNome ?? '');
+$somenteAuxilio = !empty($somenteAuxilio);
+$loginsComAuxilio = $loginsComAuxilio ?? [];
+$podeMarcarAuxilio = !empty($podeMarcarAuxilio);
 $meta = $meta ?? null;
 $periodoAtual = (string)($periodoAtual ?? '');
 $cursoExibido = (string)($cursoExibido ?? 'Todos os cursos');
+$urlAuxilio = url('/frequencia-anual/auxilio');
 
 /**
  * @param mixed $valor
@@ -92,7 +96,15 @@ foreach ($linhas as $linhaAnual) {
                         </select>
                     </div>
                 <?php endif; ?>
-                <?php if ($filtroNome !== '' || $cursoSelecionado !== 'todos'): ?>
+                <div class="form-check mb-1">
+                    <input class="form-check-input" type="checkbox" value="1" id="filtro-auxilio"
+                           name="auxilio" <?= $somenteAuxilio ? 'checked' : '' ?>
+                           onchange="this.form.submit()">
+                    <label class="form-check-label small" for="filtro-auxilio">
+                        Somente auxílio estudantil
+                    </label>
+                </div>
+                <?php if ($filtroNome !== '' || $cursoSelecionado !== 'todos' || $somenteAuxilio): ?>
                     <a href="<?= htmlspecialchars(url('/frequencia-anual'), ENT_QUOTES, 'UTF-8') ?>"
                        class="btn btn-outline-secondary">Limpar</a>
                 <?php endif; ?>
@@ -128,8 +140,8 @@ foreach ($linhas as $linhaAnual) {
 <?php if (is_array($meta) && empty($erro) && $linhas === []): ?>
     <div class="card border-0 shadow-sm">
         <div class="card-body text-secondary">
-            <?php if ($filtroNome !== ''): ?>
-                Nenhum aluno encontrado para “<?= htmlspecialchars($filtroNome, ENT_QUOTES, 'UTF-8') ?>”.
+            <?php if ($filtroNome !== '' || $somenteAuxilio || $cursoSelecionado !== 'todos'): ?>
+                Nenhum aluno encontrado com os filtros atuais.
             <?php else: ?>
                 Nenhum aluno com frequência neste semestre.
             <?php endif; ?>
@@ -148,6 +160,7 @@ foreach ($linhas as $linhaAnual) {
                             <th>Nome</th>
                             <th>Matrícula</th>
                             <th>Curso</th>
+                            <th class="text-center" style="width: 5.5rem;">Auxílio</th>
                             <th class="text-end">Frequência*</th>
                         </tr>
                     </thead>
@@ -159,6 +172,8 @@ foreach ($linhas as $linhaAnual) {
                             $nome = $nomeSocial !== ''
                                 ? $nomeSocial
                                 : trim((string)($linha['nome'] ?? ''));
+                            $login = trim((string)($linha['login'] ?? ''));
+                            $temAuxilio = $login !== '' && !empty($loginsComAuxilio[$login]);
                             $chave = $linha['aluno_id'] . '-' . $linha['curso_id'];
                             $anualDesde = $fmtData($linha['frequencia_desde'] ?? '');
                             $disciplinas = $disciplinasPorLinha[$chave] ?? [];
@@ -188,11 +203,26 @@ foreach ($linhas as $linhaAnual) {
                             <tr class="linha-passe-livre"
                                 tabindex="0"
                                 role="button"
-                                data-id="<?= htmlspecialchars($chave, ENT_QUOTES, 'UTF-8') ?>">
+                                data-id="<?= htmlspecialchars($chave, ENT_QUOTES, 'UTF-8') ?>"
+                                data-login="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8') ?>">
                                 <td class="text-end text-secondary pe-1"><?= $i + 1 ?></td>
                                 <td class="fw-semibold"><?= htmlspecialchars($nome, ENT_QUOTES, 'UTF-8') ?></td>
                                 <td><?= htmlspecialchars((string)($linha['matricula'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
                                 <td><?= $anualDesde !== '' ? '** ' : '' ?><?= htmlspecialchars((string)($linha['nome_curso'] ?? ''), ENT_QUOTES, 'UTF-8') ?></td>
+                                <td class="text-center celula-auxilio" onclick="event.stopPropagation()">
+                                    <?php if ($podeMarcarAuxilio && $login !== ''): ?>
+                                        <input type="checkbox"
+                                               class="form-check-input check-auxilio m-0"
+                                               data-login="<?= htmlspecialchars($login, ENT_QUOTES, 'UTF-8') ?>"
+                                               title="Recebe auxílio estudantil"
+                                               aria-label="Recebe auxílio estudantil"
+                                               <?= $temAuxilio ? 'checked' : '' ?>>
+                                    <?php elseif ($temAuxilio): ?>
+                                        <span class="badge text-bg-info">Auxílio</span>
+                                    <?php else: ?>
+                                        <span class="text-secondary">—</span>
+                                    <?php endif; ?>
+                                </td>
                                 <td class="text-end">
                                     <code><?= htmlspecialchars($fmtPct($linha['frequencia'] ?? null), ENT_QUOTES, 'UTF-8') ?></code>
                                 </td>
@@ -371,12 +401,61 @@ foreach ($linhas as $linhaAnual) {
             }
         }
 
-        corpo.addEventListener('click', abrirDaLinha);
+        corpo.addEventListener('click', function (ev) {
+            if (ev.target.closest('.celula-auxilio')) {
+                return;
+            }
+            abrirDaLinha(ev);
+        });
         corpo.addEventListener('keydown', function (ev) {
+            if (ev.target.closest('.celula-auxilio')) {
+                return;
+            }
             if (ev.key === 'Enter' || ev.key === ' ') {
                 ev.preventDefault();
                 abrirDaLinha(ev);
             }
+        });
+
+        const urlAuxilio = <?= json_encode($urlAuxilio, JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP) ?>;
+        corpo.addEventListener('change', function (ev) {
+            const check = ev.target.closest('.check-auxilio');
+            if (!check) {
+                return;
+            }
+            const login = String(check.dataset.login || '').trim();
+            if (login === '') {
+                return;
+            }
+            check.disabled = true;
+            const body = new URLSearchParams();
+            body.set('login', login);
+            fetch(urlAuxilio, {
+                method: 'POST',
+                headers: {
+                    'Content-Type': 'application/x-www-form-urlencoded;charset=UTF-8',
+                    'Accept': 'application/json'
+                },
+                body: body.toString(),
+                credentials: 'same-origin'
+            }).then(function (resp) {
+                return resp.json().then(function (data) {
+                    return { okHttp: resp.ok, data: data };
+                });
+            }).then(function (resultado) {
+                if (!resultado.okHttp || !resultado.data || !resultado.data.ok) {
+                    check.checked = !check.checked;
+                    return;
+                }
+                const marcado = !!resultado.data.marcado;
+                corpo.querySelectorAll('.check-auxilio[data-login="' + CSS.escape(login) + '"]').forEach(function (el) {
+                    el.checked = marcado;
+                });
+            }).catch(function () {
+                check.checked = !check.checked;
+            }).finally(function () {
+                check.disabled = false;
+            });
         });
     });
     </script>

@@ -33,7 +33,9 @@ from typing import Any
 from api_auth import carregar_config_api, obter_access_token, verificar_ssl
 from config_consultas import parsear_data
 from consulta_alunos_massa import (
+    Periodo,
     consultar_com_tentativas,
+    dividir_periodo as dividir_periodo_calendario,
     salvar_json,
     url_intervalo,
 )
@@ -46,25 +48,10 @@ TIMEOUT_SEGUNDOS = 120
 TENTATIVAS = 2
 PAGINA_CONFIG = "/index.php/configuracoes/api"
 
-Periodo = tuple[date, date]
-
-
-def fim_do_mes(dia: date, meses_adiante: int = 0) -> date:
-    """Ultimo dia do mes de dia, deslocado meses_adiante meses."""
-    indice = dia.month - 1 + meses_adiante + 1
-    primeiro_seguinte = date(dia.year + indice // 12, indice % 12 + 1, 1)
-    return primeiro_seguinte - timedelta(days=1)
-
 
 def dividir_periodo(inicio: date, fim: date, meses: int = MESES_POR_BLOCO) -> list[Periodo]:
-    """Blocos de ate `meses` meses de calendario cobrindo inicio..fim sem buracos."""
-    blocos: list[Periodo] = []
-    atual = inicio
-    while atual <= fim:
-        ultimo = min(fim_do_mes(atual, meses - 1), fim)
-        blocos.append((atual, ultimo))
-        atual = ultimo + timedelta(days=1)
-    return blocos
+    """Blocos de ate `meses` meses (padrao 2 neste script)."""
+    return dividir_periodo_calendario(inicio, fim, meses=meses)
 
 
 def periodo_do_ano(config: dict[str, str]) -> Periodo | None:
@@ -129,7 +116,10 @@ def anteriores_cobrindo(
     anteriores: dict[str, dict[str, Any]],
 ) -> list[dict[str, Any]] | None:
     """Blocos antigos que cobrem exatamente o periodo (inteiro ou mes a mes)."""
-    for divisao in ([periodo], dividir_periodo(periodo[0], periodo[1], meses=1)):
+    for divisao in (
+        [periodo],
+        dividir_periodo(periodo[0], periodo[1], meses=1),
+    ):
         blocos = [anteriores.get(chave_periodo(p)) for p in divisao]
         if all(b is not None for b in blocos):
             return blocos  # type: ignore[return-value]
@@ -216,7 +206,7 @@ def executar(config: dict[str, str], token: str) -> int:
 
     blocos: list[dict[str, Any]] = []
     erros: list[str] = []
-    for bloco in dividir_periodo(inicio, fim):
+    for bloco in dividir_periodo(inicio, fim, meses=MESES_POR_BLOCO):
         novos, erros_bloco, _ = buscar_bloco(bloco, token, config, anteriores)
         blocos.extend(novos)
         erros.extend(erros_bloco)
