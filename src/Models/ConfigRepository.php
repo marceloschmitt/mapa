@@ -490,14 +490,25 @@ class ConfigRepository
     }
 
     /**
-     * Grava os parametros das regras de alarme (ja validados).
+     * Grava os parametros das regras de alarme (ja validados) e guarda a
+     * gravacao em alarme_config_historico. Na primeira gravacao, guarda antes a
+     * configuracao que estava em vigor, para o historico comecar completo.
      *
      * @param array<string, mixed> $config
      */
-    public function saveAlarmeConfig(array $config): void
+    public function saveAlarmeConfig(array $config, ?int $usuarioId = null): void
     {
         $config = $this->normalizarAlarmeConfig($config);
         $descricoes = self::descricoesAlarme();
+
+        $vazio = $this->pdo->query('SELECT COUNT(*) FROM alarme_config_historico')->fetchColumn();
+        if ((int)$vazio === 0) {
+            $this->registrarHistoricoAlarme(
+                $this->getAlarmeConfig(),
+                null,
+                'Configuração em vigor antes do histórico (data de início desconhecida).'
+            );
+        }
 
         foreach (self::chavesAlarme() as $campo => $chave) {
             $valor = $config[$campo];
@@ -508,6 +519,23 @@ class ConfigRepository
         }
 
         $this->alarmeConfigCache = $config;
+        $this->registrarHistoricoAlarme($config, $usuarioId, null);
+    }
+
+    /**
+     * @param array<string, mixed> $config
+     */
+    private function registrarHistoricoAlarme(array $config, ?int $usuarioId, ?string $observacao): void
+    {
+        $statement = $this->pdo->prepare(
+            'INSERT INTO alarme_config_historico (config_json, salvo_por, observacao)
+             VALUES (:config_json, :salvo_por, :observacao)'
+        );
+        $statement->execute([
+            'config_json' => (string)json_encode($config, JSON_UNESCAPED_UNICODE),
+            'salvo_por' => $usuarioId !== null && $usuarioId > 0 ? $usuarioId : null,
+            'observacao' => $observacao,
+        ]);
     }
 
     /**

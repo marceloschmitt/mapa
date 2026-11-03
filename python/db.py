@@ -131,6 +131,50 @@ def _migrar_datas_aula_csv(conn: sqlite3.Connection) -> None:
         )
 
 
+CHAVE_CONTATOS_MIGRADOS = "contatos_aluno_migrado"
+
+# Mesmo SQL de Database::migrarContatosAluno (PHP): quem abrir o banco primeiro copia.
+SQL_COPIAR_CONTATOS = (
+    """
+    INSERT OR IGNORE INTO contatos_aluno (
+        aluno_id, curso_id, data_contato, canal, origem, registrado_em, alarme_email_id
+    )
+    SELECT aluno_id, curso_id, substr(enviado_em, 1, 10), 'email_automatico', 'automatico',
+           enviado_em, id
+    FROM alarme_emails
+    """,
+    """
+    INSERT INTO contatos_aluno (
+        aluno_id, curso_id, data_contato, canal, origem, registrado_em, registrado_por
+    )
+    SELECT aluno_id, curso_id, substr(visualizado_em, 1, 10),
+           COALESCE(NULLIF(TRIM(contato_tipo), ''), 'nao_informado'), 'migrado',
+           MIN(visualizado_em), visualizado_por
+    FROM alarmes
+    WHERE visualizado = 1
+      AND visualizado_em IS NOT NULL
+      AND COALESCE(contato_tipo, '') <> 'email_automatico'
+    GROUP BY aluno_id, curso_id, substr(visualizado_em, 1, 10),
+             COALESCE(NULLIF(TRIM(contato_tipo), ''), 'nao_informado'), visualizado_por
+    """,
+)
+
+
+def _migrar_contatos_aluno(conn: sqlite3.Connection) -> None:
+    """Copia uma vez os contatos ja registrados (e-mails enviados e alarmes tratados)."""
+    feito = conn.execute(
+        "SELECT 1 FROM configuracoes WHERE chave = ?", (CHAVE_CONTATOS_MIGRADOS,)
+    ).fetchone()
+    if feito is not None:
+        return
+    for sql in SQL_COPIAR_CONTATOS:
+        conn.execute(sql)
+    conn.execute(
+        "INSERT INTO configuracoes (chave, valor, descricao) VALUES (?, '1', ?)",
+        (CHAVE_CONTATOS_MIGRADOS, "Contatos antigos copiados para contatos_aluno"),
+    )
+
+
 def _descartar_efeito_contatos_antigo(conn: sqlite3.Connection) -> None:
     """Analise no formato de janelas fixas (efeito_contatos_alunos): apaga para gerar de novo."""
     antiga = conn.execute(
@@ -154,6 +198,7 @@ def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
     # Coluna legada: mantida se existir; novas instalações não a criam.
     _ensure_column(conn, "disciplina_grade", "datas_aula", "TEXT NOT NULL DEFAULT ''")
     _ensure_column(conn, "cursos", "curso_nivel", "TEXT")
+    _ensure_column(conn, "coletas", "status", "TEXT")
     _ensure_column(conn, "frequencia_curso", "data_inicio_aulas", "TEXT")
     _ensure_column(conn, "frequencia_curso", "frequencia_desde", "TEXT")
     _ensure_column(conn, "perda_vaga_candidatos", "matriculado_periodo_atual", "INTEGER NOT NULL DEFAULT 0")
@@ -164,11 +209,14 @@ def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
     _ensure_column(conn, "frequencia_disciplina", "data_trancamento", "TEXT")
     _ensure_column(conn, "frequencia_disciplina", "id_turma", "INTEGER")
     _ensure_column(conn, "alarmes", "id_turma", "INTEGER")
+    _ensure_column(conn, "alarmes", "email_enviado_em", "TEXT")
+    _ensure_column(conn, "alarmes", "fechamento", "TEXT")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_frequencia_disciplina_turma "
         "ON frequencia_disciplina(coleta_id, id_turma)"
     )
     _descartar_efeito_contatos_antigo(conn)
+    _migrar_contatos_aluno(conn)
     _migrar_datas_aula_csv(conn)
     # Tabelas descontinuadas: removidas de bancos antigos.
     conn.execute("DROP TABLE IF EXISTS disciplina_carga_horaria")

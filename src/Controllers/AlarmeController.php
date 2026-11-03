@@ -7,28 +7,12 @@ use Mapa\Core\Auth;
 use Mapa\Core\Controller;
 use Mapa\Core\Session;
 use Mapa\Models\AnalyticsRepository;
+use Mapa\Models\ContatoRepository;
 use Mapa\Models\UserRepository;
 use Mapa\Services\AlarmeEmailService;
 
 class AlarmeController extends Controller
 {
-    public const CONTATO_TIPOS = [
-        'email' => 'E-mail enviado',
-        'whatsapp' => 'WhatsApp',
-        'telefone' => 'Ligação telefônica',
-        'presencial' => 'Conversa presencial',
-        'assistencia' => 'Encaminhamento para Assistência Estudantil',
-    ];
-
-    public const ROTULOS_CONTATO_EXIBICAO = [
-        'email' => 'E-mail enviado',
-        'email_automatico' => 'E-mail automático enviado',
-        'whatsapp' => 'WhatsApp',
-        'telefone' => 'Ligação telefônica',
-        'presencial' => 'Conversa presencial',
-        'assistencia' => 'Encaminhamento para Assistência Estudantil',
-    ];
-
     public function index(): void
     {
         $this->requireAuth();
@@ -63,8 +47,14 @@ class AlarmeController extends Controller
             'isProfessor' => $isProfessor,
             'codigosMinhasDisciplinas' => $isProfessor ? ($codigosDisciplina ?? []) : [],
             'somenteAbertos' => $somenteAbertos,
-            'rotulosContato' => self::CONTATO_TIPOS,
-            'rotulosContatoExibicao' => self::ROTULOS_CONTATO_EXIBICAO,
+            'rotulosContato' => ContatoRepository::CANAIS,
+            'rotulosContatoExibicao' => ContatoRepository::ROTULOS_CANAL,
+            'rotulosMotivo' => ContatoRepository::MOTIVOS,
+            'hoje' => date('Y-m-d'),
+            'contatoMaisAntigo' => date('Y-m-d', strtotime('-' . ContatoRepository::DIAS_RETROATIVOS . ' days')),
+            'maxObservacao' => ContatoRepository::MAX_OBSERVACAO,
+            'alunosSemContato' => 0,
+            'alunosAguardandoRetorno' => 0,
             'isAdmin' => Auth::isAdmin(),
         ];
 
@@ -265,7 +255,25 @@ class AlarmeController extends Controller
             unset($grupo);
         }
 
+        // Contatos de cada aluno; com casos abertos, quem ainda não teve contato e quem aguarda retorno.
+        $resumoContatos = (new ContatoRepository())->resumoPorAluno(array_map(
+            static fn(array $grupo): int => (int)$grupo['aluno']['id'],
+            array_values($alarmesPorAluno)
+        ));
+        $alunosSemContato = 0;
+        $alunosAguardandoRetorno = 0;
+        foreach ($alarmesPorAluno as &$grupo) {
+            $chave = (int)$grupo['aluno']['id'] . '|' . (int)$grupo['aluno']['curso_id'];
+            $grupo['contatos'] = $resumoContatos[$chave] ?? null;
+            if ((int)$grupo['abertos'] > 0) {
+                $grupo['contatos'] === null ? $alunosSemContato++ : $alunosAguardandoRetorno++;
+            }
+        }
+        unset($grupo);
+
         $this->render('alarmes/index', array_merge($dadosBase, [
+            'alunosSemContato' => $alunosSemContato,
+            'alunosAguardandoRetorno' => $alunosAguardandoRetorno,
             'coleta' => $coleta,
             'alarmesPorAluno' => array_values($alarmesPorAluno),
             'totalAlarmes' => $totalAlarmes,
@@ -279,14 +287,114 @@ class AlarmeController extends Controller
         ]));
     }
 
-    public function visualizar(): void
+    /**
+     * Registra um contato com o aluno (data real, canal, se conseguiu falar,
+     * motivo). Não encerra o caso: ele segue aberto até o aluno voltar a
+     * frequentar ou alguém encerrar.
+     */
+    public function contato(): void
     {
         $user = $this->requireAuth();
+        [$redirect, $cursoParam] = $this->destinoRetorno();
+        $coletaId = (int)($_POST['coleta_id'] ?? 0);
+        $alunoId = (int)($_POST['aluno_id'] ?? 0);
+        $cursoId = (int)($_POST['curso_id'] ?? 0);
+        $codigoDisciplina = trim((string)($_POST['codigo_disciplina'] ?? ''));
+
+        if ($coletaId <= 0 || $alunoId <= 0 || $cursoId <= 0) {
+            Session::flash('erro', 'Aluno inválido.');
+            $this->redirect($redirect);
+        }
+
+        $validacao = ContatoRepository::validar($_POST, date('Y-m-d'));
+        if ($validacao['erros'] !== []) {
+            Session::flash('erro', implode(' ', $validacao['erros']));
+            $this->redirect($redirect);
+        }
+
+        if (!$this->podeAgirNoAluno($coletaId, $alunoId, $cursoId, $cursoParam, $codigoDisciplina)) {
+            Session::flash('erro', 'Sem permissão para registrar contato com este aluno.');
+            $this->redirect($redirect);
+        }
+
+        (new ContatoRepository())->registrar($validacao['dados'] + [
+            'aluno_id' => $alunoId,
+            'curso_id' => $cursoId,
+            'origem' => 'manual',
+            'codigo_disciplina' => $codigoDisciplina,
+            'registrado_por' => (int)$user['id'],
+        ]);
+
+        Session::flash(
+            'sucesso',
+            'Contato registrado. O caso continua aberto até o aluno voltar a frequentar ou alguém encerrar.'
+        );
+        $this->redirect($redirect);
+    }
+
+    /**
+     * Encerra a mão um alarme (alarme_id) ou o caso inteiro do aluno.
+     */
+    public function encerrar(): void
+    {
+        $user = $this->requireAuth();
+        [$redirect, $cursoParam] = $this->destinoRetorno();
         $alarmeId = (int)($_POST['alarme_id'] ?? 0);
         $coletaId = (int)($_POST['coleta_id'] ?? 0);
         $alunoId = (int)($_POST['aluno_id'] ?? 0);
         $cursoId = (int)($_POST['curso_id'] ?? 0);
-        $contatoTipo = trim((string)($_POST['contato_tipo'] ?? ''));
+
+        $escopo = $this->escopoAlarmes($cursoParam);
+        $repo = new AnalyticsRepository();
+        if (Auth::isProfessor()) {
+            $repo->restringirTurmas(Auth::turmaIds());
+        }
+        $usuarioId = (int)$user['id'];
+
+        if ($alarmeId > 0) {
+            $ok = $repo->encerrarAlarme($alarmeId, $usuarioId, $escopo['cursoIds'], $escopo['codigosDisciplina']);
+            Session::flash($ok ? 'sucesso' : 'erro', $ok ? 'Alarme encerrado.' : 'Não foi possível encerrar o alarme.');
+            $this->redirect($redirect);
+        }
+
+        if ($coletaId <= 0 || $alunoId <= 0 || $cursoId <= 0) {
+            Session::flash('erro', 'Aluno inválido.');
+            $this->redirect($redirect);
+        }
+
+        $encerrados = $repo->encerrarAlarmesAluno(
+            $coletaId,
+            $alunoId,
+            $cursoId,
+            $usuarioId,
+            $escopo['cursoIds'],
+            $escopo['codigosDisciplina']
+        );
+        Session::flash(
+            $encerrados > 0 ? 'sucesso' : 'erro',
+            $encerrados > 0
+                ? 'Caso encerrado (' . $encerrados . ' ' . ($encerrados === 1 ? 'alarme' : 'alarmes') . ').'
+                : 'Nenhum alarme aberto para encerrar.'
+        );
+        $this->redirect($redirect);
+    }
+
+    /** Rota antiga (registrar contato encerrava o alarme): só sobra para telas abertas antes da mudança. */
+    public function visualizar(): void
+    {
+        $this->requireAuth();
+        [$redirect] = $this->destinoRetorno();
+        Session::flash('erro', 'A tela de alarmes foi atualizada. Registre o contato de novo pelo menu Ação.');
+        $this->redirect($redirect);
+    }
+
+    /**
+     * Volta para a lista com os mesmos filtros; devolve [url, curso selecionado].
+     *
+     * @return array{0: string, 1: string}
+     */
+    private function destinoRetorno(): array
+    {
         $abertos = ($_POST['abertos'] ?? '1') === '1' ? '1' : '0';
         $cursoParam = trim((string)($_POST['curso'] ?? 'todos'));
         if ($cursoParam === '') {
@@ -297,55 +405,44 @@ class AlarmeController extends Controller
             $redirect .= '&curso=' . rawurlencode($cursoParam);
         }
 
-        if (!array_key_exists($contatoTipo, self::CONTATO_TIPOS)) {
-            Session::flash('erro', 'Selecione o tipo de ação no menu.');
-            $this->redirect($redirect);
-        }
+        return [$redirect, $cursoParam];
+    }
 
+    /**
+     * O usuário pode registrar contato com este aluno? Coordenador: curso dele.
+     * Professor: o aluno tem alarme (aberto ou não) numa disciplina/turma dele;
+     * com $codigoDisciplina, nessa disciplina.
+     */
+    private function podeAgirNoAluno(
+        int $coletaId,
+        int $alunoId,
+        int $cursoId,
+        string $cursoParam,
+        string $codigoDisciplina
+    ): bool {
         $escopo = $this->escopoAlarmes($cursoParam);
-        $cursoIds = $escopo['cursoIds'];
-        $codigosDisciplina = $escopo['codigosDisciplina'];
-        $repo = new AnalyticsRepository();
-        if (Auth::isProfessor()) {
-            $repo->restringirTurmas(Auth::turmaIds());
+        if ($escopo['cursoIds'] !== null && !in_array($cursoId, $escopo['cursoIds'], true)) {
+            return false;
         }
-        $usuarioId = (int)$user['id'];
 
-        if ($alarmeId > 0) {
-            $ok = $repo->marcarAlarmeVisualizado(
-                $alarmeId,
-                $usuarioId,
-                $contatoTipo,
-                $cursoIds,
-                $codigosDisciplina
-            );
-            if (!$ok) {
-                Session::flash('erro', 'Não foi possível registrar o contato.');
+        $codigos = $escopo['codigosDisciplina'];
+        if ($codigos === null) {
+            return true;
+        }
+        if ($codigoDisciplina !== '') {
+            if (!in_array($codigoDisciplina, $codigos, true)) {
+                return false;
             }
-            $this->redirect($redirect);
+            $codigos = [$codigoDisciplina];
+        }
+        if ($codigos === []) {
+            return false;
         }
 
-        if ($coletaId <= 0 || $alunoId <= 0 || $cursoId <= 0) {
-            Session::flash('erro', 'Aluno inválido.');
-            $this->redirect($redirect);
-        }
+        $repo = new AnalyticsRepository();
+        $repo->restringirTurmas(Auth::turmaIds());
 
-        if ($cursoIds !== null && !in_array($cursoId, $cursoIds, true)) {
-            Session::flash('erro', 'Sem permissão para este curso.');
-            $this->redirect($redirect);
-        }
-
-        $repo->marcarAlarmesAlunoVisualizados(
-            $coletaId,
-            $alunoId,
-            $cursoId,
-            $usuarioId,
-            $contatoTipo,
-            $cursoIds,
-            $codigosDisciplina
-        );
-
-        $this->redirect($redirect);
+        return $repo->alunoTemAlarmeAbertoNasDisciplinas($coletaId, $alunoId, $cursoId, $codigos, false);
     }
 
     /**

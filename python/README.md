@@ -146,6 +146,8 @@ python3 -m unittest discover -v python/tests   # regras por turma e frequência 
 php tests/php/turmas_test.php                  # escopo do professor, críticas por turma, e-mail de chamada
 php tests/php/frequencia_anual_test.php        # integrados nos ingressantes e no painel
 php tests/php/efeito_contatos_test.php         # números da tela Efeito dos contatos
+php tests/php/coleta_status_test.php           # coleta completa x falhou e aviso no portal
+php tests/php/contatos_test.php                # contatos, encerrar caso, e-mail que não encerra, histórico de regras
 ```
 
 | Arquivo | O que cobre |
@@ -157,3 +159,7 @@ php tests/php/efeito_contatos_test.php         # números da tela Efeito dos con
 | `tests/php/turmas_test.php` | Turmas do usuário professor; alarmes, contagens e marcação restritos às turmas dele (sem turma identificada continua visível); disciplinas críticas uma linha por turma com os professores da turma; chave de envio do e-mail de chamada por turma, reconhecendo o envio antigo por disciplina |
 | `tests/php/frequencia_anual_test.php` | Ingressantes do semestre mais integrados do ano (AAAA/0) com `frequencia_desde`; asterisco nos cursos integrados no gráfico por curso e nas disciplinas críticas; início do ano letivo da coleta |
 | `tests/php/efeito_contatos_test.php` | Efeito dos contatos: médias de todos os analisados (não só de quem melhorou), melhoraram/iguais/pioraram, frequência no limite, canais, janela × até o corte, efeito líquido com intervalo de 95% e curva semanal só com os analisados |
+| `python/tests/test_coleta_status.py` | Rodada do pipeline em `coleta_execucoes` (concluída, falhou antes ou depois de criar a coleta); coleta nasce `em_andamento` só dentro do pipeline; coleta anterior pula as que falharam |
+| `python/tests/test_contatos.py` | Cópia única do histórico para `contatos_aluno`; efeito lendo os contatos do semestre; `email_enviado_em` herdado no mesmo episódio, mantido ao regerar a coleta e zerado quando o alarme some e volta |
+| `tests/php/coleta_status_test.php` | `ultimaColeta()` ignora coletas em andamento ou que falharam; aviso da última rodada (falhou, não terminou em 3 h, ok) |
+| `tests/php/contatos_test.php` | Cópia do histórico pelo lado PHP; validação do formulário (data futura, mais de 60 dias, canal, motivo); resumo do último contato; um envio = um contato; encerrar alarme e caso; e-mail não encerra e não se repete no episódio; histórico da configuração de alarmes |

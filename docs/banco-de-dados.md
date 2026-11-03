@@ -292,8 +292,66 @@ Cada execução de importação de frequência (histórico).
 | `total_disciplinas` | INTEGER | sim | Contagem na importação |
 | `total_faltas_dia` | INTEGER | sim | Contagem na importação |
 | `origem` | TEXT | não | Ex.: `tabela_frequencia.json` |
+| `status` | TEXT | não | `em_andamento` (pipeline rodando), `completa` ou `falhou`; nulo = coleta antiga ou importação manual fora do pipeline |
 
-Datas de período vêm de `config/consultas.json`.
+Datas de período vêm de `config/consultas.json`. O portal (`ultimaColeta()`) e a coleta
+anterior de `gerar_alarmes.py` usam só coletas completas (ou sem status).
+
+---
+
+### `coleta_execucoes`
+
+Rodadas do pipeline (`executar_coleta.py`), inclusive as que falharam antes de criar a
+coleta. A última que falhou ou não terminou em 3 horas gera um aviso no topo do portal.
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `id` | INTEGER | sim (PK) | Identificador |
+| `iniciada_em` | TEXT | sim | Início da rodada |
+| `terminada_em` | TEXT | não | Fim (nulo enquanto roda ou se foi interrompida) |
+| `status` | TEXT | sim | `em_andamento`, `concluida` ou `falhou` |
+| `passo_falhou` | TEXT | não | Script que parou a rodada |
+| `coleta_id` | INTEGER | não (FK) | → `coletas.id` criada na rodada, se chegou a criar |
+
+---
+
+### `contatos_aluno`
+
+Contatos com o aluno: registro permanente, fora da limpeza de coletas. Registrar um
+contato **não encerra** o caso. Na primeira abertura do banco, copia os e-mails de
+`alarme_emails` e os contatos que antes ficavam nos alarmes tratados.
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `id` | INTEGER | sim (PK) | Identificador |
+| `aluno_id`, `curso_id` | INTEGER | sim (FK) | → `alunos.id`, `cursos.id` |
+| `data_contato` | TEXT | sim | Dia em que o contato aconteceu (não o do registro) |
+| `canal` | TEXT | sim | `email`, `email_automatico`, `whatsapp`, `telefone`, `presencial`, `assistencia` ou `nao_informado` |
+| `origem` | TEXT | sim | `manual` (tela), `automatico` (e-mail do MAPA) ou `migrado` |
+| `conseguiu_falar` | INTEGER | não | `1` sim, `0` não, nulo = não se aplica |
+| `motivo` | TEXT | não | Motivo principal das faltas (lista em `ContatoRepository::MOTIVOS`, provisória) |
+| `observacao` | TEXT | não | Até 500 caracteres |
+| `codigo_disciplina` | TEXT | não | Disciplina de onde o contato partiu |
+| `registrado_em` | TEXT | sim | Momento do registro |
+| `registrado_por` | INTEGER | não (FK) | → `usuarios.id` |
+| `alarme_email_id` | INTEGER | não | Envio de origem (`alarme_emails.id`); único, sem FK |
+
+**Índice:** `idx_contatos_aluno_aluno` em `(aluno_id, curso_id, data_contato)`.
+
+---
+
+### `alarme_config_historico`
+
+Uma linha por gravação das regras em Configurações → Alarmes, com a configuração inteira
+em JSON. A primeira gravação guarda antes a que estava em vigor.
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `id` | INTEGER | sim (PK) | Identificador |
+| `config_json` | TEXT | sim | Configuração completa |
+| `salvo_em` | TEXT | sim | Momento da gravação |
+| `salvo_por` | INTEGER | não (FK) | → `usuarios.id` |
+| `observacao` | TEXT | não | Ex.: configuração anterior ao histórico |
 
 ---
 
@@ -575,11 +633,15 @@ Sinais de risco de evasão gerados a partir da coleta.
 | `mensagem` | TEXT | sim | Texto curto para a UI |
 | `detalhe_json` | TEXT | não | Payload JSON (percentuais, datas, semanas) |
 | `gerado_em` | TEXT | sim | Momento da geração |
-| `visualizado` | INTEGER | sim | `0` aberto, `1` com contato registrado (padrão `0`) |
-| `visualizado_em` | TEXT | não | Data/hora do contato |
-| `visualizado_por` | INTEGER | não (FK) | → `usuarios.id` (quem registrou) |
-| `contato_tipo` | TEXT | não | `email`, `whatsapp`, `telefone`, `presencial` ou `assistencia` |
+| `visualizado` | INTEGER | sim | `0` caso aberto, `1` encerrado (padrão `0`) |
+| `visualizado_em` | TEXT | não | Data/hora do encerramento |
+| `visualizado_por` | INTEGER | não (FK) | → `usuarios.id` (quem encerrou) |
+| `contato_tipo` | TEXT | não | Só em alarmes encerrados antes da separação entre contato e encerramento: o contato que os encerrou |
 | `id_turma` | INTEGER | não | Turma do aluno na disciplina → `turmas.id_turma`; nulo = alarme do curso ou turma não identificada |
+| `email_enviado_em` | TEXT | não | O e-mail ao aluno já incluiu este alarme; passa de coleta em coleta enquanto o alarme continuar, e o aluno não recebe outro e-mail no mesmo episódio |
+| `fechamento` | TEXT | não | Como foi encerrado: `manual` (tela) ou `retorno` (voltou a frequentar); nulo = encerrado ao registrar contato, como era antes |
+
+Os contatos ficam em [`contatos_aluno`](#contatos_aluno); registrar contato não encerra o alarme.
 
 **Unique:** `(coleta_id, aluno_id, curso_id, codigo_disciplina, tipo)`.  
 **Índice:** `idx_alarmes_visualizado` em `visualizado`.  

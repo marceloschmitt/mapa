@@ -190,6 +190,12 @@ $passeLivreAtivo = $noCaminho('/passe-livre');
 </nav>
 
 <main class="container pb-5">
+    <?php if (!empty($avisoColeta)): ?>
+        <div class="alert alert-warning d-flex align-items-start gap-2" role="status">
+            <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+            <span><?= $e((string)$avisoColeta) ?></span>
+        </div>
+    <?php endif; ?>
     <?= $content ?>
 </main>
 

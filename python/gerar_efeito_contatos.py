@@ -2,7 +2,7 @@
 """Efeito dos contatos: faltas semana a semana em torno do contato com o aluno (manual).
 
 So alunos/curso do semestre atual. Um contato = um dia com algum contato,
-qualquer que seja o canal (e-mail automatico em alarme_emails; contatos
+qualquer que seja o canal (contatos_aluno: e-mails automaticos e contatos
 registrados na tela de alarmes). Para cada aluno grava uma serie semanal de
 aulas e faltas em torno de uma data de referencia:
 
@@ -46,12 +46,13 @@ from typing import Any
 
 from db import conectar, fechar
 
-CANAL_AUTOMATICO = "email_automatico"
 CANAL_NAO_INFORMADO = "nao_informado"
 REFERENCIAS = ("primeiro", "segundo")
 GRUPOS = ("contatado", "comparacao")
 # Semanas gravadas antes da referencia (a tela mostra a tendencia anterior).
 SEMANAS_ANTES = 6
+# Coletas que o portal mostra: completas, ou antigas/manuais sem status.
+COLETA_COMPLETA = "(status IS NULL OR status = 'completa')"
 
 Par = tuple[int, int]
 
@@ -68,9 +69,10 @@ def data_local(texto: Any) -> date | None:
 def semestre_atual(cursor: Any) -> dict[str, Any] | None:
     """Coletas do semestre da ultima coleta e a data de corte de cada uma."""
     ultima = cursor.execute(
-        """
+        f"""
         SELECT id, data_inicial, data_final
         FROM coletas
+        WHERE {COLETA_COMPLETA}
         ORDER BY id DESC
         LIMIT 1
         """
@@ -86,7 +88,7 @@ def semestre_atual(cursor: Any) -> dict[str, Any] | None:
 
     cortes: dict[int, date] = {}
     for row in cursor.execute(
-        "SELECT id, executada_em, data_referencia FROM coletas WHERE id >= ?",
+        f"SELECT id, executada_em, data_referencia FROM coletas WHERE id >= ? AND {COLETA_COMPLETA}",
         (primeira,),
     ):
         referencia = data_local(row["data_referencia"])
@@ -109,39 +111,20 @@ def semestre_atual(cursor: Any) -> dict[str, Any] | None:
     }
 
 
-def carregar_contatos(cursor: Any, primeira_id: int) -> dict[Par, dict[date, set[str]]]:
-    """Dias de contato de cada aluno/curso, com os canais usados em cada dia."""
+def carregar_contatos(cursor: Any, inicio: date) -> dict[Par, dict[date, set[str]]]:
+    """Dias de contato de cada aluno/curso no semestre, com os canais usados em cada dia."""
     contatos: dict[Par, dict[date, set[str]]] = defaultdict(lambda: defaultdict(set))
-
-    def registrar(aluno_id: Any, curso_id: Any, canal: str, quando: Any) -> None:
-        dia = data_local(quando)
+    for row in cursor.execute(
+        """
+        SELECT aluno_id, curso_id, canal, data_contato
+        FROM contatos_aluno
+        WHERE data_contato >= ?
+        """,
+        (inicio.isoformat(),),
+    ).fetchall():
+        dia = data_local(row[3])
         if dia is not None:
-            contatos[(int(aluno_id), int(curso_id))][dia].add(canal)
-
-    for row in cursor.execute(
-        """
-        SELECT aluno_id, curso_id, enviado_em
-        FROM alarme_emails
-        WHERE coleta_id >= ?
-        """,
-        (primeira_id,),
-    ).fetchall():
-        registrar(row[0], row[1], CANAL_AUTOMATICO, row[2])
-
-    for row in cursor.execute(
-        """
-        SELECT DISTINCT aluno_id, curso_id,
-               COALESCE(NULLIF(TRIM(contato_tipo), ''), ?) AS canal,
-               substr(visualizado_em, 1, 10)
-        FROM alarmes
-        WHERE coleta_id >= ?
-          AND visualizado = 1
-          AND visualizado_em IS NOT NULL
-        """,
-        (CANAL_NAO_INFORMADO, primeira_id),
-    ).fetchall():
-        registrar(row[0], row[1], str(row[2]), row[3])
-
+            contatos[(int(row[0]), int(row[1]))][dia].add(str(row[2] or CANAL_NAO_INFORMADO))
     return contatos
 
 
@@ -366,10 +349,11 @@ def calcular_semanas(
 
     ultima_coleta: dict[Par, int] = {}
     for row in cursor.execute(
-        """
+        f"""
         SELECT aluno_id, curso_id, MAX(coleta_id)
         FROM frequencia_curso
         WHERE coleta_id >= ?
+          AND coleta_id IN (SELECT id FROM coletas WHERE {COLETA_COMPLETA})
         GROUP BY aluno_id, curso_id
         """,
         (primeira_id,),
@@ -591,7 +575,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"Semestre desde {semestre['inicio']:%d/%m/%Y}; coletas {semestre['primeira_id']} a {semestre['ultima_id']}")
         print(f"Comparacao: {args.semanas} semanas antes x depois; minimo {args.min_aulas} aulas em cada lado")
 
-        contatos = carregar_contatos(cursor, semestre["primeira_id"])
+        contatos = carregar_contatos(cursor, semestre["inicio"])
         alarmes_criticos = carregar_alarmes_criticos(cursor, semestre["primeira_id"])
         series = montar_series(contatos, alarmes_criticos, corte)
         comparacao = sum(1 for s in series if s["grupo"] == "comparacao")

@@ -16,6 +16,7 @@ Uso:
 from __future__ import annotations
 
 import json
+import os
 import sys
 from pathlib import Path
 from typing import Any
@@ -30,6 +31,8 @@ from db import conectar, fechar, nome_disciplina_conhecido, parsear_data_sql, ro
 from paths import JSON_TABELA_FREQUENCIA
 
 ARQUIVO_ENTRADA = JSON_TABELA_FREQUENCIA
+# Definida por executar_coleta.py: a coleta so aparece no portal quando o pipeline termina.
+VARIAVEL_PIPELINE = "MAPA_COLETA_PIPELINE"
 
 
 def carregar_tabela(caminho: Path) -> list[dict[str, Any]]:
@@ -114,13 +117,19 @@ def upsert_aluno_curso(
 
 
 def criar_coleta(cursor: Any, total_alunos: int) -> int:
-    """Cria registro de coleta com datas de config/consultas.json."""
+    """Cria registro de coleta com datas de config/consultas.json.
+
+    Dentro do pipeline a coleta nasce em_andamento (executar_coleta.py marca
+    completa ou falhou no fim); rodado sozinho, o script a deixa sem status,
+    visivel no portal como antes.
+    """
+    status = "em_andamento" if os.environ.get(VARIAVEL_PIPELINE) == "1" else None
     cursor.execute(
         """
         INSERT INTO coletas (
             executada_em, data_inicial, data_final, data_referencia,
-            total_alunos, origem
-        ) VALUES (datetime('now', 'localtime'), ?, ?, ?, ?, ?)
+            total_alunos, origem, status
+        ) VALUES (datetime('now', 'localtime'), ?, ?, ?, ?, ?, ?)
         """,
         (
             parsear_data_sql(frequencia_data_inicial()),
@@ -128,6 +137,7 @@ def criar_coleta(cursor: Any, total_alunos: int) -> int:
             data_referencia().isoformat(),
             total_alunos,
             ARQUIVO_ENTRADA.name,
+            status,
         ),
     )
     return int(cursor.lastrowid)

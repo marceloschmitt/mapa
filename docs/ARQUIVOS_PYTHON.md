@@ -13,7 +13,10 @@ Ponto de entrada único do pipeline de coleta. Roda os scripts na sequência
 fixa (consulta em massa → consulta inicial → análise de frequência → imports →
 alarmes → e-mails PHP), interrompendo a cadeia se um
 passo falhar. Pensado para ser chamado por caminho absoluto (cron ou manual),
-sem `cd` prévio.
+sem `cd` prévio. Cada rodada fica em `coleta_execucoes` (concluída ou falhou,
+com o passo que parou); a coleta criada nasce `em_andamento` e só vira
+`completa` quando todos os passos Python terminam, antes dos e-mails. O portal
+ignora coletas que falharam e avisa no topo quando a última rodada falhou.
 
 ---
 

@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS usuarios (
     criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- status: em_andamento (pipeline rodando) | completa | falhou; NULL = coleta antiga ou
+-- importacao manual fora do pipeline. O portal mostra so as completas (e as NULL).
 CREATE TABLE IF NOT EXISTS coletas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     executada_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
@@ -23,7 +25,20 @@ CREATE TABLE IF NOT EXISTS coletas (
     total_alunos INTEGER NOT NULL DEFAULT 0,
     total_disciplinas INTEGER NOT NULL DEFAULT 0,
     total_faltas_dia INTEGER NOT NULL DEFAULT 0,
-    origem TEXT
+    origem TEXT,
+    status TEXT
+);
+
+-- Rodadas do pipeline (executar_coleta.py), inclusive as que falharam antes de criar a coleta.
+-- passo_falhou = script que parou a rodada; coleta_id = coleta criada nela, se chegou a criar.
+CREATE TABLE IF NOT EXISTS coleta_execucoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    iniciada_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    terminada_em TEXT,
+    status TEXT NOT NULL DEFAULT 'em_andamento' CHECK (status IN ('em_andamento', 'concluida', 'falhou')),
+    passo_falhou TEXT,
+    coleta_id INTEGER,
+    FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS alunos (
@@ -294,6 +309,12 @@ CREATE TABLE IF NOT EXISTS alarmes (
     contato_tipo TEXT CHECK (contato_tipo IS NULL OR contato_tipo IN ('email', 'email_automatico', 'whatsapp', 'telefone', 'presencial', 'assistencia')),
     -- Turma do aluno na disciplina (NULL = alarme do curso ou turma nao identificada).
     id_turma INTEGER,
+    -- E-mail ao aluno (automatico ou forcado) ja incluiu este alarme; passa de coleta em
+    -- coleta enquanto o alarme continuar, para o aluno nao receber o mesmo e-mail de novo.
+    email_enviado_em TEXT,
+    -- Como o caso foi encerrado (visualizado = 1): manual (tela) ou retorno (voltou a
+    -- frequentar); NULL = encerrado ao registrar contato, como era antes.
+    fechamento TEXT,
     FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE CASCADE,
     FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
@@ -314,6 +335,18 @@ CREATE TABLE IF NOT EXISTS configuracoes (
     valor TEXT NOT NULL DEFAULT '',
     descricao TEXT,
     atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- Historico das regras de alarme (Configuracoes -> Alarmes): uma linha por gravacao, com a
+-- configuracao inteira em JSON. A primeira gravacao registra antes a que estava em vigor
+-- (observacao diz que a data de inicio dela e desconhecida).
+CREATE TABLE IF NOT EXISTS alarme_config_historico (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    config_json TEXT NOT NULL,
+    salvo_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    salvo_por INTEGER,
+    observacao TEXT,
+    FOREIGN KEY (salvo_por) REFERENCES usuarios(id) ON DELETE SET NULL
 );
 
 -- Historico de e-mails automaticos por chamada em atraso.
@@ -369,6 +402,34 @@ CREATE INDEX IF NOT EXISTS idx_alarme_emails_coleta
 
 CREATE INDEX IF NOT EXISTS idx_alarme_emails_aluno_enviado
     ON alarme_emails(aluno_id, enviado_em);
+
+-- Contatos com o aluno: registro permanente, fora da limpeza de coletas (alarme_emails
+-- some em cascata com a coleta). origem: manual (tela de alarmes), automatico (e-mail do
+-- MAPA) ou migrado (registrado antes desta tabela). data_contato = dia em que o contato
+-- aconteceu, nao o do registro. conseguiu_falar: 1 sim, 0 nao, NULL nao se aplica (e-mail).
+-- codigo_disciplina: disciplina de onde o contato partiu, se houver.
+-- alarme_email_id: envio de origem de um contato automatico (sem FK: sobrevive a ele).
+CREATE TABLE IF NOT EXISTS contatos_aluno (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    aluno_id INTEGER NOT NULL,
+    curso_id INTEGER NOT NULL,
+    data_contato TEXT NOT NULL,
+    canal TEXT NOT NULL CHECK (canal IN ('email', 'email_automatico', 'whatsapp', 'telefone', 'presencial', 'assistencia', 'nao_informado')),
+    origem TEXT NOT NULL DEFAULT 'manual' CHECK (origem IN ('manual', 'automatico', 'migrado')),
+    conseguiu_falar INTEGER CHECK (conseguiu_falar IS NULL OR conseguiu_falar IN (0, 1)),
+    motivo TEXT,
+    observacao TEXT,
+    codigo_disciplina TEXT,
+    registrado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    registrado_por INTEGER,
+    alarme_email_id INTEGER UNIQUE,
+    FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
+    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
+    FOREIGN KEY (registrado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_contatos_aluno_aluno
+    ON contatos_aluno(aluno_id, curso_id, data_contato);
 
 -- Historico de e-mails de aviso ao staff (max. 1 por destinatario a cada 7 dias).
 CREATE TABLE IF NOT EXISTS staff_alarme_emails (

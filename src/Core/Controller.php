@@ -14,6 +14,9 @@ abstract class Controller
         $data['podeVerFrequenciaAnual'] = $data['podeVerFrequenciaAnual'] ?? Auth::canVerFrequenciaAnual();
         // Limites e textos das regras de alarme: as telas nao fixam mais 75%.
         $data['alarmeConfig'] = $data['alarmeConfig'] ?? self::alarmeConfig();
+        $data['avisoColeta'] = $data['usuario'] !== null
+            ? (new \Mapa\Models\ColetaRepository())->avisoUltimaExecucao()
+            : null;
 
         View::render($view, $data, $layout);
     }

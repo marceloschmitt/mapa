@@ -88,6 +88,7 @@ class Database
         // Coluna legada datas_aula (CSV): mantida em bancos antigos; novas usam disciplina_aulas.
         self::ensureColumn('disciplina_grade', 'datas_aula', "TEXT NOT NULL DEFAULT ''");
         self::ensureColumn('cursos', 'curso_nivel', 'TEXT');
+        self::ensureColumn('coletas', 'status', 'TEXT');
         self::ensureColumn('professores', 'email', 'TEXT');
         self::ensureColumn('frequencia_curso', 'data_inicio_aulas', 'TEXT');
         self::ensureColumn('frequencia_curso', 'frequencia_desde', 'TEXT');
@@ -116,8 +117,53 @@ class Database
         self::migrateApiConfigFromEnv();
         self::migrateEmailConfigDefaults();
         self::migrateAlarmesContatoEmailAutomatico();
-        // Depois da reconstrucao acima, que recria alarmes sem esta coluna.
+        // Depois da reconstrucao acima, que recria alarmes sem estas colunas.
         self::ensureColumn('alarmes', 'id_turma', 'INTEGER');
+        self::ensureColumn('alarmes', 'email_enviado_em', 'TEXT');
+        self::ensureColumn('alarmes', 'fechamento', 'TEXT');
+        self::migrarContatosAluno();
+    }
+
+    /**
+     * Copia uma vez os contatos ja registrados para contatos_aluno: e-mails
+     * enviados (alarme_emails) e alarmes tratados na tela. Mesmo SQL de
+     * python/db.py: quem abrir o banco primeiro copia.
+     */
+    private static function migrarContatosAluno(): void
+    {
+        $chave = 'contatos_aluno_migrado';
+        $feito = self::$connection->prepare('SELECT 1 FROM configuracoes WHERE chave = :chave');
+        $feito->execute(['chave' => $chave]);
+        if ($feito->fetchColumn() !== false) {
+            return;
+        }
+
+        self::$connection->exec(
+            "INSERT OR IGNORE INTO contatos_aluno (
+                aluno_id, curso_id, data_contato, canal, origem, registrado_em, alarme_email_id
+             )
+             SELECT aluno_id, curso_id, substr(enviado_em, 1, 10), 'email_automatico', 'automatico',
+                    enviado_em, id
+             FROM alarme_emails"
+        );
+        self::$connection->exec(
+            "INSERT INTO contatos_aluno (
+                aluno_id, curso_id, data_contato, canal, origem, registrado_em, registrado_por
+             )
+             SELECT aluno_id, curso_id, substr(visualizado_em, 1, 10),
+                    COALESCE(NULLIF(TRIM(contato_tipo), ''), 'nao_informado'), 'migrado',
+                    MIN(visualizado_em), visualizado_por
+             FROM alarmes
+             WHERE visualizado = 1
+               AND visualizado_em IS NOT NULL
+               AND COALESCE(contato_tipo, '') <> 'email_automatico'
+             GROUP BY aluno_id, curso_id, substr(visualizado_em, 1, 10),
+                      COALESCE(NULLIF(TRIM(contato_tipo), ''), 'nao_informado'), visualizado_por"
+        );
+        $marca = self::$connection->prepare(
+            'INSERT INTO configuracoes (chave, valor, descricao) VALUES (:chave, \'1\', :descricao)'
+        );
+        $marca->execute(['chave' => $chave, 'descricao' => 'Contatos antigos copiados para contatos_aluno']);
     }
 
     /**

@@ -31,11 +31,12 @@ class AlarmeConfigController extends Controller
 
     public function save(): void
     {
-        $this->requireAdmin();
+        $usuario = $this->requireAdmin();
+        $usuarioId = (int)($usuario['id'] ?? 0);
         $repository = new ConfigRepository();
 
         if (isset($_POST['restaurar'])) {
-            $repository->saveAlarmeConfig(ConfigRepository::ALARME_PADRAO);
+            $repository->saveAlarmeConfig(ConfigRepository::ALARME_PADRAO, $usuarioId);
             Session::flash('sucesso', 'Valores padrão restaurados. Rode a coleta para regerar os alarmes.');
             $this->redirect('/configuracoes/alarmes');
         }
@@ -64,7 +65,7 @@ class AlarmeConfigController extends Controller
             $this->redirect('/configuracoes/alarmes');
         }
 
-        $repository->saveAlarmeConfig($resultado['config']);
+        $repository->saveAlarmeConfig($resultado['config'], $usuarioId);
         Session::flash(
             'sucesso',
             'Regras de alarme salvas. Os alarmes passam a usar os novos critérios na próxima coleta '
