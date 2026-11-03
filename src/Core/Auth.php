@@ -130,6 +130,12 @@ class Auth
         return self::isAdmin() || self::isGeral() || self::isProfessor();
     }
 
+    /** Marcar/desmarcar auxílio estudantil na Frequência corrente. */
+    public static function canMarcarAuxilioEstudantil(): bool
+    {
+        return self::isAdmin() || self::isGeral();
+    }
+
     /**
      * Usuários com permissão explícita para assinar atestados de passe livre.
      * Lido do banco (não da sessão) para que conceder ou retirar a permissão

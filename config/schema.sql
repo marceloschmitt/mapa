@@ -409,6 +409,14 @@ CREATE INDEX IF NOT EXISTS idx_alunos_trancados_coleta
 CREATE INDEX IF NOT EXISTS idx_alunos_trancados_curso
     ON alunos_trancados(curso_id);
 
+-- Marcacao manual de auxilio estudantil (Frequencia corrente); por login, fora da coleta.
+CREATE TABLE IF NOT EXISTS alunos_auxilio_estudantil (
+    login TEXT PRIMARY KEY,
+    marcado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    marcado_por INTEGER,
+    FOREIGN KEY (marcado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+);
+
 -- Candidatos a perda de vaga (reprovacao em todas as disciplinas nos 2 semestres anteriores).
 CREATE TABLE IF NOT EXISTS perda_vaga_execucoes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,

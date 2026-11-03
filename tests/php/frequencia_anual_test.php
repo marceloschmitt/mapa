@@ -9,6 +9,7 @@ declare(strict_types=1);
 chdir(dirname(__DIR__, 2));
 require 'src/bootstrap.php';
 
+use Mapa\Core\Auth;
 use Mapa\Core\Database;
 use Mapa\Core\Env;
 use Mapa\Models\AnalyticsRepository;
@@ -130,6 +131,53 @@ verificar('filtro de curso', [3, 4, 6], array_map(
 $disciplinas = $repo->disciplinasFrequenciaCorrente(1, [1, 6]);
 verificar('disciplinas por aluno e curso', ['1-1', '6-2'], array_keys($disciplinas));
 verificar('percentual da disciplina', 60.0, $disciplinas['1-1'][0]['frequencia']);
+
+echo "== Auxílio estudantil\n";
+// Mesmo login em dois cursos: a marcação é por pessoa.
+$insAluno->execute([7, 'a1', 'm7-outro', 'Aluno 1 outro curso']);
+$insIngresso->execute([7, 2, '2026/2']);
+$insCurso->execute([7, 2, 55.0, null]);
+$insDisc->execute([7, 2, 55.0]);
+
+verificar('sem marcação no início', false, $repo->temAuxilio('a1'));
+verificar('alternar marca', true, $repo->alternarAuxilio('a1', 1));
+verificar('tem auxílio após marcar', true, $repo->temAuxilio('a1'));
+$mapa = $repo->loginsComAuxilio();
+verificar('mapa contém o login', true, isset($mapa['a1']));
+
+$filtrados = $repo->linhasFrequenciaCorrente(1, null, '', true);
+$loginsFiltrados = [];
+foreach ($filtrados as $linha) {
+    $loginsFiltrados[] = (string)$linha['login'];
+}
+sort($loginsFiltrados);
+verificar(
+    'filtro só auxílio: duas linhas do mesmo login',
+    ['a1', 'a1'],
+    $loginsFiltrados
+);
+$idsFiltrados = array_map(static fn(array $l): int => (int)$l['aluno_id'], $filtrados);
+sort($idsFiltrados);
+verificar('filtro só auxílio: aluno_ids 1 e 7', [1, 7], $idsFiltrados);
+
+verificar('alternar desmarca', false, $repo->alternarAuxilio('a1', 1));
+verificar('filtro vazio após desmarcar', [], $repo->linhasFrequenciaCorrente(1, null, '', true));
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    @session_start();
+}
+verificar('admin pode marcar', true, (static function (): bool {
+    Auth::login(['id' => 1, 'username' => 'admin', 'perfil' => 'administrador', 'nome' => 'Admin']);
+    return Auth::canMarcarAuxilioEstudantil();
+})());
+verificar('geral pode marcar', true, (static function (): bool {
+    Auth::login(['id' => 2, 'username' => 'geral', 'perfil' => 'geral', 'nome' => 'Geral']);
+    return Auth::canMarcarAuxilioEstudantil();
+})());
+verificar('professor não marca', false, (static function (): bool {
+    Auth::login(['id' => 3, 'username' => 'prof', 'perfil' => 'professor', 'nome' => 'Prof']);
+    return Auth::canMarcarAuxilioEstudantil();
+})());
 
 echo "\n{$total} verificações, {$falhas} falha(s).\n";
 exit($falhas > 0 ? 1 : 0);
