@@ -578,6 +578,94 @@ CREATE TABLE IF NOT EXISTS efeito_contatos_semanas (
     UNIQUE (serie_id, semana)
 );
 
+-- Acompanhamento dos alunos em risco (gerar_efeito_contatos.py), uma linha por
+-- aluno/curso com risco pela regra de referencia (risco_referencia.py) ou com contato.
+-- Tudo o que a tela de eficacia mostra sai daqui; a referencia "antes do MAPA" sai de
+-- referencia_historica_alunos.
+CREATE TABLE IF NOT EXISTS acompanhamento_execucoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    coleta_id INTEGER,
+    periodo TEXT NOT NULL DEFAULT '',
+    data_inicio TEXT NOT NULL,
+    data_corte TEXT NOT NULL,
+    total_alunos INTEGER NOT NULL DEFAULT 0,
+    executado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- risco_*: primeiro alarme critico pela referencia (NULL = sem risco; so contatado).
+-- retorno: presenca nas 2 semanas apos o risco: voltou, parcial, nao_voltou, sem_aulas;
+-- NULL enquanto as 2 semanas nao couberem nos dados. contato_retorno: idem, apos o 1o
+-- contato. desde_contato_*: do dia seguinte ao ultimo contato ate a data dos dados.
+-- rep_falta / rematriculou: preenchidos no fechamento do semestre
+-- (gerar_referencia_historica.py); NULL ate la.
+CREATE TABLE IF NOT EXISTS acompanhamento_alunos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    execucao_id INTEGER NOT NULL,
+    aluno_id INTEGER NOT NULL,
+    curso_id INTEGER NOT NULL,
+    nivel TEXT,
+    ingressante INTEGER NOT NULL DEFAULT 0,
+    auxilio INTEGER NOT NULL DEFAULT 0,
+    saiu INTEGER NOT NULL DEFAULT 0,
+    risco_tipo TEXT,
+    risco_data TEXT,
+    risco_semana INTEGER,
+    antes_aulas INTEGER NOT NULL DEFAULT 0,
+    antes_faltas INTEGER NOT NULL DEFAULT 0,
+    retorno_aulas INTEGER NOT NULL DEFAULT 0,
+    retorno_faltas INTEGER NOT NULL DEFAULT 0,
+    retorno TEXT,
+    total_contatos INTEGER NOT NULL DEFAULT 0,
+    primeiro_contato TEXT,
+    primeiro_canal TEXT,
+    dias_ate_contato INTEGER,
+    ultimo_contato TEXT,
+    ultimo_canal TEXT,
+    ultimo_falou INTEGER,
+    ultimo_motivo TEXT,
+    contato_retorno_aulas INTEGER NOT NULL DEFAULT 0,
+    contato_retorno_faltas INTEGER NOT NULL DEFAULT 0,
+    contato_retorno TEXT,
+    desde_contato_aulas INTEGER NOT NULL DEFAULT 0,
+    desde_contato_faltas INTEGER NOT NULL DEFAULT 0,
+    rep_falta INTEGER,
+    rematriculou INTEGER,
+    FOREIGN KEY (execucao_id) REFERENCES acompanhamento_execucoes(id) ON DELETE CASCADE,
+    FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
+    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_acompanhamento_alunos_execucao
+    ON acompanhamento_alunos(execucao_id, curso_id);
+
+-- Referencia historica (gerar_referencia_historica.py): um semestre fechado,
+-- uma linha por aluno/curso com disciplinas semestrais, sem identificar o aluno.
+-- Os alarmes sao os mesmos simulados pela regra de referencia; com_mapa = 1 nos
+-- semestres em que houve contatos do MAPA. presenca_inicio = % de presenca nas 4
+-- primeiras semanas. rematriculou = NULL quando o semestre seguinte ainda nao
+-- tem matriculas. Regerar um periodo apaga e regrava as linhas dele.
+CREATE TABLE IF NOT EXISTS referencia_historica_alunos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    periodo TEXT NOT NULL,
+    com_mapa INTEGER NOT NULL DEFAULT 0,
+    curso_id INTEGER,
+    nome_curso TEXT NOT NULL DEFAULT '',
+    nivel TEXT,
+    ingressante INTEGER NOT NULL DEFAULT 0,
+    risco_tipo TEXT,
+    risco_semana INTEGER,
+    retorno TEXT,
+    presenca_inicio REAL,
+    rep_falta INTEGER NOT NULL DEFAULT 0,
+    reprovou INTEGER NOT NULL DEFAULT 0,
+    rematriculou INTEGER,
+    concluiu INTEGER NOT NULL DEFAULT 0,
+    gerado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_referencia_historica_periodo
+    ON referencia_historica_alunos(periodo, risco_tipo);
+
 -- Passe livre: percentual de frequencia do semestre anterior (carga manual).
 -- Um aluno em dois cursos aparece em duas linhas.
 CREATE TABLE IF NOT EXISTS passe_livre_aluno_curso (

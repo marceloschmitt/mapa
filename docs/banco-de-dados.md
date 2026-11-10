@@ -340,6 +340,53 @@ contato **não encerra** o caso. Na primeira abertura do banco, copia os e-mails
 
 ---
 
+### `acompanhamento_execucoes` e `acompanhamento_alunos`
+
+Acompanhamento dos alunos em risco do semestre atual (`gerar_efeito_contatos.py`), base
+da tela de eficácia. "Em risco" é o primeiro alarme crítico pela **regra de referência**
+(`python/risco_referencia.py`: os valores padrão das regras, fixos, simulados sobre as
+faltas), não os alarmes gravados. Uma linha por aluno/curso em risco ou com contato; só a
+última execução fica no banco.
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `execucao_id` | INTEGER | sim (FK) | → `acompanhamento_execucoes.id` (coleta, período, início, data dos dados, total de alunos) |
+| `aluno_id`, `curso_id` | INTEGER | sim (FK) | → `alunos.id`, `cursos.id` |
+| `nivel` | TEXT | não | `cursos.curso_nivel` |
+| `ingressante`, `auxilio`, `saiu` | INTEGER | sim | Ingresso no período (ou no ano, cursos anuais); auxílio estudantil; trancou ou sumiu da última coleta |
+| `risco_tipo`, `risco_data`, `risco_semana` | TEXT/INTEGER | não | Primeiro alarme crítico pela referência (nulo = só contatado) |
+| `antes_aulas`, `antes_faltas` | INTEGER | sim | Nas 2 semanas antes do risco |
+| `retorno_aulas`, `retorno_faltas`, `retorno` | INTEGER/TEXT | não | Nas 2 semanas depois do risco; `retorno` = `voltou` (presença ≥ 75%), `parcial`, `nao_voltou`, `sem_aulas`; nulo enquanto as 2 semanas não couberem nos dados |
+| `total_contatos`, `primeiro_contato`, `primeiro_canal`, `dias_ate_contato` | — | não | Contatos do semestre; dias do risco ao primeiro contato (negativo = contatado antes do risco) |
+| `ultimo_contato`, `ultimo_canal`, `ultimo_falou`, `ultimo_motivo` | — | não | Último contato |
+| `contato_retorno_*` | — | não | Nas 2 semanas depois do primeiro contato (mesmas classes) |
+| `desde_contato_aulas`, `desde_contato_faltas` | INTEGER | sim | Do dia seguinte ao último contato até a data dos dados |
+| `rep_falta`, `rematriculou` | INTEGER | não | Preenchidos no fechamento do semestre por `gerar_referencia_historica.py` |
+
+---
+
+### `referencia_historica_alunos`
+
+Um semestre fechado analisado com a mesma regra de referência
+(`gerar_referencia_historica.py`): uma linha por aluno/curso com disciplinas semestrais,
+**sem identificar o aluno**. É o "antes do MAPA" da tela de eficácia (`com_mapa = 0`).
+Regerar um período apaga e regrava as linhas dele.
+
+| Coluna | Tipo | Obrigatório | Descrição |
+|--------|------|-------------|-----------|
+| `periodo` | TEXT | sim | AAAA/S |
+| `com_mapa` | INTEGER | sim | 1 se houve contatos do MAPA no período |
+| `curso_id`, `nome_curso`, `nivel` | — | não | Curso (id quando o nome existe em `cursos`) |
+| `ingressante` | INTEGER | sim | Ingresso no período |
+| `risco_tipo`, `risco_semana` | TEXT/INTEGER | não | Primeiro alarme crítico pela referência |
+| `retorno` | TEXT | não | Nas 2 semanas depois do risco (mesmas classes do acompanhamento) |
+| `presenca_inicio` | REAL | não | % de presença nas 4 primeiras semanas |
+| `rep_falta`, `reprovou` | INTEGER | sim | Reprovou por falta / reprovou em alguma disciplina |
+| `rematriculou` | INTEGER | não | Matriculado no semestre seguinte (nulo sem as matrículas dele) |
+| `concluiu` | INTEGER | sim | Status concluído, formado, defendido ou formando |
+
+---
+
 ### `alarme_config_historico`
 
 Uma linha por gravação das regras em Configurações → Alarmes, com a configuração inteira

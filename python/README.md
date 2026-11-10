@@ -133,7 +133,9 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 | `gerar_perda_vaga.py` | Manual (tela Perda de vaga → Gerar análise): candidatos a perda de vaga (2 semestres anteriores) → BD; usa `resposta_matriculas_AAAA_S.json` como cache |
 | `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência **mensal** (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`), sem JSON. Trancadas (`ausencias_especiais`) → `situacao`; % total do curso = valor da API. Só apaga os semestres que regenera. Opção `--semestres N` (padrão 3). |
 | `importar_emails_professores.py` | Manual: e-mails dos professores a partir de CSV do Moodle (`data/Users.csv`) |
-| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos → Gerar análise): faltas semana a semana em torno do contato (contatados) e do alarme crítico ainda sem contato (comparação), com as aulas e a última chamada da turma do aluno → BD (`efeito_contatos_*`). Opções `--semanas` (padrão 2) e `--min-aulas` (padrão 3). |
+| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos → Gerar análise): acompanhamento dos alunos em risco pela regra de referência (tipo e semana do risco, retorno em 2 semanas, contatos, presença desde o último contato) → BD (`acompanhamento_*`); e a série semanal da tela antiga → BD (`efeito_contatos_*`). Opções `--semanas` (padrão 2) e `--min-aulas` (padrão 3). |
+| `gerar_referencia_historica.py` | Manual: um semestre fechado (`AAAA/S`) com a regra de referência: faltas por dia da API (status a status, mês a mês; cache `resposta_intervalo_AAAA_S.json`), aulas e situação final das matrículas do período, rematrícula das matrículas do seguinte → BD (`referencia_historica_alunos`, sem identificar o aluno). No semestre que acabou de fechar, leva reprovação por falta e rematrícula para `acompanhamento_alunos`. Opções `--sem-api`, `--inicio`, `--fim`. |
+| `risco_referencia.py` | Regra de referência de risco: os três alarmes simulados com os valores padrão fixos (`REFERENCIA`), `Disciplina` (aulas, faltas, validade), retorno em 2 semanas (`voltou` ≥ 75%, `parcial`, `nao_voltou`, `sem_aulas`). Funções puras, usadas pelos dois scripts acima. |
 
 ---
 
@@ -148,6 +150,7 @@ php tests/php/frequencia_anual_test.php        # integrados nos ingressantes e n
 php tests/php/efeito_contatos_test.php         # números da tela Efeito dos contatos
 php tests/php/coleta_status_test.php           # coleta completa x falhou e aviso no portal
 php tests/php/contatos_test.php                # contatos, encerrar caso, e-mail que não encerra, histórico de regras
+php tests/php/acompanhamento_test.php          # funil, referência histórica e comparação com margem
 ```
 
 | Arquivo | O que cobre |
@@ -163,3 +166,5 @@ php tests/php/contatos_test.php                # contatos, encerrar caso, e-mail
 | `python/tests/test_contatos.py` | Cópia única do histórico para `contatos_aluno`; efeito lendo os contatos do semestre; `email_enviado_em` herdado no mesmo episódio, mantido ao regerar a coleta e zerado quando o alarme some e volta |
 | `tests/php/coleta_status_test.php` | `ultimaColeta()` ignora coletas em andamento ou que falharam; aviso da última rodada (falhou, não terminou em 3 h, ok) |
 | `tests/php/contatos_test.php` | Cópia do histórico pelo lado PHP; validação do formulário (data futura, mais de 60 dias, canal, motivo); resumo do último contato; um envio = um contato; encerrar alarme e caso; e-mail não encerra e não se repete no episódio; histórico da configuração de alarmes |
+| `python/tests/test_risco_referencia.py` | Regra de referência: contagem de aulas/faltas até a validade; 3 semanas sem vir, frequência baixa (carência) e dias seguidos de falta; tipo mais grave no mesmo dia; a regra não lê a configuração do banco; classes de retorno; indicadores por aluno (risco, antes/depois, contatos, retorno não medido); recortes de `carregar_alunos` (ingressante, auxílio, saiu, última chamada) |
+| `tests/php/acompanhamento_test.php` | Comparação com margem de 95% e selos (melhor, pior, incerto, poucos); funil em risco → contatados → retorno medido, com mediana dos dias e filtros; referência histórica sem MAPA por situação |
