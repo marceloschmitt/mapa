@@ -2,7 +2,7 @@
 declare(strict_types=1);
 
 /*
- * Funil do acompanhamento, referência histórica e comparação com margem, num SQLite temporário.
+ * Comparação de duas proporções com margem de 95% (o "voltou" da tela Eficácia dos alarmes).
  * Rodar na raiz do projeto: php tests/php/acompanhamento_test.php
  */
 
@@ -49,78 +49,6 @@ verificar('abaixo é pior', 'pior', AcompanhamentoRepository::comparar(100, 10, 
 verificar('poucos alunos não compara', ['poucos', null], [
     AcompanhamentoRepository::comparar(10, 8, 300, 84)['selo'],
     AcompanhamentoRepository::comparar(10, 8, 300, 84)['diferenca'],
-]);
-
-$pdo = Database::connection();
-$pdo->exec("INSERT INTO cursos (id, nome_curso) VALUES (1, 'Curso A'), (2, 'Curso B')");
-for ($i = 1; $i <= 8; $i++) {
-    $pdo->exec("INSERT INTO alunos (id, login, matricula, nome) VALUES ({$i}, 'a{$i}', '{$i}', 'Aluno {$i}')");
-}
-$pdo->exec("INSERT INTO acompanhamento_execucoes (id, periodo, data_inicio, data_corte, total_alunos)
-            VALUES (1, '2026/2', '2026-08-03', '2026-11-01', 1500)");
-$ins = $pdo->prepare(
-    'INSERT INTO acompanhamento_alunos
-        (execucao_id, aluno_id, curso_id, ingressante, auxilio, risco_tipo, risco_semana, retorno,
-         primeiro_contato, dias_ate_contato)
-     VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?)'
-);
-foreach ([
-    [1, 1, 1, 0, 'faltas_3semanas', 3, 'voltou', '2026-08-20', 2],
-    [2, 1, 0, 1, 'faltas_3semanas', 4, 'parcial', '2026-08-28', 6],
-    [3, 1, 0, 0, 'faltas_3semanas', 5, 'nao_voltou', null, null],
-    [4, 2, 0, 0, 'faltas_4dias', 2, 'voltou', '2026-08-10', -3],  // contatado antes do risco
-    [5, 2, 0, 0, 'percentual_baixo', 6, null, '2026-10-25', 1],    // retorno ainda não medido
-    [6, 1, 0, 0, null, null, null, '2026-09-01', null],            // só contatado, sem risco
-    [7, 1, 0, 0, 'percentual_baixo', 12, 'voltou', null, null],
-] as $linha) {
-    $ins->execute($linha);
-}
-
-$repo = new AcompanhamentoRepository($pdo);
-echo "== Funil\n";
-$funil = $repo->funil(1);
-verificar('em risco, contatados e mediana dos dias (só do risco em diante)', [6, 4, 2.0], [
-    $funil['total']['em_risco'], $funil['total']['contatados'], $funil['total']['dias_mediana'],
-]);
-verificar('retorno medido dos contatados', ['medidos' => 3, 'voltou' => 2, 'parcial' => 1, 'nao_voltou' => 0],
-    $funil['total']['contatados_medidos']);
-verificar('retorno medido dos não contatados', ['medidos' => 2, 'voltou' => 1, 'parcial' => 0, 'nao_voltou' => 1],
-    $funil['total']['nao_contatados_medidos']);
-verificar('por situação (mediana de 2 e 6 dias)', [3, 2, 4.0], [
-    $funil['por_tipo']['faltas_3semanas']['em_risco'],
-    $funil['por_tipo']['faltas_3semanas']['contatados'],
-    $funil['por_tipo']['faltas_3semanas']['dias_mediana'],
-]);
-$filtrado = $repo->funil(1, ['curso_ids' => [1], 'semana_max' => 9, 'ingressante' => true]);
-verificar('filtros de curso, semana e ingressante', [1, 1], [$filtrado['total']['em_risco'], $filtrado['total']['contatados']]);
-verificar('filtro de auxílio', 1, $repo->funil(1, ['auxilio' => true])['total']['em_risco']);
-verificar('curso sem alunos', 0, $repo->funil(1, ['curso_ids' => []])['total']['em_risco']);
-
-echo "== Referência histórica\n";
-$insRef = $pdo->prepare(
-    'INSERT INTO referencia_historica_alunos (periodo, com_mapa, curso_id, nome_curso, ingressante, risco_tipo, risco_semana, retorno)
-     VALUES (?, ?, ?, ?, ?, ?, ?, ?)'
-);
-foreach ([
-    ['2025/2', 0, 1, 'Curso A', 1, 'faltas_3semanas', 3, 'voltou'],
-    ['2025/2', 0, 1, 'Curso A', 0, 'faltas_3semanas', 4, 'parcial'],
-    ['2026/1', 0, 2, 'Curso B', 0, 'faltas_3semanas', 5, 'nao_voltou'],
-    ['2026/1', 0, 2, 'Curso B', 0, 'faltas_4dias', 2, 'voltou'],
-    ['2026/1', 0, 2, 'Curso B', 0, 'faltas_4dias', 14, null],
-    ['2026/1', 0, 1, 'Curso A', 0, null, null, null],
-    ['2026/2', 1, 1, 'Curso A', 0, 'faltas_3semanas', 3, 'voltou'],  // com MAPA: fora da referência
-] as $linha) {
-    $insRef->execute($linha);
-}
-$ref = $repo->referencia();
-verificar('períodos sem MAPA', ['2025/2', '2026/1'], $ref['periodos']);
-verificar('total em risco e retorno', [5, 4, 2, 1, 1], [
-    $ref['total']['em_risco'], $ref['total']['medidos'], $ref['total']['voltou'],
-    $ref['total']['parcial'], $ref['total']['nao_voltou'],
-]);
-verificar('por situação e filtro de curso', [3, 1], [
-    $ref['por_tipo']['faltas_3semanas']['em_risco'],
-    $repo->referencia(['curso_ids' => [2], 'tipo' => 'faltas_4dias', 'semana_max' => 9])['total']['em_risco'],
 ]);
 
 echo "\n{$total} verificações, {$falhas} falha(s).\n";

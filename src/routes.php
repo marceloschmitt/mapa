@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Mapa\Controllers\AcompanhamentoController;
 use Mapa\Controllers\AlarmeConfigController;
 use Mapa\Controllers\AlarmeController;
 use Mapa\Controllers\AnalyticsController;
@@ -53,6 +54,10 @@ return static function (Router $router): void {
     $router->post('/frequencia-anual/auxilio', [FrequenciaAnualController::class, 'auxilio']);
     $router->get('/chamadas', [ChamadasController::class, 'index']);
     $router->get('/chamadas/exportar-atrasadas-1-semestre', [ChamadasController::class, 'exportarAtrasadasPrimeiroSemestre']);
+    $router->get('/acompanhamento', [AcompanhamentoController::class, 'index']);
+    $router->post('/acompanhamento/contato', [AcompanhamentoController::class, 'contato']);
+    $router->get('/acompanhamento/exportar', [AcompanhamentoController::class, 'exportar']);
+    $router->post('/acompanhamento/gerar', [AcompanhamentoController::class, 'gerar']);
     $router->get('/efeito-contatos', [EfeitoContatosController::class, 'index']);
     $router->post('/efeito-contatos/gerar', [EfeitoContatosController::class, 'gerar']);
 

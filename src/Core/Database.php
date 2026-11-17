@@ -101,6 +101,13 @@ class Database
         self::ensureColumn('frequencia_disciplina', 'situacao', 'TEXT');
         self::ensureColumn('frequencia_disciplina', 'data_trancamento', 'TEXT');
         self::ensureColumn('frequencia_disciplina', 'id_turma', 'INTEGER');
+        self::ensureColumn('efeito_contatos_series', 'alarme_tipo', 'TEXT');
+        self::ensureColumn('efeito_contatos_series', 'dias_ate_contato', 'INTEGER');
+        self::ensureColumn('efeito_contatos_series', 'ingressante', 'INTEGER NOT NULL DEFAULT 0');
+        self::ensureColumn('efeito_contatos_series', 'auxilio', 'INTEGER NOT NULL DEFAULT 0');
+        self::ensureColumn('efeito_contatos_execucoes', 'intervalo_segundo', 'INTEGER NOT NULL DEFAULT 7');
+        self::ensureColumn('efeito_contatos_execucoes', 'intervalo_equipe', 'INTEGER NOT NULL DEFAULT 3');
+        self::ensureColumn('efeito_contatos_series', 'falou', 'INTEGER');
         self::$connection->exec(
             'CREATE INDEX IF NOT EXISTS idx_frequencia_disciplina_turma
              ON frequencia_disciplina(coleta_id, id_turma)'
@@ -223,8 +230,8 @@ class Database
     }
 
     /**
-     * Garante chaves da API na tabela configuracoes.
-     * Valores legados no .env (API_*) sao copiados uma vez se a chave estiver vazia.
+     * Garante chaves da API na tabela configuracoes (vazias ou com o padrao).
+     * Os API_* do .env nao sao copiados: valem por cima do banco na leitura.
      */
     private static function migrateApiConfigFromEnv(): void
     {
@@ -294,10 +301,9 @@ class Database
                 continue;
             }
 
-            $valor = trim(Env::get($meta['env'], ''));
-            if ($valor === '') {
-                $valor = $meta['default'];
-            }
+            // O .env não é mais copiado para o banco: ConfigRepository::apiDoEnv() e
+            // api_auth.carregar_config_api() o leem direto (o secret não vai para o SQLite).
+            $valor = $meta['default'];
 
             // Fallback: monta oauth a partir de API_BASE_URL legado.
             if ($chave === 'api_oauth_url' && $valor === '') {

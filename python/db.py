@@ -211,6 +211,13 @@ def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
     _ensure_column(conn, "alarmes", "id_turma", "INTEGER")
     _ensure_column(conn, "alarmes", "email_enviado_em", "TEXT")
     _ensure_column(conn, "alarmes", "fechamento", "TEXT")
+    _ensure_column(conn, "efeito_contatos_series", "alarme_tipo", "TEXT")
+    _ensure_column(conn, "efeito_contatos_series", "dias_ate_contato", "INTEGER")
+    _ensure_column(conn, "efeito_contatos_series", "ingressante", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "efeito_contatos_series", "auxilio", "INTEGER NOT NULL DEFAULT 0")
+    _ensure_column(conn, "efeito_contatos_execucoes", "intervalo_segundo", "INTEGER NOT NULL DEFAULT 7")
+    _ensure_column(conn, "efeito_contatos_execucoes", "intervalo_equipe", "INTEGER NOT NULL DEFAULT 3")
+    _ensure_column(conn, "efeito_contatos_series", "falou", "INTEGER")
     conn.execute(
         "CREATE INDEX IF NOT EXISTS idx_frequencia_disciplina_turma "
         "ON frequencia_disciplina(coleta_id, id_turma)"

@@ -40,7 +40,7 @@ from bisect import bisect_right
 from collections import Counter, defaultdict
 from datetime import date, timedelta
 from statistics import mean, median
-from typing import Any
+from typing import Any, NamedTuple
 
 from api_auth import carregar_config_api
 from db import conectar, fechar
@@ -56,6 +56,8 @@ from risco_referencia import (
 )
 
 CANAL_NAO_INFORMADO = "nao_informado"
+# Contato que nao e da equipe: o e-mail que o MAPA manda sozinho.
+CANAIS_AUTOMATICOS = {"email_automatico"}
 REFERENCIAS = ("primeiro", "segundo")
 GRUPOS = ("contatado", "comparacao")
 # Semanas gravadas antes da referencia (a tela mostra a tendencia anterior).
@@ -64,6 +66,16 @@ SEMANAS_ANTES = 6
 COLETA_COMPLETA = "(status IS NULL OR status = 'completa')"
 
 Par = tuple[int, int]
+
+# Num mesmo dia com varios alarmes criticos, o tipo que vale (o de maior risco de evasao).
+PRIORIDADE_TIPO = ("faltas_4dias", "faltas_3semanas", "percentual_baixo")
+
+
+class AlarmeCritico(NamedTuple):
+    """Primeiro alarme critico do aluno/curso no semestre (tabela alarmes do portal)."""
+
+    data: date
+    tipo: str
 
 
 def data_local(texto: Any) -> date | None:
@@ -145,6 +157,18 @@ def carregar_contatos_registros(cursor: Any, inicio: date) -> dict[Par, list[dic
     return contatos
 
 
+def carregar_falou(cursor: Any, inicio: date) -> dict[Par, dict[date, int | None]]:
+    """Conseguiu falar com o aluno no dia (contatos da equipe): 1 se em algum sim, 0 se so nao, None sem resposta."""
+    saida: dict[Par, dict[date, int | None]] = defaultdict(dict)
+    for par, registros in carregar_contatos_registros(cursor, inicio).items():
+        for registro in registros:
+            if registro["canal"] in CANAIS_AUTOMATICOS or registro["conseguiu_falar"] is None:
+                continue
+            atual = saida[par].get(registro["data"])
+            saida[par][registro["data"]] = max(atual or 0, registro["conseguiu_falar"])
+    return saida
+
+
 def carregar_contatos(cursor: Any, inicio: date) -> dict[Par, dict[date, set[str]]]:
     """Dias de contato de cada aluno/curso no semestre, com os canais usados em cada dia."""
     contatos: dict[Par, dict[date, set[str]]] = defaultdict(lambda: defaultdict(set))
@@ -154,23 +178,33 @@ def carregar_contatos(cursor: Any, inicio: date) -> dict[Par, dict[date, set[str
     return contatos
 
 
-def carregar_alarmes_criticos(cursor: Any, primeira_id: int) -> dict[Par, date]:
-    """Dia da coleta em que cada aluno/curso teve o primeiro alarme critico gravado no semestre."""
-    saida: dict[Par, date] = {}
+def carregar_alarmes_criticos(cursor: Any, primeira_id: int) -> dict[Par, AlarmeCritico]:
+    """Primeiro alarme critico gravado no semestre de cada aluno/curso: dia da coleta e tipo.
+
+    Usa os alarmes reais do portal (os mesmos da tela Alarmes). Coletas que
+    falharam no meio ficam de fora, como no portal.
+    """
+    saida: dict[Par, AlarmeCritico] = {}
+    ordem = {tipo: i for i, tipo in enumerate(PRIORIDADE_TIPO)}
     for row in cursor.execute(
-        """
-        SELECT a.aluno_id, a.curso_id, MIN(c.executada_em)
+        f"""
+        SELECT a.aluno_id, a.curso_id, c.executada_em, a.tipo
         FROM alarmes a
         JOIN coletas c ON c.id = a.coleta_id
         WHERE a.coleta_id >= ?
           AND a.severidade = 'critico'
-        GROUP BY a.aluno_id, a.curso_id
+          AND c.id IN (SELECT id FROM coletas WHERE {COLETA_COMPLETA})
         """,
         (primeira_id,),
     ).fetchall():
         dia = data_local(row[2])
-        if dia is not None:
-            saida[(int(row[0]), int(row[1]))] = dia
+        if dia is None:
+            continue
+        par = (int(row[0]), int(row[1]))
+        novo = AlarmeCritico(dia, str(row[3]))
+        atual = saida.get(par)
+        if atual is None or (novo.data, ordem.get(novo.tipo, 99)) < (atual.data, ordem.get(atual.tipo, 99)):
+            saida[par] = novo
     return saida
 
 
@@ -201,20 +235,85 @@ def semanas_da_serie(
     return semanas
 
 
+def contatos_da_equipe(
+    contatos: dict[Par, dict[date, set[str]]],
+) -> dict[Par, dict[date, set[str]]]:
+    """So os contatos da equipe: tudo menos o e-mail automatico, por dia."""
+    saida: dict[Par, dict[date, set[str]]] = {}
+    for par, dias in contatos.items():
+        manuais = {dia: canais - CANAIS_AUTOMATICOS for dia, canais in dias.items() if canais - CANAIS_AUTOMATICOS}
+        if manuais:
+            saida[par] = manuais
+    return saida
+
+
+def intervalo_equipe(
+    contatos: dict[Par, dict[date, set[str]]],
+    alarmes_criticos: dict[Par, AlarmeCritico],
+) -> int:
+    """Mediana de dias do alarme critico ao 1o contato da equipe (contatos depois do alarme); 3 sem nenhum."""
+    equipe = contatos_da_equipe(contatos)
+    intervalos = [
+        dias
+        for par, por_dia in equipe.items()
+        if par in alarmes_criticos and (dias := (min(por_dia) - alarmes_criticos[par].data).days) >= 0
+    ]
+    return round(median(intervalos)) if intervalos else 3
+
+
+def intervalo_segundo_contato(
+    contatos: dict[Par, dict[date, set[str]]],
+    alarmes_criticos: dict[Par, AlarmeCritico],
+) -> int:
+    """Mediana de dias entre o 1o e o 2o contato da equipe (alunos com alarme critico); 7 sem nenhum 2o."""
+    intervalos = [
+        (datas[1] - datas[0]).days
+        for par, dias in contatos_da_equipe(contatos).items()
+        if par in alarmes_criticos and len(datas := sorted(dias)) >= 2
+    ]
+    return max(1, round(median(intervalos))) if intervalos else 7
+
+
 def montar_series(
     contatos: dict[Par, dict[date, set[str]]],
-    alarmes_criticos: dict[Par, date],
+    alarmes_criticos: dict[Par, AlarmeCritico],
     corte: date,
+    alunos: dict[Par, dict[str, Any]] | None = None,
+    intervalo_segundo: int | None = None,
+    intervalo_alarme: int | None = None,
+    falou: dict[Par, dict[date, int | None]] | None = None,
 ) -> list[dict[str, Any]]:
-    """Series dos contatados (1o e 2o contato) e da comparacao.
+    """Series do contato da equipe x sem contato da equipe, so de quem teve alarme critico.
 
-    Comparacao = alarme critico sem contato ate o dia do alarme; quem recebe
-    contato depois entra ate a semana anterior ao contato.
+    O e-mail automatico sai para quase todos no dia do alarme, entao a
+    pergunta e se o contato da equipe (ligacao, WhatsApp, conversa, e-mail
+    manual, assistencia) muda alguma coisa alem dele:
+
+    - contatado/primeiro: dia do 1o contato da equipe;
+    - comparacao/primeiro: aluno sem contato da equipe ate intervalo_alarme dias
+      depois do alarme (mediana do alarme ao 1o contato da equipe), alinhado
+      nesse dia; quem recebe contato da equipe depois entra ate a semana anterior;
+    - contatado/segundo: dia do 2o contato da equipe;
+    - comparacao/segundo: um contato da equipe so ate intervalo_segundo dias
+      depois dele (mediana entre o 1o e o 2o), alinhado nesse dia.
+
+    Cada serie leva os recortes da tela: tipo do alarme, dias do alarme ao
+    contato (negativo = antes do alarme critico), conseguiu falar, ingressante
+    e auxilio estudantil.
     """
     series: list[dict[str, Any]] = []
+    alunos = alunos or {}
+    falou = falou or {}
+    equipe = contatos_da_equipe(contatos)
+    if intervalo_alarme is None:
+        intervalo_alarme = intervalo_equipe(contatos, alarmes_criticos)
+    if intervalo_segundo is None:
+        intervalo_segundo = intervalo_segundo_contato(contatos, alarmes_criticos)
 
     def nova(par: Par, grupo: str, referencia: str, dia: date, total: int, canais: str,
              ate: date | None = None) -> None:
+        alarme = alarmes_criticos[par]
+        perfil = alunos.get(par, {})
         series.append({
             "par": par,
             "grupo": grupo,
@@ -222,22 +321,33 @@ def montar_series(
             "data": dia,
             "total": total,
             "canais": canais,
+            "alarme_tipo": alarme.tipo,
+            "dias_ate_contato": (dia - alarme.data).days if grupo == "contatado" else None,
+            "falou": falou.get(par, {}).get(dia) if grupo == "contatado" else None,
+            "ingressante": bool(perfil.get("ingressante")),
+            "auxilio": bool(perfil.get("auxilio")),
             "semanas": semanas_da_serie(dia, corte, ate),
             "contagem": {},
         })
 
-    for par, dias in contatos.items():
+    for par, alarme in alarmes_criticos.items():
+        dias = equipe.get(par, {})
         datas = sorted(dias)
         for referencia, dia in zip(REFERENCIAS, datas):
             nova(par, "contatado", referencia, dia, len(datas), ",".join(sorted(dias[dia])))
 
-    for par, alarme in alarmes_criticos.items():
-        dias = contatos.get(par)
-        primeiro = min(dias) if dias else None
-        if primeiro is not None and primeiro <= alarme:
-            continue
-        ate = primeiro - timedelta(days=1) if primeiro is not None else None
-        nova(par, "comparacao", "primeiro", alarme, 0, "", ate)
+        # Sem contato da equipe ate o mesmo ponto depois do alarme.
+        referencia = alarme.data + timedelta(days=intervalo_alarme)
+        if referencia <= corte and (not datas or datas[0] > referencia):
+            nova(par, "comparacao", "primeiro", referencia, len(datas), "",
+                 datas[0] - timedelta(days=1) if datas else None)
+
+        # Um contato da equipe so, ate a mesma distancia do 1o.
+        if datas:
+            referencia = datas[0] + timedelta(days=intervalo_segundo)
+            if referencia <= corte and (len(datas) < 2 or datas[1] > referencia):
+                nova(par, "comparacao", "segundo", referencia, len(datas), "",
+                     datas[1] - timedelta(days=1) if len(datas) >= 2 else None)
 
     return series
 
@@ -472,8 +582,12 @@ def montar_indicadores(
     contatos: dict[Par, list[dict[str, Any]]],
     inicio: date,
     corte: date,
+    alarmes_criticos: dict[Par, AlarmeCritico] | None = None,
 ) -> list[dict[str, Any]]:
-    """Uma linha por aluno/curso em risco (regra de referencia) ou com contato.
+    """Uma linha por aluno/curso em risco ou com contato.
+
+    Risco = primeiro alarme critico real (alarmes_criticos, tabela alarmes do
+    portal); sem esse dicionario, a regra de referencia simulada (risco_referencia).
 
     O retorno so e classificado quando as 2 semanas seguintes cabem nos dados
     (ate o corte); antes disso fica None. dias_ate_contato e do risco ao
@@ -484,7 +598,11 @@ def montar_indicadores(
     for par, aluno in alunos.items():
         disciplinas = aluno["disciplinas"]
         registros = contatos.get(par, [])
-        critico = primeiro_critico(simular_alarmes(disciplinas, inicio, corte))
+        if alarmes_criticos is None:
+            critico = primeiro_critico(simular_alarmes(disciplinas, inicio, corte))
+        else:
+            alarme = alarmes_criticos.get(par)
+            critico = (alarme.tipo, alarme.data) if alarme else None
         if critico is None and not registros:
             continue
 
@@ -596,6 +714,8 @@ def gravar(
     semanas: int,
     min_aulas: int,
     series: list[dict[str, Any]],
+    intervalo_segundo: int = 7,
+    intervalo_alarme: int = 3,
 ) -> int:
     """Substitui a serie semanal anterior pela nova."""
     cursor.execute("DELETE FROM efeito_contatos_semanas")
@@ -606,8 +726,9 @@ def gravar(
     cursor.execute(
         """
         INSERT INTO efeito_contatos_execucoes (
-            coleta_id, data_inicio, data_corte, janela_dias, min_aulas, total_eventos, executado_em
-        ) VALUES (?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
+            coleta_id, data_inicio, data_corte, janela_dias, min_aulas, total_eventos,
+            intervalo_segundo, intervalo_equipe, executado_em
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, datetime('now', 'localtime'))
         """,
         (
             semestre["ultima_id"],
@@ -616,6 +737,8 @@ def gravar(
             7 * semanas,
             min_aulas,
             contatados,
+            intervalo_segundo,
+            intervalo_alarme,
         ),
     )
     execucao_id = int(cursor.lastrowid)
@@ -626,8 +749,9 @@ def gravar(
             """
             INSERT INTO efeito_contatos_series (
                 execucao_id, aluno_id, curso_id, grupo, referencia,
-                data_referencia, total_contatos, canais
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+                data_referencia, total_contatos, canais,
+                alarme_tipo, dias_ate_contato, falou, ingressante, auxilio
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 execucao_id,
@@ -638,6 +762,11 @@ def gravar(
                 serie["data"].isoformat(),
                 serie["total"],
                 serie["canais"],
+                serie.get("alarme_tipo"),
+                serie.get("dias_ate_contato"),
+                serie.get("falou"),
+                int(bool(serie.get("ingressante"))),
+                int(bool(serie.get("auxilio"))),
             ),
         )
         serie_id = int(cursor.lastrowid)
@@ -695,7 +824,7 @@ def imprimir_indicadores(linhas: list[dict[str, Any]], total_alunos: int) -> Non
     em_risco = [l for l in linhas if l["risco_tipo"]]
     contatados = [l for l in em_risco if l["primeiro"]]
     dias = [l["dias_ate_contato"] for l in contatados if l["dias_ate_contato"] is not None and l["dias_ate_contato"] >= 0]
-    print(f"\nAlunos: {total_alunos}; em risco (referencia): {len(em_risco)}; contatados: {len(contatados)}"
+    print(f"\nAlunos: {total_alunos}; com alarme critico: {len(em_risco)}; contatados: {len(contatados)}"
           + (f"; dias do risco ao contato (mediana): {median(dias):.0f}" if dias else ""))
     print("Situacao              Em risco  Contat.  Medidos  Voltou  Parcial  Nao voltou")
     for tipo in TIPOS:
@@ -748,15 +877,21 @@ def main(argv: list[str] | None = None) -> int:
 
         alunos = carregar_alunos(cursor, semestre)
         registros = carregar_contatos_registros(cursor, semestre["inicio"])
-        indicadores = montar_indicadores(alunos, registros, semestre["inicio"], corte)
+        alarmes = carregar_alarmes_criticos(cursor, semestre["primeira_id"])
+        indicadores = montar_indicadores(alunos, registros, semestre["inicio"], corte, alarmes)
         gravar_indicadores(cursor, semestre, corte, len(alunos), indicadores)
 
         contatos = carregar_contatos(cursor, semestre["inicio"])
-        series = montar_series(contatos, carregar_alarmes_criticos(cursor, semestre["primeira_id"]), corte)
+        intervalo = intervalo_segundo_contato(contatos, alarmes)
+        intervalo_alarme = intervalo_equipe(contatos, alarmes)
+        series = montar_series(
+            contatos, alarmes, corte, alunos, intervalo, intervalo_alarme,
+            carregar_falou(cursor, semestre["inicio"]),
+        )
         sem_dados = calcular_semanas(cursor, series, semestre, alunos)
         if sem_dados:
             print(f"Contatados sem frequencia no semestre (fora da serie): {sem_dados}")
-        execucao_id = gravar(cursor, semestre, args.semanas, args.min_aulas, series)
+        execucao_id = gravar(cursor, semestre, args.semanas, args.min_aulas, series, intervalo, intervalo_alarme)
         conn.commit()
     except Exception as error:  # noqa: BLE001
         conn.rollback()
@@ -768,7 +903,7 @@ def main(argv: list[str] | None = None) -> int:
     imprimir_indicadores(indicadores, len(alunos))
     imprimir_resumo(series, args.semanas, args.min_aulas)
     print(f"\nExecucao #{execucao_id} gravada em {time.monotonic() - inicio_execucao:.0f}s.")
-    print("Tela: /index.php/efeito-contatos")
+    print("Tela: /index.php/acompanhamento")
     return 0
 
 

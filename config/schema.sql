@@ -538,6 +538,10 @@ CREATE TABLE IF NOT EXISTS efeito_contatos_execucoes (
     data_inicio TEXT NOT NULL DEFAULT '',
     data_corte TEXT NOT NULL DEFAULT '',
     janela_dias INTEGER NOT NULL DEFAULT 14,
+    -- Mediana de dias entre o 1o e o 2o contato: onde a comparacao do 2o contato e alinhada.
+    intervalo_segundo INTEGER NOT NULL DEFAULT 7,
+    -- Mediana de dias do alarme critico ao 1o contato da equipe: onde a comparacao e alinhada.
+    intervalo_equipe INTEGER NOT NULL DEFAULT 3,
     min_aulas INTEGER NOT NULL DEFAULT 3,
     total_eventos INTEGER NOT NULL DEFAULT 0,
     executado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
@@ -547,9 +551,14 @@ CREATE TABLE IF NOT EXISTS efeito_contatos_execucoes (
 -- grupo 'contatado': data_referencia = dia do 1o contato (referencia 'primeiro') e,
 -- com dois ou mais contatos, tambem do 2o (referencia 'segundo').
 -- grupo 'comparacao': aluno com alarme critico ainda sem contato, data_referencia =
--- dia do primeiro alarme critico (referencia 'primeiro'). Com contato depois, a serie
+-- dia do primeiro alarme critico (referencia 'primeiro'); ou contatado uma vez que
+-- ainda nao tinha o 2o contato, data_referencia = 1o contato + intervalo_segundo
+-- (referencia 'segundo'). Com contato depois, a serie
 -- para na ultima semana inteira antes dele.
 -- canais: canais do dia da referencia, separados por virgula (vazio na comparacao).
+-- So alunos com alarme critico real (tabela alarmes). Recortes da tela: alarme_tipo =
+-- tipo do primeiro alarme critico; dias_ate_contato = do alarme a referencia (so
+-- contatados; negativo = contatado antes do alarme critico); ingressante; auxilio.
 CREATE TABLE IF NOT EXISTS efeito_contatos_series (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     execucao_id INTEGER NOT NULL,
@@ -560,6 +569,11 @@ CREATE TABLE IF NOT EXISTS efeito_contatos_series (
     data_referencia TEXT NOT NULL,
     total_contatos INTEGER NOT NULL DEFAULT 0,
     canais TEXT NOT NULL DEFAULT '',
+    alarme_tipo TEXT,
+    dias_ate_contato INTEGER,
+    falou INTEGER,
+    ingressante INTEGER NOT NULL DEFAULT 0,
+    auxilio INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (execucao_id) REFERENCES efeito_contatos_execucoes(id) ON DELETE CASCADE
 );
 

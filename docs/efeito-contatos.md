@@ -1,9 +1,18 @@
-# Efeito dos contatos — como medimos a eficácia dos alertas
+# Eficácia dos alarmes — como medimos o efeito dos contatos
 
-Tela: **Acompanhamento → Efeito dos contatos** (`/index.php/efeito-contatos`).
+Tela: **Acompanhamento → Eficácia dos alarmes** (`/index.php/acompanhamento`). A antiga
+`/efeito-contatos` redireciona para ela.
 Geração: botão **Gerar análise** (administrador), que roda `python/gerar_efeito_contatos.py`.
 
-Pergunta que a tela responde: **depois de receber contato, o aluno volta a frequentar mais do que voltaria sem o contato?**
+Pergunta que a tela responde: **o contato da equipe com alunos em alarme crítico faz eles voltarem a frequentar, além do e-mail automático?**
+
+---
+
+## O que a tela mostra
+
+A descrição atual da tela (pergunta, decisões, grupos, números, código, testes e pendências) está em
+**[eficacia-alarmes.md](eficacia-alarmes.md)**. Este arquivo guarda o histórico: por que a versão
+antiga foi refeita, a validação estatística e achados paralelos.
 
 ---
 
@@ -25,7 +34,10 @@ Teste com o banco local (2 coletas, set/2026, **nenhum aluno contatado**), fingi
 
 ---
 
-## Como funciona agora
+## Versão intermediária (histórico: faltas, contatado × não contatado)
+
+> Substituída pela comparação "contato da equipe × só e-mail automático" descrita em
+> [eficacia-alarmes.md](eficacia-alarmes.md). A série semanal abaixo continua igual.
 
 ### Série semanal
 
