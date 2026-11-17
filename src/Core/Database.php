@@ -88,6 +88,7 @@ class Database
         // Coluna legada datas_aula (CSV): mantida em bancos antigos; novas usam disciplina_aulas.
         self::ensureColumn('disciplina_grade', 'datas_aula', "TEXT NOT NULL DEFAULT ''");
         self::ensureColumn('cursos', 'curso_nivel', 'TEXT');
+        self::ensureColumn('coletas', 'status', 'TEXT');
         self::ensureColumn('professores', 'email', 'TEXT');
         self::ensureColumn('frequencia_curso', 'data_inicio_aulas', 'TEXT');
         self::ensureColumn('frequencia_curso', 'frequencia_desde', 'TEXT');
@@ -100,12 +101,18 @@ class Database
         self::ensureColumn('frequencia_disciplina', 'situacao', 'TEXT');
         self::ensureColumn('frequencia_disciplina', 'data_trancamento', 'TEXT');
         self::ensureColumn('frequencia_disciplina', 'id_turma', 'INTEGER');
+        self::ensureColumn('efeito_contatos_series', 'alarme_tipo', 'TEXT');
+        self::ensureColumn('efeito_contatos_series', 'dias_ate_contato', 'INTEGER');
+        self::ensureColumn('efeito_contatos_series', 'ingressante', 'INTEGER NOT NULL DEFAULT 0');
+        self::ensureColumn('efeito_contatos_series', 'auxilio', 'INTEGER NOT NULL DEFAULT 0');
+        self::ensureColumn('efeito_contatos_execucoes', 'intervalo_segundo', 'INTEGER NOT NULL DEFAULT 7');
+        self::ensureColumn('efeito_contatos_execucoes', 'intervalo_equipe', 'INTEGER NOT NULL DEFAULT 3');
+        self::ensureColumn('efeito_contatos_series', 'falou', 'INTEGER');
         self::$connection->exec(
             'CREATE INDEX IF NOT EXISTS idx_frequencia_disciplina_turma
              ON frequencia_disciplina(coleta_id, id_turma)'
         );
-        self::ensureColumn('efeito_contatos_alunos', 'aulas_ate_corte', 'INTEGER NOT NULL DEFAULT 0');
-        self::ensureColumn('efeito_contatos_alunos', 'faltas_ate_corte', 'INTEGER NOT NULL DEFAULT 0');
+        self::descartarEfeitoContatosAntigo();
         self::migrarPasseLivreAtestadosEstrutura();
         self::removerPasseLivrePeriodoAtual();
         self::migrarDatasAulaCsvParaTabela();
@@ -118,8 +125,53 @@ class Database
         self::migrateApiConfigFromEnv();
         self::migrateEmailConfigDefaults();
         self::migrateAlarmesContatoEmailAutomatico();
-        // Depois da reconstrucao acima, que recria alarmes sem esta coluna.
+        // Depois da reconstrucao acima, que recria alarmes sem estas colunas.
         self::ensureColumn('alarmes', 'id_turma', 'INTEGER');
+        self::ensureColumn('alarmes', 'email_enviado_em', 'TEXT');
+        self::ensureColumn('alarmes', 'fechamento', 'TEXT');
+        self::migrarContatosAluno();
+    }
+
+    /**
+     * Copia uma vez os contatos ja registrados para contatos_aluno: e-mails
+     * enviados (alarme_emails) e alarmes tratados na tela. Mesmo SQL de
+     * python/db.py: quem abrir o banco primeiro copia.
+     */
+    private static function migrarContatosAluno(): void
+    {
+        $chave = 'contatos_aluno_migrado';
+        $feito = self::$connection->prepare('SELECT 1 FROM configuracoes WHERE chave = :chave');
+        $feito->execute(['chave' => $chave]);
+        if ($feito->fetchColumn() !== false) {
+            return;
+        }
+
+        self::$connection->exec(
+            "INSERT OR IGNORE INTO contatos_aluno (
+                aluno_id, curso_id, data_contato, canal, origem, registrado_em, alarme_email_id
+             )
+             SELECT aluno_id, curso_id, substr(enviado_em, 1, 10), 'email_automatico', 'automatico',
+                    enviado_em, id
+             FROM alarme_emails"
+        );
+        self::$connection->exec(
+            "INSERT INTO contatos_aluno (
+                aluno_id, curso_id, data_contato, canal, origem, registrado_em, registrado_por
+             )
+             SELECT aluno_id, curso_id, substr(visualizado_em, 1, 10),
+                    COALESCE(NULLIF(TRIM(contato_tipo), ''), 'nao_informado'), 'migrado',
+                    MIN(visualizado_em), visualizado_por
+             FROM alarmes
+             WHERE visualizado = 1
+               AND visualizado_em IS NOT NULL
+               AND COALESCE(contato_tipo, '') <> 'email_automatico'
+             GROUP BY aluno_id, curso_id, substr(visualizado_em, 1, 10),
+                      COALESCE(NULLIF(TRIM(contato_tipo), ''), 'nao_informado'), visualizado_por"
+        );
+        $marca = self::$connection->prepare(
+            'INSERT INTO configuracoes (chave, valor, descricao) VALUES (:chave, \'1\', :descricao)'
+        );
+        $marca->execute(['chave' => $chave, 'descricao' => 'Contatos antigos copiados para contatos_aluno']);
     }
 
     /**
@@ -179,8 +231,8 @@ class Database
     }
 
     /**
-     * Garante chaves da API na tabela configuracoes.
-     * Valores legados no .env (API_*) sao copiados uma vez se a chave estiver vazia.
+     * Garante chaves da API na tabela configuracoes (vazias ou com o padrao).
+     * Os API_* do .env nao sao copiados: valem por cima do banco na leitura.
      */
     private static function migrateApiConfigFromEnv(): void
     {
@@ -250,10 +302,9 @@ class Database
                 continue;
             }
 
-            $valor = trim(Env::get($meta['env'], ''));
-            if ($valor === '') {
-                $valor = $meta['default'];
-            }
+            // O .env não é mais copiado para o banco: ConfigRepository::apiDoEnv() e
+            // api_auth.carregar_config_api() o leem direto (o secret não vai para o SQLite).
+            $valor = $meta['default'];
 
             // Fallback: monta oauth a partir de API_BASE_URL legado.
             if ($chave === 'api_oauth_url' && $valor === '') {
@@ -395,6 +446,18 @@ class Database
         );
     }
 
+    /** Análise no formato de janelas fixas (efeito_contatos_alunos): apaga para gerar de novo. */
+    private static function descartarEfeitoContatosAntigo(): void
+    {
+        $antiga = self::$connection->query(
+            "SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'efeito_contatos_alunos'"
+        )->fetchColumn();
+        if ($antiga === false) {
+            return;
+        }
+
+        self::$connection->exec('DELETE FROM efeito_contatos_execucoes');
+        self::$connection->exec('DROP TABLE efeito_contatos_alunos');
     /**
      * Permite curso_id NULL em disciplina_grade/disciplina_aulas e remove o
      * placeholder "Curso nao informado".

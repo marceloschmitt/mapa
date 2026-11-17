@@ -1,6 +1,7 @@
 <?php
 declare(strict_types=1);
 
+use Mapa\Controllers\AcompanhamentoController;
 use Mapa\Controllers\AlarmeConfigController;
 use Mapa\Controllers\AlarmeController;
 use Mapa\Controllers\AnalyticsController;
@@ -38,6 +39,8 @@ return static function (Router $router): void {
     $router->get('/analytics', [AnalyticsController::class, 'index']);
     $router->get('/alarmes', [AlarmeController::class, 'index']);
     $router->post('/alarmes/visualizar', [AlarmeController::class, 'visualizar']);
+    $router->post('/alarmes/contato', [AlarmeController::class, 'contato']);
+    $router->post('/alarmes/encerrar', [AlarmeController::class, 'encerrar']);
     $router->post('/alarmes/enviar-email', [AlarmeController::class, 'enviarEmail']);
     $router->get('/ingressantes', [IngressantesController::class, 'index']);
     $router->get('/trancados', [TrancadosController::class, 'index']);
@@ -54,6 +57,10 @@ return static function (Router $router): void {
     $router->post('/frequencia-anual/auxilio', [FrequenciaAnualController::class, 'auxilio']);
     $router->get('/chamadas', [ChamadasController::class, 'index']);
     $router->get('/chamadas/exportar-atrasadas-1-semestre', [ChamadasController::class, 'exportarAtrasadasPrimeiroSemestre']);
+    $router->get('/acompanhamento', [AcompanhamentoController::class, 'index']);
+    $router->post('/acompanhamento/contato', [AcompanhamentoController::class, 'contato']);
+    $router->get('/acompanhamento/exportar', [AcompanhamentoController::class, 'exportar']);
+    $router->post('/acompanhamento/gerar', [AcompanhamentoController::class, 'gerar']);
     $router->get('/efeito-contatos', [EfeitoContatosController::class, 'index']);
     $router->post('/efeito-contatos/gerar', [EfeitoContatosController::class, 'gerar']);
 

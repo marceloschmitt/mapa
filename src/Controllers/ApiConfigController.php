@@ -30,14 +30,19 @@ class ApiConfigController extends Controller
     {
         $this->requireAdmin();
 
-        $oauthUrl = trim((string)($_POST['api_oauth_url'] ?? ''));
-        $clientId = trim((string)($_POST['api_client_id'] ?? ''));
-        $clientSecret = (string)($_POST['api_client_secret'] ?? '');
-        $urlMatriculados = trim((string)($_POST['api_url_matriculados'] ?? ''));
-        $urlAlunos = trim((string)($_POST['api_url_alunos'] ?? ''));
-        $urlMassaCadastro = trim((string)($_POST['api_url_alunos_massa_cadastro'] ?? ''));
-        $urlMassaIntervalo = trim((string)($_POST['api_url_alunos_massa_intervalo'] ?? ''));
-        $verifySsl = isset($_POST['api_verify_ssl']);
+        // Campos definidos no .env valem o .env (a tela os mostra só para leitura).
+        $env = ConfigRepository::apiDoEnv();
+        $campo = static fn(string $nome): string => $env[$nome] ?? trim((string)($_POST[$nome] ?? ''));
+        $oauthUrl = $campo('api_oauth_url');
+        $clientId = $campo('api_client_id');
+        $clientSecret = isset($env['api_client_secret']) ? '' : (string)($_POST['api_client_secret'] ?? '');
+        $urlMatriculados = $campo('api_url_matriculados');
+        $urlAlunos = $campo('api_url_alunos');
+        $urlMassaCadastro = $campo('api_url_alunos_massa_cadastro');
+        $urlMassaIntervalo = $campo('api_url_alunos_massa_intervalo');
+        $verifySsl = isset($env['api_verify_ssl'])
+            ? in_array(strtolower($env['api_verify_ssl']), ['1', 'true', 'yes', 'on'], true)
+            : isset($_POST['api_verify_ssl']);
         $periodoLetivo = trim((string)($_POST['api_periodo_letivo'] ?? ''));
         $dataInicial = trim((string)($_POST['frequencia_data_inicial'] ?? ''));
         $dataFinal = trim((string)($_POST['frequencia_data_final'] ?? ''));

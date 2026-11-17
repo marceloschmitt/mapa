@@ -67,13 +67,19 @@ class AnalyticsRepository
         return $this->limiteFrequencia;
     }
 
-    /** @return array<string, mixed>|null */
+    /**
+     * Ultima coleta completa: as que o pipeline ainda esta montando ou que
+     * falharam no meio (status em_andamento/falhou) nao aparecem no portal.
+     *
+     * @return array<string, mixed>|null
+     */
     public function ultimaColeta(): ?array
     {
         $statement = $this->db->query(
             'SELECT id, executada_em, data_inicial, data_final, data_referencia,
                     total_alunos, total_disciplinas, total_faltas_dia, origem
              FROM coletas
+             WHERE status IS NULL OR status = \'completa\'
              ORDER BY id DESC
              LIMIT 1'
         );
@@ -1511,6 +1517,7 @@ class AnalyticsRepository
         $sql = 'SELECT al.id, al.tipo, al.severidade, al.mensagem, al.codigo_disciplina,
                        al.disciplina, al.visualizado, al.visualizado_em, al.visualizado_por,
                        al.contato_tipo, al.gerado_em, al.detalhe_json,
+                       al.email_enviado_em, al.fechamento,
                        al.aluno_id, al.curso_id,
                        al.id_turma, t.nome_turma,
                        a.nome AS aluno_nome, a.nome_social AS aluno_nome_social,
@@ -1723,23 +1730,19 @@ class AnalyticsRepository
         ];
     }
 
-    public const CONTATO_TIPOS = ['email', 'whatsapp', 'telefone', 'presencial', 'assistencia'];
-
     /**
+     * Encerra um alarme a mao (visualizado = 1, fechamento manual). Registrar
+     * contato nao encerra: o caso segue aberto ate o aluno voltar ou alguem encerrar.
+     *
      * @param list<int>|null $cursoIdsPermitidos
      * @param list<string>|null $codigosDisciplinaPermitidos
      */
-    public function marcarAlarmeVisualizado(
+    public function encerrarAlarme(
         int $alarmeId,
         int $usuarioId,
-        string $contatoTipo,
         ?array $cursoIdsPermitidos = null,
         ?array $codigosDisciplinaPermitidos = null
     ): bool {
-        if (!in_array($contatoTipo, self::CONTATO_TIPOS, true)) {
-            return false;
-        }
-
         $select = $this->db->prepare(
             'SELECT id, curso_id, codigo_disciplina, id_turma, visualizado FROM alarmes WHERE id = :id LIMIT 1'
         );
@@ -1774,7 +1777,7 @@ class AnalyticsRepository
              SET visualizado = 1,
                  visualizado_em = datetime(\'now\', \'localtime\'),
                  visualizado_por = :usuario_id,
-                 contato_tipo = :contato_tipo
+                 fechamento = \'manual\'
              WHERE id = :id
                AND visualizado = 0'
         );
@@ -1782,29 +1785,25 @@ class AnalyticsRepository
         $statement->execute([
             'id' => $alarmeId,
             'usuario_id' => $usuarioId,
-            'contato_tipo' => $contatoTipo,
         ]);
 
         return $statement->rowCount() > 0;
     }
 
     /**
+     * Encerra a mao todos os alarmes abertos do aluno/curso (no escopo do usuario).
+     *
      * @param list<int>|null $cursoIdsPermitidos
      * @param list<string>|null $codigosDisciplinaPermitidos
      */
-    public function marcarAlarmesAlunoVisualizados(
+    public function encerrarAlarmesAluno(
         int $coletaId,
         int $alunoId,
         int $cursoId,
         int $usuarioId,
-        string $contatoTipo,
         ?array $cursoIdsPermitidos = null,
         ?array $codigosDisciplinaPermitidos = null
     ): int {
-        if (!in_array($contatoTipo, self::CONTATO_TIPOS, true)) {
-            return 0;
-        }
-
         if ($cursoIdsPermitidos !== null && !in_array($cursoId, $cursoIdsPermitidos, true)) {
             return 0;
         }
@@ -1817,7 +1816,7 @@ class AnalyticsRepository
                 SET visualizado = 1,
                     visualizado_em = datetime(\'now\', \'localtime\'),
                     visualizado_por = :usuario_id,
-                    contato_tipo = :contato_tipo
+                    fechamento = \'manual\'
                 WHERE coleta_id = :coleta_id
                   AND aluno_id = :aluno_id
                   AND curso_id = :curso_id
@@ -1825,7 +1824,6 @@ class AnalyticsRepository
 
         $params = [
             'usuario_id' => $usuarioId,
-            'contato_tipo' => $contatoTipo,
             'coleta_id' => $coletaId,
             'aluno_id' => $alunoId,
             'curso_id' => $cursoId,
@@ -1851,7 +1849,8 @@ class AnalyticsRepository
     }
 
     /**
-     * True se o aluno tem ao menos um alarme aberto em alguma das disciplinas.
+     * True se o aluno tem ao menos um alarme aberto (ou, com $somenteAbertos
+     * false, qualquer alarme) em alguma das disciplinas.
      *
      * @param list<string> $codigosDisciplina
      */
@@ -1859,7 +1858,8 @@ class AnalyticsRepository
         int $coletaId,
         int $alunoId,
         int $cursoId,
-        array $codigosDisciplina
+        array $codigosDisciplina,
+        bool $somenteAbertos = true
     ): bool {
         if ($codigosDisciplina === []) {
             return false;
@@ -1883,8 +1883,8 @@ class AnalyticsRepository
              FROM alarmes
              WHERE coleta_id = :coleta_id
                AND aluno_id = :aluno_id
-               AND curso_id = :curso_id
-               AND visualizado = 0
+               AND curso_id = :curso_id'
+               . ($somenteAbertos ? ' AND visualizado = 0' : '') . '
                AND codigo_disciplina IN (' . implode(', ', $placeholders) . ')'
                . $sqlTurma . '
              LIMIT 1'

@@ -14,6 +14,8 @@ CREATE TABLE IF NOT EXISTS usuarios (
     criado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
+-- status: em_andamento (pipeline rodando) | completa | falhou; NULL = coleta antiga ou
+-- importacao manual fora do pipeline. O portal mostra so as completas (e as NULL).
 CREATE TABLE IF NOT EXISTS coletas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     executada_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
@@ -23,7 +25,20 @@ CREATE TABLE IF NOT EXISTS coletas (
     total_alunos INTEGER NOT NULL DEFAULT 0,
     total_disciplinas INTEGER NOT NULL DEFAULT 0,
     total_faltas_dia INTEGER NOT NULL DEFAULT 0,
-    origem TEXT
+    origem TEXT,
+    status TEXT
+);
+
+-- Rodadas do pipeline (executar_coleta.py), inclusive as que falharam antes de criar a coleta.
+-- passo_falhou = script que parou a rodada; coleta_id = coleta criada nela, se chegou a criar.
+CREATE TABLE IF NOT EXISTS coleta_execucoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    iniciada_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    terminada_em TEXT,
+    status TEXT NOT NULL DEFAULT 'em_andamento' CHECK (status IN ('em_andamento', 'concluida', 'falhou')),
+    passo_falhou TEXT,
+    coleta_id INTEGER,
+    FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS alunos (
@@ -301,6 +316,12 @@ CREATE TABLE IF NOT EXISTS alarmes (
     contato_tipo TEXT CHECK (contato_tipo IS NULL OR contato_tipo IN ('email', 'email_automatico', 'whatsapp', 'telefone', 'presencial', 'assistencia')),
     -- Turma do aluno na disciplina (NULL = alarme do curso ou turma nao identificada).
     id_turma INTEGER,
+    -- E-mail ao aluno (automatico ou forcado) ja incluiu este alarme; passa de coleta em
+    -- coleta enquanto o alarme continuar, para o aluno nao receber o mesmo e-mail de novo.
+    email_enviado_em TEXT,
+    -- Como o caso foi encerrado (visualizado = 1): manual (tela) ou retorno (voltou a
+    -- frequentar); NULL = encerrado ao registrar contato, como era antes.
+    fechamento TEXT,
     FOREIGN KEY (coleta_id) REFERENCES coletas(id) ON DELETE CASCADE,
     FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
@@ -321,6 +342,18 @@ CREATE TABLE IF NOT EXISTS configuracoes (
     valor TEXT NOT NULL DEFAULT '',
     descricao TEXT,
     atualizado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- Historico das regras de alarme (Configuracoes -> Alarmes): uma linha por gravacao, com a
+-- configuracao inteira em JSON. A primeira gravacao registra antes a que estava em vigor
+-- (observacao diz que a data de inicio dela e desconhecida).
+CREATE TABLE IF NOT EXISTS alarme_config_historico (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    config_json TEXT NOT NULL,
+    salvo_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    salvo_por INTEGER,
+    observacao TEXT,
+    FOREIGN KEY (salvo_por) REFERENCES usuarios(id) ON DELETE SET NULL
 );
 
 -- Historico de e-mails automaticos por chamada em atraso.
@@ -376,6 +409,34 @@ CREATE INDEX IF NOT EXISTS idx_alarme_emails_coleta
 
 CREATE INDEX IF NOT EXISTS idx_alarme_emails_aluno_enviado
     ON alarme_emails(aluno_id, enviado_em);
+
+-- Contatos com o aluno: registro permanente, fora da limpeza de coletas (alarme_emails
+-- some em cascata com a coleta). origem: manual (tela de alarmes), automatico (e-mail do
+-- MAPA) ou migrado (registrado antes desta tabela). data_contato = dia em que o contato
+-- aconteceu, nao o do registro. conseguiu_falar: 1 sim, 0 nao, NULL nao se aplica (e-mail).
+-- codigo_disciplina: disciplina de onde o contato partiu, se houver.
+-- alarme_email_id: envio de origem de um contato automatico (sem FK: sobrevive a ele).
+CREATE TABLE IF NOT EXISTS contatos_aluno (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    aluno_id INTEGER NOT NULL,
+    curso_id INTEGER NOT NULL,
+    data_contato TEXT NOT NULL,
+    canal TEXT NOT NULL CHECK (canal IN ('email', 'email_automatico', 'whatsapp', 'telefone', 'presencial', 'assistencia', 'nao_informado')),
+    origem TEXT NOT NULL DEFAULT 'manual' CHECK (origem IN ('manual', 'automatico', 'migrado')),
+    conseguiu_falar INTEGER CHECK (conseguiu_falar IS NULL OR conseguiu_falar IN (0, 1)),
+    motivo TEXT,
+    observacao TEXT,
+    codigo_disciplina TEXT,
+    registrado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
+    registrado_por INTEGER,
+    alarme_email_id INTEGER UNIQUE,
+    FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
+    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
+    FOREIGN KEY (registrado_por) REFERENCES usuarios(id) ON DELETE SET NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_contatos_aluno_aluno
+    ON contatos_aluno(aluno_id, curso_id, data_contato);
 
 -- Historico de e-mails de aviso ao staff (max. 1 por destinatario a cada 7 dias).
 CREATE TABLE IF NOT EXISTS staff_alarme_emails (
@@ -487,10 +548,11 @@ CREATE TABLE IF NOT EXISTS perda_vaga_reprovacoes (
 CREATE INDEX IF NOT EXISTS idx_perda_vaga_reprovacoes_candidato
     ON perda_vaga_reprovacoes(candidato_id);
 
--- Efeito dos contatos (manual, python/gerar_efeito_contatos.py): taxa de faltas
--- dos alunos contatados antes do primeiro contato, antes do ultimo e depois do ultimo
--- (N dias seguintes e, em *_ate_corte, do dia seguinte ate a data dos dados).
+-- Efeito dos contatos (manual, python/gerar_efeito_contatos.py): faltas semana a
+-- semana em torno de uma data de referencia, para os alunos contatados e para um
+-- grupo de comparacao (alarme critico ainda sem contato).
 -- Um contato = um dia com algum contato (e-mail automatico ou registro na tela de alarmes).
+-- janela_dias = semanas antes x depois comparadas na tela (multiplo de 7).
 -- total_eventos = alunos/curso contatados.
 CREATE TABLE IF NOT EXISTS efeito_contatos_execucoes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -498,34 +560,147 @@ CREATE TABLE IF NOT EXISTS efeito_contatos_execucoes (
     data_inicio TEXT NOT NULL DEFAULT '',
     data_corte TEXT NOT NULL DEFAULT '',
     janela_dias INTEGER NOT NULL DEFAULT 14,
+    -- Mediana de dias entre o 1o e o 2o contato: onde a comparacao do 2o contato e alinhada.
+    intervalo_segundo INTEGER NOT NULL DEFAULT 7,
+    -- Mediana de dias do alarme critico ao 1o contato da equipe: onde a comparacao e alinhada.
+    intervalo_equipe INTEGER NOT NULL DEFAULT 3,
     min_aulas INTEGER NOT NULL DEFAULT 3,
     total_eventos INTEGER NOT NULL DEFAULT 0,
     executado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
 );
 
--- canais_ultimo: canais do dia do ultimo contato, separados por virgula.
-CREATE TABLE IF NOT EXISTS efeito_contatos_alunos (
+-- Uma serie semanal por aluno/curso e referencia.
+-- grupo 'contatado': data_referencia = dia do 1o contato (referencia 'primeiro') e,
+-- com dois ou mais contatos, tambem do 2o (referencia 'segundo').
+-- grupo 'comparacao': aluno com alarme critico ainda sem contato, data_referencia =
+-- dia do primeiro alarme critico (referencia 'primeiro'); ou contatado uma vez que
+-- ainda nao tinha o 2o contato, data_referencia = 1o contato + intervalo_segundo
+-- (referencia 'segundo'). Com contato depois, a serie
+-- para na ultima semana inteira antes dele.
+-- canais: canais do dia da referencia, separados por virgula (vazio na comparacao).
+-- So alunos com alarme critico real (tabela alarmes). Recortes da tela: alarme_tipo =
+-- tipo do primeiro alarme critico; dias_ate_contato = do alarme a referencia (so
+-- contatados; negativo = contatado antes do alarme critico); ingressante; auxilio.
+CREATE TABLE IF NOT EXISTS efeito_contatos_series (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     execucao_id INTEGER NOT NULL,
     aluno_id INTEGER NOT NULL,
     curso_id INTEGER NOT NULL,
-    total_contatos INTEGER NOT NULL,
-    primeiro_contato TEXT NOT NULL,
-    ultimo_contato TEXT NOT NULL,
-    canais_ultimo TEXT NOT NULL DEFAULT '',
-    aulas_antes_primeiro INTEGER NOT NULL DEFAULT 0,
-    faltas_antes_primeiro INTEGER NOT NULL DEFAULT 0,
-    aulas_antes_ultimo INTEGER NOT NULL DEFAULT 0,
-    faltas_antes_ultimo INTEGER NOT NULL DEFAULT 0,
-    aulas_depois_ultimo INTEGER NOT NULL DEFAULT 0,
-    faltas_depois_ultimo INTEGER NOT NULL DEFAULT 0,
-    aulas_ate_corte INTEGER NOT NULL DEFAULT 0,
-    faltas_ate_corte INTEGER NOT NULL DEFAULT 0,
+    grupo TEXT NOT NULL CHECK (grupo IN ('contatado', 'comparacao')),
+    referencia TEXT NOT NULL CHECK (referencia IN ('primeiro', 'segundo')),
+    data_referencia TEXT NOT NULL,
+    total_contatos INTEGER NOT NULL DEFAULT 0,
+    canais TEXT NOT NULL DEFAULT '',
+    alarme_tipo TEXT,
+    dias_ate_contato INTEGER,
+    falou INTEGER,
+    ingressante INTEGER NOT NULL DEFAULT 0,
+    auxilio INTEGER NOT NULL DEFAULT 0,
     FOREIGN KEY (execucao_id) REFERENCES efeito_contatos_execucoes(id) ON DELETE CASCADE
 );
 
-CREATE INDEX IF NOT EXISTS idx_efeito_contatos_alunos_execucao
-    ON efeito_contatos_alunos(execucao_id, curso_id);
+CREATE INDEX IF NOT EXISTS idx_efeito_contatos_series_execucao
+    ON efeito_contatos_series(execucao_id, referencia, curso_id);
+
+-- Aulas e faltas da serie por semana relativa a referencia: -1 = 7 dias antes,
+-- 1 = 7 dias depois (o dia da referencia nao entra). Semanas sem aula nao sao gravadas.
+CREATE TABLE IF NOT EXISTS efeito_contatos_semanas (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    serie_id INTEGER NOT NULL,
+    semana INTEGER NOT NULL,
+    aulas INTEGER NOT NULL,
+    faltas INTEGER NOT NULL,
+    FOREIGN KEY (serie_id) REFERENCES efeito_contatos_series(id) ON DELETE CASCADE,
+    UNIQUE (serie_id, semana)
+);
+
+-- Acompanhamento dos alunos em risco (gerar_efeito_contatos.py), uma linha por
+-- aluno/curso com risco pela regra de referencia (risco_referencia.py) ou com contato.
+-- Tudo o que a tela de eficacia mostra sai daqui; a referencia "antes do MAPA" sai de
+-- referencia_historica_alunos.
+CREATE TABLE IF NOT EXISTS acompanhamento_execucoes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    coleta_id INTEGER,
+    periodo TEXT NOT NULL DEFAULT '',
+    data_inicio TEXT NOT NULL,
+    data_corte TEXT NOT NULL,
+    total_alunos INTEGER NOT NULL DEFAULT 0,
+    executado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+-- risco_*: primeiro alarme critico pela referencia (NULL = sem risco; so contatado).
+-- retorno: presenca nas 2 semanas apos o risco: voltou, parcial, nao_voltou, sem_aulas;
+-- NULL enquanto as 2 semanas nao couberem nos dados. contato_retorno: idem, apos o 1o
+-- contato. desde_contato_*: do dia seguinte ao ultimo contato ate a data dos dados.
+-- rep_falta / rematriculou: preenchidos no fechamento do semestre
+-- (gerar_referencia_historica.py); NULL ate la.
+CREATE TABLE IF NOT EXISTS acompanhamento_alunos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    execucao_id INTEGER NOT NULL,
+    aluno_id INTEGER NOT NULL,
+    curso_id INTEGER NOT NULL,
+    nivel TEXT,
+    ingressante INTEGER NOT NULL DEFAULT 0,
+    auxilio INTEGER NOT NULL DEFAULT 0,
+    saiu INTEGER NOT NULL DEFAULT 0,
+    risco_tipo TEXT,
+    risco_data TEXT,
+    risco_semana INTEGER,
+    antes_aulas INTEGER NOT NULL DEFAULT 0,
+    antes_faltas INTEGER NOT NULL DEFAULT 0,
+    retorno_aulas INTEGER NOT NULL DEFAULT 0,
+    retorno_faltas INTEGER NOT NULL DEFAULT 0,
+    retorno TEXT,
+    total_contatos INTEGER NOT NULL DEFAULT 0,
+    primeiro_contato TEXT,
+    primeiro_canal TEXT,
+    dias_ate_contato INTEGER,
+    ultimo_contato TEXT,
+    ultimo_canal TEXT,
+    ultimo_falou INTEGER,
+    ultimo_motivo TEXT,
+    contato_retorno_aulas INTEGER NOT NULL DEFAULT 0,
+    contato_retorno_faltas INTEGER NOT NULL DEFAULT 0,
+    contato_retorno TEXT,
+    desde_contato_aulas INTEGER NOT NULL DEFAULT 0,
+    desde_contato_faltas INTEGER NOT NULL DEFAULT 0,
+    rep_falta INTEGER,
+    rematriculou INTEGER,
+    FOREIGN KEY (execucao_id) REFERENCES acompanhamento_execucoes(id) ON DELETE CASCADE,
+    FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
+    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_acompanhamento_alunos_execucao
+    ON acompanhamento_alunos(execucao_id, curso_id);
+
+-- Referencia historica (gerar_referencia_historica.py): um semestre fechado,
+-- uma linha por aluno/curso com disciplinas semestrais, sem identificar o aluno.
+-- Os alarmes sao os mesmos simulados pela regra de referencia; com_mapa = 1 nos
+-- semestres em que houve contatos do MAPA. presenca_inicio = % de presenca nas 4
+-- primeiras semanas. rematriculou = NULL quando o semestre seguinte ainda nao
+-- tem matriculas. Regerar um periodo apaga e regrava as linhas dele.
+CREATE TABLE IF NOT EXISTS referencia_historica_alunos (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    periodo TEXT NOT NULL,
+    com_mapa INTEGER NOT NULL DEFAULT 0,
+    curso_id INTEGER,
+    nome_curso TEXT NOT NULL DEFAULT '',
+    nivel TEXT,
+    ingressante INTEGER NOT NULL DEFAULT 0,
+    risco_tipo TEXT,
+    risco_semana INTEGER,
+    retorno TEXT,
+    presenca_inicio REAL,
+    rep_falta INTEGER NOT NULL DEFAULT 0,
+    reprovou INTEGER NOT NULL DEFAULT 0,
+    rematriculou INTEGER,
+    concluiu INTEGER NOT NULL DEFAULT 0,
+    gerado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_referencia_historica_periodo
+    ON referencia_historica_alunos(periodo, risco_tipo);
 
 -- Passe livre: percentual de frequencia do semestre anterior (carga manual).
 -- Um aluno em dois cursos aparece em duas linhas.

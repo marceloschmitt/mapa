@@ -13,7 +13,10 @@ Ponto de entrada único do pipeline de coleta. Roda os scripts na sequência
 fixa (consulta em massa → consulta inicial → análise de frequência → imports →
 alarmes → e-mails PHP), interrompendo a cadeia se um
 passo falhar. Pensado para ser chamado por caminho absoluto (cron ou manual),
-sem `cd` prévio.
+sem `cd` prévio. Cada rodada fica em `coleta_execucoes` (concluída ou falhou,
+com o passo que parou); a coleta criada nasce `em_andamento` e só vira
+`completa` quando todos os passos Python terminam, antes dos e-mails. O portal
+ignora coletas que falharam e avisa no topo quando a última rodada falhou.
 
 ---
 
@@ -255,13 +258,35 @@ API → "Buscar meses encerrados" (somente administradores; log em
 `data/integrados_anual.log`). Rodar a cada troca de semestre dos integrados.
 
 ### `gerar_efeito_contatos.py`
-Compara a taxa de faltas dos alunos contatados no semestre (e-mail automático
-em `alarme_emails` e contatos registrados na tela de alarmes) antes e depois
-do contato. Conta as aulas da turma do aluno (`turma_aulas`) até a última
-chamada da turma (`turma_ultima_aula`); sem turma identificada, usa a grade e
-a última chamada da disciplina no curso. Só lê o banco e grava em
-`efeito_contatos_*`. Acionado pela tela Efeito dos contatos → Gerar análise
-(opções `--janela` e `--min-aulas`).
+Acompanhamento dos alunos em risco do semestre atual. "Em risco" é o primeiro
+alarme crítico pela regra de referência (`risco_referencia.py`), simulada
+sobre as faltas por dia, e não os alarmes gravados (que seguem a configuração
+do momento). Para cada aluno em risco ou contatado grava tipo e semana do
+risco, presença nas 2 semanas antes e depois (retorno: voltou, parcial, não
+voltou), contatos (`contatos_aluno`), retorno após o 1º contato e presença
+desde o último (`acompanhamento_*`). Grava também a série semanal da tela
+antiga (`efeito_contatos_*`). Conta as aulas da turma do aluno (`turma_aulas`)
+até a última chamada da turma (`turma_ultima_aula`); sem turma identificada,
+usa a grade e a última chamada da disciplina no curso. Só lê o banco.
+Acionado pela tela Efeito dos contatos → Gerar análise (opções `--semanas` e
+`--min-aulas`).
+
+### `gerar_referencia_historica.py`
+Um semestre fechado (`AAAA/S`) analisado com a mesma regra de referência, para
+servir de "antes do MAPA": disciplinas, datas de aula (`turno_turma`) e
+situação final vêm das matrículas do período (`resposta_matriculas_AAAA_S.json`),
+as faltas por dia vêm da API de intervalo (status a status, mês a mês, como na
+coleta; cache em `resposta_intervalo_AAAA_S.json`) e a rematrícula vem das
+matrículas do semestre seguinte. Grava uma linha por aluno/curso em
+`referencia_historica_alunos`, sem identificar o aluno. Rodado no fechamento
+do semestre atual, preenche também reprovação por falta e rematrícula em
+`acompanhamento_alunos`. Opções `--sem-api`, `--inicio`, `--fim`.
+
+### `risco_referencia.py`
+Módulo de apoio: a regra de referência de risco. Os três alarmes simulados com
+valores fixos (`REFERENCIA`, os padrões das regras) usando as funções de
+`gerar_alarmes.py`, a classe `Disciplina` (aulas, faltas, validade) e o
+retorno em 2 semanas. Funções puras, sem I/O.
 
 ### `importar_emails_professores.py`
 Atualiza os e-mails dos professores a partir de um CSV exportado do Moodle
@@ -297,5 +322,7 @@ remove prefixos de iniciais que o Moodle cola no início do nome.
 | `consulta_integrados_anual.py` | Manual (tela Configuração da API) | Busca os meses encerrados do ano letivo dos integrados |
 | `gerar_perda_vaga.py` | Manual (tela Perda de vaga) | Candidatos a perda de vaga |
 | `gerar_passe_livre.py` | Manual | Passe livre a partir da frequência mensal |
-| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos) | Faltas antes e depois do contato com o aluno |
+| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos) | Acompanhamento dos alunos em risco (regra de referência) e série semanal |
+| `gerar_referencia_historica.py` | Manual | Semestre fechado com a regra de referência: o "antes do MAPA" |
+| `risco_referencia.py` | Módulo de apoio | Regra de referência de risco e retorno em 2 semanas |
 | `importar_emails_professores.py` | Manual | Atualiza e-mails de professores via CSV |

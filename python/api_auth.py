@@ -8,7 +8,7 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
-from db import conectar, fechar, row_to_dict
+from db import conectar, env, fechar, row_to_dict
 
 USER_AGENT = "MAPA/1.0"
 
@@ -28,9 +28,32 @@ CHAVES_API = (
     "integrados_data_inicio",
 )
 
+# Credenciais e URLs que podem vir do .env e valem mais que a tela (chave do
+# banco -> variavel). Mesma lista de ConfigRepository::API_ENV no PHP.
+CHAVES_ENV = {
+    "api_oauth_url": "API_OAUTH_URL",
+    "api_client_id": "API_CLIENT_ID",
+    "api_client_secret": "API_CLIENT_SECRET",
+    "api_url_matriculados": "API_URL_MATRICULADOS",
+    "api_url_alunos": "API_URL_ALUNOS",
+    "api_url_alunos_massa_cadastro": "API_URL_ALUNOS_MASSA_CADASTRO",
+    "api_url_alunos_massa_intervalo": "API_URL_ALUNOS_MASSA_INTERVALO",
+    "api_verify_ssl": "API_VERIFY_SSL",
+}
+
+
+def config_api_do_env() -> dict[str, str]:
+    """Chaves da API definidas no .env (ou no ambiente), por chave do banco."""
+    valores: dict[str, str] = {}
+    for chave, variavel in CHAVES_ENV.items():
+        valor = env(variavel).strip()
+        if valor:
+            valores[chave] = valor
+    return valores
+
 
 def carregar_config_api() -> dict[str, str]:
-    """Le as chaves da API na tabela configuracoes."""
+    """Le as chaves da API: o .env (CHAVES_ENV) vale mais que a tabela configuracoes."""
     conn = conectar()
     cursor = conn.cursor()
     placeholders = ",".join("?" for _ in CHAVES_API)
@@ -46,6 +69,7 @@ def carregar_config_api() -> dict[str, str]:
         if chave in config:
             config[chave] = str(item.get("valor") or "").strip()
 
+    config.update(config_api_do_env())
     return config
 
 

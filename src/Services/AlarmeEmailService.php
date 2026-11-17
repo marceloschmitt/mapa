@@ -8,6 +8,7 @@ use Mapa\Core\Env;
 use Mapa\Lib\SmtpMailer;
 use Mapa\Models\AnalyticsRepository;
 use Mapa\Models\ConfigRepository;
+use Mapa\Models\ContatoRepository;
 use Mapa\Models\CursoCoordenacaoRepository;
 use PDO;
 use Throwable;
@@ -206,7 +207,7 @@ class AlarmeEmailService
     /**
      * Envio manual (professor/coordenador): mesma mensagem do automático,
      * ignora janela de 7 dias e o interruptor de alarmes aos alunos.
-     * Marca os alarmes abertos como email_automatico.
+     * Registra o contato e marca os alarmes como avisados (sem encerrá-los).
      *
      * @param string|null $codigoDisciplina Se informado, limita aos alarmes dessa disciplina.
      * @return array{ok: bool, mensagem: string}
@@ -260,6 +261,9 @@ class AlarmeEmailService
         }
 
         try {
+            $mailer->send([$destinatario], $this->montarAssunto(), $this->montarMensagem($grupo));
+            $this->registrarEnvio($coletaId, $grupo, $destinatario, $usuarioId);
+            $this->marcarAlarmesEnviados($grupo['alarme_ids']);
             $nomeAluno = trim((string)($grupo['nome'] ?? ''));
             $mailer->send(
                 [$destinatario],
@@ -322,6 +326,7 @@ class AlarmeEmailService
         }
 
         if ($exigirCritico) {
+            // Só alarme crítico ainda não avisado por e-mail neste episódio dispara o envio.
             $check = $this->pdo->prepare(
                 'SELECT 1
                  FROM alarmes al
@@ -329,7 +334,8 @@ class AlarmeEmailService
                    AND al.aluno_id = :aluno_id
                    AND al.curso_id = :curso_id
                    AND al.severidade = \'critico\'
-                   AND al.visualizado = 0'
+                   AND al.visualizado = 0
+                   AND al.email_enviado_em IS NULL'
                 . $filtroDisc
                 . ' LIMIT 1'
             );
@@ -1311,12 +1317,14 @@ class AlarmeEmailService
      */
     private function agruparAlarmesParaEnvio(int $coletaId): array
     {
+        // Dispara com alarme crítico aberto ainda não avisado; o e-mail lista todos os abertos.
         $statement = $this->pdo->prepare(
             'SELECT DISTINCT al.aluno_id, al.curso_id
              FROM alarmes al
              WHERE al.coleta_id = :coleta_id
                AND al.severidade = \'critico\'
                AND al.visualizado = 0
+               AND al.email_enviado_em IS NULL
                AND NOT EXISTS (
                    SELECT 1
                    FROM alunos_trancados at
@@ -1527,6 +1535,7 @@ class AlarmeEmailService
         $trancados = $this->mapaTrancadosColeta($coletaId);
         $enviosColeta = $this->enviosNestaColeta($coletaId);
         $recentes = $this->enviosRecentesDetalhados();
+        $avisadosNoEpisodio = $this->criticosJaAvisados($coletaId);
 
         foreach ($candidatos as $c) {
             $chave = $this->chaveAlunoCurso($c);
@@ -1536,6 +1545,13 @@ class AlarmeEmailService
 
             if (isset($trancados[$chave])) {
                 $motivos[$chave] = 'Aluno trancado — e-mail automático não é enviado.';
+                continue;
+            }
+
+            if (isset($avisadosNoEpisodio[$chave])) {
+                $motivos[$chave] = 'E-mail automático já enviado em '
+                    . $this->formatarDataEnvio($avisadosNoEpisodio[$chave])
+                    . '; outro só sai se surgir um novo alarme crítico.';
                 continue;
             }
 
@@ -1573,6 +1589,35 @@ class AlarmeEmailService
         }
 
         return $motivos;
+    }
+
+    /**
+     * Alunos/curso cujos alarmes críticos abertos já foram todos avisados por
+     * e-mail (chave "aluno|curso" => data do último envio).
+     *
+     * @return array<string, string>
+     */
+    private function criticosJaAvisados(int $coletaId): array
+    {
+        $statement = $this->pdo->prepare(
+            'SELECT aluno_id, curso_id, MAX(email_enviado_em) AS enviado,
+                    SUM(CASE WHEN email_enviado_em IS NULL THEN 1 ELSE 0 END) AS pendentes
+             FROM alarmes
+             WHERE coleta_id = :coleta_id
+               AND severidade = \'critico\'
+               AND visualizado = 0
+             GROUP BY aluno_id, curso_id'
+        );
+        $statement->execute(['coleta_id' => $coletaId]);
+
+        $saida = [];
+        foreach ($statement->fetchAll() as $row) {
+            if ((int)$row['pendentes'] === 0 && $row['enviado'] !== null) {
+                $saida[(int)$row['aluno_id'] . '|' . (int)$row['curso_id']] = (string)$row['enviado'];
+            }
+        }
+
+        return $saida;
     }
 
     /**
@@ -1691,8 +1736,12 @@ class AlarmeEmailService
      *   alarme_ids: list<int>
      * } $grupo
      */
-    private function registrarEnvio(int $coletaId, array $grupo, string $destinatario): void
-    {
+    private function registrarEnvio(
+        int $coletaId,
+        array $grupo,
+        string $destinatario,
+        ?int $usuarioId = null
+    ): void {
         $statement = $this->pdo->prepare(
             'INSERT INTO alarme_emails (
                 coleta_id, aluno_id, curso_id, destinatario, alarme_ids, enviado_em
@@ -1711,22 +1760,41 @@ class AlarmeEmailService
             'destinatario' => $destinatario,
             'alarme_ids' => implode(',', array_map('strval', $grupo['alarme_ids'])),
         ]);
+
+        // O envio também é um contato (registro permanente, fora da limpeza de coletas).
+        $envio = $this->pdo->prepare(
+            'SELECT id FROM alarme_emails WHERE coleta_id = :coleta_id AND aluno_id = :aluno_id AND curso_id = :curso_id'
+        );
+        $envio->execute([
+            'coleta_id' => $coletaId,
+            'aluno_id' => (int)$grupo['aluno_id'],
+            'curso_id' => (int)$grupo['curso_id'],
+        ]);
+        (new ContatoRepository($this->pdo))->registrar([
+            'aluno_id' => (int)$grupo['aluno_id'],
+            'curso_id' => (int)$grupo['curso_id'],
+            'data_contato' => date('Y-m-d'),
+            'canal' => self::CONTATO_AUTOMATICO,
+            'origem' => 'automatico',
+            'registrado_por' => $usuarioId,
+            'alarme_email_id' => (int)$envio->fetchColumn(),
+        ]);
     }
 
     /**
+     * Marca os alarmes que o e-mail incluiu. Não encerra o caso: o alarme segue
+     * aberto (a equipe acompanha), mas não gera outro e-mail neste episódio.
+     *
      * @param list<int> $alarmeIds
      */
-    private function marcarAlarmesEnviados(array $alarmeIds, ?int $usuarioId = null): void
+    private function marcarAlarmesEnviados(array $alarmeIds): void
     {
         if ($alarmeIds === []) {
             return;
         }
 
         $placeholders = [];
-        $params = [
-            'contato_tipo' => self::CONTATO_AUTOMATICO,
-            'usuario_id' => $usuarioId,
-        ];
+        $params = [];
         foreach ($alarmeIds as $index => $id) {
             $key = 'id_' . $index;
             $placeholders[] = ':' . $key;
@@ -1735,12 +1803,9 @@ class AlarmeEmailService
 
         $statement = $this->pdo->prepare(
             'UPDATE alarmes
-             SET visualizado = 1,
-                 visualizado_em = datetime(\'now\', \'localtime\'),
-                 visualizado_por = :usuario_id,
-                 contato_tipo = :contato_tipo
+             SET email_enviado_em = datetime(\'now\', \'localtime\')
              WHERE id IN (' . implode(', ', $placeholders) . ')
-               AND visualizado = 0'
+               AND email_enviado_em IS NULL'
         );
         $statement->execute($params);
     }

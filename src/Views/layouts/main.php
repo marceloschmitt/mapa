@@ -47,7 +47,7 @@ $itensAcompanhamento = [
     ['/ingressantes', 'bi-person-plus', 'Ingressantes', true],
     ['/chamadas', 'bi-clipboard-check', 'Últimas chamadas', !empty($podeVerChamadas)],
     ['/frequencia-anual', 'bi-calendar3', 'Frequência corrente', !empty($podeVerFrequenciaAnual)],
-    ['/efeito-contatos', 'bi-graph-down-arrow', 'Efeito dos contatos', !empty($podeVerChamadas)],
+    ['/acompanhamento', 'bi-graph-up-arrow', 'Eficácia dos alarmes', true],
 ];
 $itensSituacao = [
     ['/trancados', 'bi-pause-circle', 'Alunos trancados', true],
@@ -192,6 +192,12 @@ $passeLivreAtivo = $noCaminho('/passe-livre');
 </nav>
 
 <main class="container pb-5">
+    <?php if (!empty($avisoColeta)): ?>
+        <div class="alert alert-warning d-flex align-items-start gap-2" role="status">
+            <i class="bi bi-exclamation-triangle" aria-hidden="true"></i>
+            <span><?= $e((string)$avisoColeta) ?></span>
+        </div>
+    <?php endif; ?>
     <?= $content ?>
 </main>
 

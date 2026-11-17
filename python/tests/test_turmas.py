@@ -277,17 +277,111 @@ class EfeitoContatosTest(unittest.TestCase):
 
     def test_aulas_param_na_ultima_chamada_da_turma(self) -> None:
         contato = {date(2026, 9, 15): {"email"}}
-        registros = gerar_efeito_contatos.montar_registros({(1, 1): contato, (2, 1): contato}, 14)
+        alarme = gerar_efeito_contatos.AlarmeCritico(date(2026, 9, 14), "percentual_baixo")
+        series = gerar_efeito_contatos.montar_series(
+            {(1, 1): contato, (2, 1): contato}, {(1, 1): alarme, (2, 1): alarme}, date(2026, 9, 30)
+        )
+        series = [s for s in series if s["grupo"] == "contatado"]
         semestre = {"primeira_id": 1, "ultima_id": 1, "inicio": date(2026, 9, 1), "cortes": {1: date(2026, 9, 30)}}
-        gerar_efeito_contatos.calcular_janelas(self.conn.cursor(), registros, semestre)
-        por_aluno = {r["par"][0]: r["contagem"] for r in registros}
+        gerar_efeito_contatos.calcular_semanas(self.conn.cursor(), series, semestre)
+        por_aluno = {s["par"][0]: s["contagem"] for s in series}
 
         # Com turma: so segundas, e depois do contato so ate 21/09.
-        self.assertEqual(por_aluno[1]["antes_primeiro"], [2, 0])
-        self.assertEqual(por_aluno[1]["depois_ultimo"], [1, 1])
+        self.assertEqual(por_aluno[1], {-2: [1, 0], -1: [1, 0], 1: [1, 1]})
         # Sem turma: grade e ultima chamada da disciplina.
-        self.assertEqual(por_aluno[2]["antes_primeiro"], [4, 0])
-        self.assertEqual(por_aluno[2]["depois_ultimo"], [4, 1])
+        self.assertEqual(por_aluno[2], {-2: [2, 0], -1: [2, 0], 1: [2, 1], 2: [2, 0]})
+
+
+class AlarmesCriticosTest(unittest.TestCase):
+    def test_primeiro_alarme_critico_real(self) -> None:
+        conn = banco()
+        cur = conn.cursor()
+        cur.executemany(
+            "INSERT INTO coletas (id, executada_em, status) VALUES (?, ?, ?)",
+            [(1, "2026-09-01 08:00:00", "completa"), (2, "2026-09-08 08:00:00", "falhou"),
+             (3, "2026-09-15 08:00:00", "completa")],
+        )
+        cur.execute("INSERT INTO cursos (id, nome_curso) VALUES (1, 'Curso A')")
+        cur.executemany("INSERT INTO alunos (id, login, matricula, nome) VALUES (?, ?, ?, ?)",
+                        [(1, "a1", "1", "A"), (2, "a2", "2", "B"), (3, "a3", "3", "C")])
+        cur.executemany(
+            "INSERT INTO alarmes (coleta_id, aluno_id, curso_id, tipo, severidade, mensagem) VALUES (?, ?, 1, ?, ?, '')",
+            [
+                (1, 1, "percentual_baixo", "critico"),  # mesmo dia: vale dias seguidos de falta
+                (1, 1, "faltas_4dias", "critico"),
+                (3, 1, "faltas_3semanas", "critico"),
+                (2, 2, "faltas_4dias", "critico"),      # coleta que falhou: fica de fora
+                (3, 2, "percentual_baixo", "critico"),
+                (1, 3, "percentual_baixo", "alto"),     # nao critico: fora
+            ],
+        )
+        alarmes = gerar_efeito_contatos.carregar_alarmes_criticos(cur, 1)
+        critico = gerar_efeito_contatos.AlarmeCritico
+        self.assertEqual(alarmes, {
+            (1, 1): critico(date(2026, 9, 1), "faltas_4dias"),
+            (2, 1): critico(date(2026, 9, 15), "percentual_baixo"),
+        })
+
+
+class SeriesEfeitoTest(unittest.TestCase):
+    CORTE = date(2026, 9, 30)
+
+    def test_contato_da_equipe_e_comparacao(self) -> None:
+        critico = gerar_efeito_contatos.AlarmeCritico
+        d = lambda dia: date(2026, 9, dia)  # noqa: E731
+        contatos = {
+            (1, 1): {d(1): {"email_automatico"}, d(3): {"telefone"}, d(15): {"whatsapp"}},
+            (2, 1): {d(1): {"email_automatico"}},                   # so o e-mail automatico
+            (3, 1): {d(1): {"email_automatico"}, d(10): {"whatsapp"}},
+            (5, 1): {d(5): {"telefone"}},                           # sem alarme critico: fora
+            (6, 1): {d(18): {"presencial"}},                        # contato da equipe antes do alarme
+        }
+        alarmes = {
+            (1, 1): critico(d(1), "faltas_4dias"),
+            (2, 1): critico(d(1), "faltas_3semanas"),
+            (3, 1): critico(d(1), "percentual_baixo"),
+            (4, 1): critico(d(28), "percentual_baixo"),             # alarme + 3 dias passa do corte
+            (6, 1): critico(d(20), "percentual_baixo"),
+        }
+        self.assertEqual(gerar_efeito_contatos.intervalo_equipe(contatos, alarmes), 6)   # mediana de 2 e 9
+        self.assertEqual(gerar_efeito_contatos.intervalo_segundo_contato(contatos, alarmes), 12)
+
+        perfis = {(1, 1): {"ingressante": True, "auxilio": True}}
+        falou = {(1, 1): {d(3): 1}}
+        series = gerar_efeito_contatos.montar_series(contatos, alarmes, self.CORTE, perfis, 10, 3, falou)
+        chaves = {(s["par"][0], s["grupo"], s["referencia"]): s for s in series}
+
+        self.assertEqual(sorted(chaves), [
+            (1, "comparacao", "segundo"), (1, "contatado", "primeiro"), (1, "contatado", "segundo"),
+            (2, "comparacao", "primeiro"),
+            (3, "comparacao", "primeiro"), (3, "comparacao", "segundo"), (3, "contatado", "primeiro"),
+            (6, "comparacao", "segundo"), (6, "contatado", "primeiro"),
+        ])
+        # Contato da equipe: o e-mail automatico nao conta, nem como canal.
+        um = chaves[(1, "contatado", "primeiro")]
+        self.assertEqual(
+            (um["data"], um["canais"], um["total"], um["dias_ate_contato"], um["falou"], um["ingressante"]),
+            (d(3), "telefone", 2, 2, 1, True),
+        )
+        self.assertEqual(chaves[(1, "contatado", "segundo")]["data"], d(15))
+        # Comparacao: sem contato da equipe 3 dias depois do alarme; para antes do contato que vier.
+        self.assertEqual(chaves[(2, "comparacao", "primeiro")]["data"], d(4))
+        tres = chaves[(3, "comparacao", "primeiro")]
+        self.assertEqual((tres["data"], [n for n, _, _ in tres["semanas"] if n > 0]), (d(4), []))
+        self.assertIsNone(tres["dias_ate_contato"])
+        # Comparacao do 2o: um contato da equipe so, 10 dias depois dele; para antes do 2o (15/09).
+        self.assertEqual(chaves[(1, "comparacao", "segundo")]["data"], d(13))
+        self.assertEqual(chaves[(3, "comparacao", "segundo")]["data"], d(20))
+        self.assertEqual(chaves[(6, "contatado", "primeiro")]["dias_ate_contato"], -2)
+
+    def test_semanas_em_torno_da_referencia(self) -> None:
+        semanas = gerar_efeito_contatos.semanas_da_serie(date(2026, 9, 15), self.CORTE)
+        por_numero = {s: (inicio, fim) for s, inicio, fim in semanas}
+        self.assertEqual(por_numero[-1], ("2026-09-08", "2026-09-14"))
+        self.assertEqual(por_numero[1], ("2026-09-16", "2026-09-22"))
+        # O dia da referencia nao entra; depois dela vai ate a semana que comeca no corte.
+        self.assertEqual([s for s, _, _ in semanas if s > 0], [1, 2, 3])
+        self.assertEqual(min(por_numero), -gerar_efeito_contatos.SEMANAS_ANTES)
 
 
 if __name__ == "__main__":

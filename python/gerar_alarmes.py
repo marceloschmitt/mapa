@@ -169,7 +169,10 @@ def limpar_alarmes_coleta(cursor: Any, coleta_id: int) -> None:
 
 
 def coleta_anterior_id(cursor: Any, coleta_id: int) -> int | None:
-    """Retorna o id da coleta imediatamente anterior.
+    """Retorna o id da ultima coleta completa antes da atual.
+
+    Pula as que falharam ou ficaram pela metade (status falhou/em_andamento):
+    nelas os alarmes podem nao ter sido gerados, e os tratados se perderiam.
 
     Args:
         cursor: Cursor SQLite.
@@ -179,7 +182,11 @@ def coleta_anterior_id(cursor: Any, coleta_id: int) -> int | None:
         ID da coleta anterior ou None.
     """
     cursor.execute(
-        "SELECT id FROM coletas WHERE id < ? ORDER BY id DESC LIMIT 1",
+        """
+        SELECT id FROM coletas
+        WHERE id < ? AND (status IS NULL OR status = 'completa')
+        ORDER BY id DESC LIMIT 1
+        """,
         (coleta_id,),
     )
     row = cursor.fetchone()
@@ -211,13 +218,13 @@ def trazer_alarmes_tratados(cursor: Any, coleta_id: int) -> int:
             coleta_id, aluno_id, curso_id, codigo_disciplina, disciplina,
             tipo, severidade, mensagem, detalhe_json,
             visualizado, visualizado_em, visualizado_por, contato_tipo, gerado_em,
-            id_turma
+            id_turma, email_enviado_em, fechamento
         )
         SELECT
             ?, a.aluno_id, a.curso_id, a.codigo_disciplina, a.disciplina,
             a.tipo, a.severidade, a.mensagem, a.detalhe_json,
             a.visualizado, a.visualizado_em, a.visualizado_por, a.contato_tipo, a.gerado_em,
-            a.id_turma
+            a.id_turma, a.email_enviado_em, a.fechamento
         FROM alarmes a
         WHERE a.coleta_id = ?
           AND a.visualizado = 1
@@ -252,11 +259,68 @@ def trazer_alarmes_tratados(cursor: Any, coleta_id: int) -> int:
             visualizado_por = excluded.visualizado_por,
             contato_tipo = excluded.contato_tipo,
             gerado_em = excluded.gerado_em,
-            id_turma = COALESCE(excluded.id_turma, alarmes.id_turma)
+            id_turma = COALESCE(excluded.id_turma, alarmes.id_turma),
+            email_enviado_em = COALESCE(excluded.email_enviado_em, alarmes.email_enviado_em),
+            fechamento = excluded.fechamento
         """,
         (coleta_id, anterior, coleta_id, coleta_id),
     )
     return int(cursor.rowcount or 0)
+
+
+ChaveAlarme = tuple[int, int, str, str]
+
+
+def emails_enviados_abertos(cursor: Any, coleta_id: int) -> dict[ChaveAlarme, str]:
+    """email_enviado_em dos alarmes abertos da coleta, por (aluno, curso, disciplina, tipo).
+
+    Lido antes de limpar_alarmes_coleta: regerar a mesma coleta nao pode
+    apagar o registro de que o aluno ja recebeu o e-mail.
+    """
+    return {
+        (int(r[0]), int(r[1]), str(r[2]), str(r[3])): str(r[4])
+        for r in cursor.execute(
+            """
+            SELECT aluno_id, curso_id, codigo_disciplina, tipo, email_enviado_em
+            FROM alarmes
+            WHERE coleta_id = ? AND visualizado = 0 AND email_enviado_em IS NOT NULL
+            """,
+            (coleta_id,),
+        ).fetchall()
+    }
+
+
+def herdar_emails_enviados(
+    cursor: Any,
+    coleta_id: int,
+    guardados: dict[ChaveAlarme, str],
+) -> int:
+    """Leva o email_enviado_em para os alarmes abertos que continuam (mesmo episodio).
+
+    Fontes: o que a propria coleta ja tinha (guardados) e a coleta completa
+    anterior. Alarme que sumiu e voltou depois e outro episodio: nao herda.
+    """
+    herdados = dict(guardados)
+    anterior = coleta_anterior_id(cursor, coleta_id)
+    if anterior is not None:
+        for chave, enviado in emails_enviados_abertos(cursor, anterior).items():
+            herdados.setdefault(chave, enviado)
+    if not herdados:
+        return 0
+
+    total = 0
+    for (aluno_id, curso_id, codigo, tipo), enviado in herdados.items():
+        cursor.execute(
+            """
+            UPDATE alarmes SET email_enviado_em = ?
+            WHERE coleta_id = ? AND aluno_id = ? AND curso_id = ?
+              AND codigo_disciplina = ? AND tipo = ?
+              AND visualizado = 0 AND email_enviado_em IS NULL
+            """,
+            (enviado, coleta_id, aluno_id, curso_id, codigo, tipo),
+        )
+        total += int(cursor.rowcount or 0)
+    return total
 
 
 def cancelar_avisos_staff_alunos_ausentes(cursor: Any, coleta_id: int) -> int:
@@ -931,11 +995,13 @@ def gerar(coleta_id: int | None = None) -> dict[str, Any]:
 
     config = carregar_config_alarmes(cursor)
 
+    emails_guardados = emails_enviados_abertos(cursor, coleta_id)
     limpar_alarmes_coleta(cursor, coleta_id)
     n_tratados = trazer_alarmes_tratados(cursor, coleta_id)
     n_percentual = gerar_percentual_baixo(cursor, coleta_id, referencia, config)
     n_4dias = gerar_faltas_4dias(cursor, coleta_id, referencia, config)
     n_3semanas = gerar_faltas_3semanas(cursor, coleta_id, referencia, config)
+    herdar_emails_enviados(cursor, coleta_id, emails_guardados)
     n_staff_cancelados = cancelar_avisos_staff_alunos_ausentes(cursor, coleta_id)
 
     conn.commit()

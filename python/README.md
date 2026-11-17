@@ -133,7 +133,9 @@ Usados pelos programas acima; não entram na lista do `executar_coleta.py`.
 | `gerar_perda_vaga.py` | Manual (tela Perda de vaga → Gerar análise): candidatos a perda de vaga (2 semestres anteriores) → BD; usa `resposta_matriculas_AAAA_S.json` como cache |
 | `gerar_passe_livre.py` | Manual: ATIVO/FORMANDO do semestre atual × frequência **mensal** (`frequencia_periodo`) dos **3 semestres anteriores** → BD (`passe_livre_*`), sem JSON. Trancadas (`ausencias_especiais`) → `situacao`; % total do curso = valor da API. Só apaga os semestres que regenera. Opção `--semestres N` (padrão 3). |
 | `importar_emails_professores.py` | Manual: e-mails dos professores a partir de CSV do Moodle (`data/Users.csv`) |
-| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos → Gerar análise): faltas antes e depois do contato, com as aulas e a última chamada da turma do aluno → BD (`efeito_contatos_*`) |
+| `gerar_efeito_contatos.py` | Manual (tela Efeito dos contatos → Gerar análise): acompanhamento dos alunos em risco pela regra de referência (tipo e semana do risco, retorno em 2 semanas, contatos, presença desde o último contato) → BD (`acompanhamento_*`); e a série semanal da tela antiga → BD (`efeito_contatos_*`). Opções `--semanas` (padrão 2) e `--min-aulas` (padrão 3). |
+| `gerar_referencia_historica.py` | Manual: um semestre fechado (`AAAA/S`) com a regra de referência: faltas por dia da API (status a status, mês a mês; cache `resposta_intervalo_AAAA_S.json`), aulas e situação final das matrículas do período, rematrícula das matrículas do seguinte → BD (`referencia_historica_alunos`, sem identificar o aluno). No semestre que acabou de fechar, leva reprovação por falta e rematrícula para `acompanhamento_alunos`. Opções `--sem-api`, `--inicio`, `--fim`. |
+| `risco_referencia.py` | Regra de referência de risco: os três alarmes simulados com os valores padrão fixos (`REFERENCIA`), `Disciplina` (aulas, faltas, validade), retorno em 2 semanas (`voltou` ≥ 75%, `parcial`, `nao_voltou`, `sem_aulas`). Funções puras, usadas pelos dois scripts acima. |
 
 ---
 
@@ -145,13 +147,24 @@ Usam bancos SQLite temporários criados a partir do `schema.sql`; não tocam em 
 python3 -m unittest discover -v python/tests   # regras por turma e frequência anual no pipeline
 php tests/php/turmas_test.php                  # escopo do professor, críticas por turma, e-mail de chamada
 php tests/php/frequencia_anual_test.php        # integrados nos ingressantes e no painel
+php tests/php/efeito_contatos_test.php         # números da tela Efeito dos contatos
+php tests/php/coleta_status_test.php           # coleta completa x falhou e aviso no portal
+php tests/php/contatos_test.php                # contatos, encerrar caso, e-mail que não encerra, histórico de regras
+php tests/php/acompanhamento_test.php          # funil, referência histórica e comparação com margem
 ```
 
 | Arquivo | O que cobre |
 |---------|-------------|
-| `python/tests/test_turmas.py` | `id_turma` vindo das matrículas; turmas e professores da grade; chamada da turma (maior data entre os alunos) e herança do histórico quando a disciplina tem uma só turma no curso; alarme de 3 semanas com as aulas da turma; efeito dos contatos parando na última chamada da turma |
+| `python/tests/test_turmas.py` | `id_turma` vindo das matrículas; turmas e professores da grade; chamada da turma (maior data entre os alunos) e herança do histórico quando a disciplina tem uma só turma no curso; alarme de 3 semanas com as aulas da turma; efeito dos contatos parando na última chamada da turma, semanas em torno da referência e quem entra como contatado ou comparação |
 | `python/tests/test_consulta_alunos_massa.py` | Intervalo em massa por status e mês: URLs mensais ATIVO/FORMANDO, fusão somando contadores e recalculando %, arquivo anterior mantido se um mês falhar |
 | `python/tests/test_integrados_anual.py` | Busca dos meses encerrados (`consulta_integrados_anual.py`, API simulada): blocos de até 2 meses, só integrados, `&status=ATIVO`, nova tentativa mês a mês, versão anterior mantida quando um bloco falha |
 | `python/tests/test_frequencia_anual.py` | Soma do ano letivo (`integrados_anual.py`): arredondamento como a API, disciplinas casadas pela matrícula no componente, arquivo ausente ou com buraco; só integrados ganham `frequencia_anual`; importação grava o ano e `frequencia_desde` (faltas por dia seguem do semestre); alarme com carência do início do ano e mensagem "no ano letivo" |
 | `tests/php/turmas_test.php` | Turmas do usuário professor; alarmes, contagens e marcação restritos às turmas dele (sem turma identificada continua visível); disciplinas críticas uma linha por turma com os professores da turma; chave de envio do e-mail de chamada por turma, reconhecendo o envio antigo por disciplina |
 | `tests/php/frequencia_anual_test.php` | Ingressantes do semestre mais integrados do ano (AAAA/0) com `frequencia_desde`; asterisco nos cursos integrados no gráfico por curso e nas disciplinas críticas; início do ano letivo da coleta |
+| `tests/php/efeito_contatos_test.php` | Efeito dos contatos: médias de todos os analisados (não só de quem melhorou), melhoraram/iguais/pioraram, frequência no limite, canais, janela × até o corte, efeito líquido com intervalo de 95% e curva semanal só com os analisados |
+| `python/tests/test_coleta_status.py` | Rodada do pipeline em `coleta_execucoes` (concluída, falhou antes ou depois de criar a coleta); coleta nasce `em_andamento` só dentro do pipeline; coleta anterior pula as que falharam |
+| `python/tests/test_contatos.py` | Cópia única do histórico para `contatos_aluno`; efeito lendo os contatos do semestre; `email_enviado_em` herdado no mesmo episódio, mantido ao regerar a coleta e zerado quando o alarme some e volta |
+| `tests/php/coleta_status_test.php` | `ultimaColeta()` ignora coletas em andamento ou que falharam; aviso da última rodada (falhou, não terminou em 3 h, ok) |
+| `tests/php/contatos_test.php` | Cópia do histórico pelo lado PHP; validação do formulário (data futura, mais de 60 dias, canal, motivo); resumo do último contato; um envio = um contato; encerrar alarme e caso; e-mail não encerra e não se repete no episódio; histórico da configuração de alarmes |
+| `python/tests/test_risco_referencia.py` | Regra de referência: contagem de aulas/faltas até a validade; 3 semanas sem vir, frequência baixa (carência) e dias seguidos de falta; tipo mais grave no mesmo dia; a regra não lê a configuração do banco; classes de retorno; indicadores por aluno (risco, antes/depois, contatos, retorno não medido); recortes de `carregar_alunos` (ingressante, auxílio, saiu, última chamada) |
+| `tests/php/acompanhamento_test.php` | Comparação com margem de 95% e selos (melhor, pior, incerto, poucos); funil em risco → contatados → retorno medido, com mediana dos dias e filtros; referência histórica sem MAPA por situação |

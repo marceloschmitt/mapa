@@ -127,14 +127,14 @@ verificar(
 );
 verificar('matriculados nas turmas dele', 3, $repo->contarAlunosMatriculados(1, null, $codigos));
 verificar(
-    'não marca alarme de outra turma',
+    'não encerra alarme de outra turma',
     false,
-    $repo->marcarAlarmeVisualizado($alarmeIds['a2x'], $usuarioAna, 'email', null, $codigos)
+    $repo->encerrarAlarme($alarmeIds['a2x'], $usuarioAna, null, $codigos)
 );
 verificar(
-    'marca alarme da turma dele',
+    'encerra alarme da turma dele',
     true,
-    $repo->marcarAlarmeVisualizado($alarmeIds['a1x'], $usuarioAna, 'email', null, $codigos)
+    $repo->encerrarAlarme($alarmeIds['a1x'], $usuarioAna, null, $codigos)
 );
 
 $repo->restringirTurmas([]);
