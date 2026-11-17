@@ -15,6 +15,14 @@ $dataReferencia = (string)($config['data_referencia'] ?? 'hoje-2');
 $integradosInicio = (string)($config['integrados_data_inicio'] ?? '');
 $integradosAnual = $integradosAnual ?? null;
 $temClientSecret = !empty($temClientSecret);
+$doEnv = $config['do_env'] ?? [];
+// Campo definido no .env: só leitura, com a variável indicada.
+$soLeitura = static fn(string $chave): string => isset($doEnv[$chave]) ? ' readonly data-do-env="1"' : '';
+$notaEnv = static fn(string $chave): string => isset($doEnv[$chave])
+    ? '<span class="badge text-bg-light border ms-1 fw-normal"><i class="bi bi-file-earmark-lock"></i> .env: '
+        . htmlspecialchars($doEnv[$chave], ENT_QUOTES, 'UTF-8') . '</span>'
+    : '';
+$secretDoEnv = isset($doEnv['api_client_secret']);
 
 $formatarDataIso = static function (string $data): string {
     $ts = strtotime($data);
@@ -37,7 +45,7 @@ if ($dataFinal === '') {
     <h1 class="h4 mb-1">Configuração da API</h1>
     <p class="text-secondary mb-0">
         Credenciais, período, intervalo e URLs do webservice SIGAA.
-        Ficam gravadas no banco de dados (não em arquivos do projeto).
+        Ficam gravadas no banco de dados; credenciais e URLs também podem vir do arquivo <code>.env</code>.
     </p>
 </div>
 
@@ -50,8 +58,15 @@ if ($dataFinal === '') {
 <?php endif; ?>
 
 <div class="alert alert-info">
-    Os scripts Python leem estes valores da tabela <code>configuracoes</code>.
-    Use o ícone do olho para revelar o Client Secret.
+    Os scripts Python leem estes valores da tabela <code>configuracoes</code>, com a mesma regra do portal:
+    o que estiver no <code>.env</code> (<code>API_OAUTH_URL</code>, <code>API_CLIENT_ID</code>,
+    <code>API_CLIENT_SECRET</code>, <code>API_URL_*</code>, <code>API_VERIFY_SSL</code>) vale mais que a tela.
+    <?php if ($doEnv !== []): ?>
+        <br><strong><?= count($doEnv) ?> <?= count($doEnv) === 1 ? 'campo vem' : 'campos vêm' ?> do .env</strong>
+        e <?= count($doEnv) === 1 ? 'aparece' : 'aparecem' ?> só para leitura. Para mudar, edite o <code>.env</code>.
+    <?php else: ?>
+        Use o ícone do olho para revelar o Client Secret.
+    <?php endif; ?>
 </div>
 
 <div class="card border-0 shadow-sm">
@@ -61,31 +76,40 @@ if ($dataFinal === '') {
               class="row g-3"
               autocomplete="off">
             <div class="col-12">
-                <label for="api_oauth_url" class="form-label">URL OAuth (token) <span class="text-danger">*</span></label>
+                <label for="api_oauth_url" class="form-label">URL OAuth (token) <span class="text-danger">*</span><?= $notaEnv('api_oauth_url') ?></label>
                 <input type="url"
                        class="form-control"
                        id="api_oauth_url"
                        name="api_oauth_url"
                        value="<?= htmlspecialchars($oauthUrl, ENT_QUOTES, 'UTF-8') ?>"
                        placeholder="https://app.exemplo.edu.br/oauth/token"
-                       required>
+                       required<?= $soLeitura('api_oauth_url') ?>>
             </div>
 
             <div class="col-md-6">
-                <label for="api_client_id" class="form-label">Client ID <span class="text-danger">*</span></label>
+                <label for="api_client_id" class="form-label">Client ID <span class="text-danger">*</span><?= $notaEnv('api_client_id') ?></label>
                 <input type="text"
                        class="form-control"
                        id="api_client_id"
                        name="api_client_id"
                        value="<?= htmlspecialchars($clientId, ENT_QUOTES, 'UTF-8') ?>"
                        required
-                       autocomplete="off">
+                       autocomplete="off"<?= $soLeitura('api_client_id') ?>>
             </div>
 
             <div class="col-md-6">
                 <label for="api_client_secret" class="form-label">
-                    Client Secret <?= $temClientSecret ? '' : '<span class="text-danger">*</span>' ?>
+                    Client Secret <?= $temClientSecret ? '' : '<span class="text-danger">*</span>' ?><?= $notaEnv('api_client_secret') ?>
                 </label>
+                <?php if ($secretDoEnv): ?>
+                <input type="password"
+                       class="form-control"
+                       id="api_client_secret"
+                       value=""
+                       placeholder="Definido no .env (não aparece na tela)"
+                       readonly data-do-env="1">
+                <div class="form-text">Para trocar, edite <code>API_CLIENT_SECRET</code> no <code>.env</code>.</div>
+                <?php else: ?>
                 <div class="input-group">
                     <input type="password"
                            class="form-control"
@@ -107,6 +131,7 @@ if ($dataFinal === '') {
                     </button>
                 </div>
                 <div class="form-text">Clique no olho para revelar ou ocultar o valor.</div>
+                <?php endif; ?>
             </div>
 
             <div class="col-md-4">
@@ -169,12 +194,12 @@ if ($dataFinal === '') {
             </div>
 
             <div class="col-12">
-                <label for="api_url_matriculados" class="form-label">URL matriculados <span class="text-danger">*</span></label>
+                <label for="api_url_matriculados" class="form-label">URL matriculados <span class="text-danger">*</span><?= $notaEnv('api_url_matriculados') ?></label>
                 <textarea class="form-control font-monospace"
                           id="api_url_matriculados"
                           name="api_url_matriculados"
                           rows="3"
-                          required><?= htmlspecialchars($urlMatriculados, ENT_QUOTES, 'UTF-8') ?></textarea>
+                          required<?= $soLeitura('api_url_matriculados') ?>><?= htmlspecialchars($urlMatriculados, ENT_QUOTES, 'UTF-8') ?></textarea>
                 <div class="form-text">
                     Não inclua <code>periodo_letivo</code> aqui — use o campo Período letivo acima; o sistema acrescenta na execução.
                     Sem <code>tipo=extracao</code> a API devolve disciplinas e docentes (necessário para professores).
@@ -183,12 +208,12 @@ if ($dataFinal === '') {
             </div>
 
             <div class="col-12">
-                <label for="api_url_alunos" class="form-label">URL alunos <span class="text-danger">*</span></label>
+                <label for="api_url_alunos" class="form-label">URL alunos <span class="text-danger">*</span><?= $notaEnv('api_url_alunos') ?></label>
                 <textarea class="form-control font-monospace"
                           id="api_url_alunos"
                           name="api_url_alunos"
                           rows="2"
-                          required><?= htmlspecialchars($urlAlunos, ENT_QUOTES, 'UTF-8') ?></textarea>
+                          required<?= $soLeitura('api_url_alunos') ?>><?= htmlspecialchars($urlAlunos, ENT_QUOTES, 'UTF-8') ?></textarea>
                 <div class="form-text">
                     Consulta aluno por aluno, usada pelo Gerar passe livre. Deve conter <code>{login}</code>;
                     o modo mensal e o período são acrescentados pelo script.
@@ -196,24 +221,24 @@ if ($dataFinal === '') {
             </div>
 
             <div class="col-12">
-                <label for="api_url_alunos_massa_cadastro" class="form-label">URL alunos em massa — cadastro <span class="text-danger">*</span></label>
+                <label for="api_url_alunos_massa_cadastro" class="form-label">URL alunos em massa — cadastro <span class="text-danger">*</span><?= $notaEnv('api_url_alunos_massa_cadastro') ?></label>
                 <textarea class="form-control font-monospace"
                           id="api_url_alunos_massa_cadastro"
                           name="api_url_alunos_massa_cadastro"
                           rows="2"
-                          required><?= htmlspecialchars($urlMassaCadastro, ENT_QUOTES, 'UTF-8') ?></textarea>
+                          required<?= $soLeitura('api_url_alunos_massa_cadastro') ?>><?= htmlspecialchars($urlMassaCadastro, ENT_QUOTES, 'UTF-8') ?></textarea>
                 <div class="form-text">
                     Endereço completo do cadastro de todos os alunos (cursos, status, e-mail). Usada a cada coleta.
                 </div>
             </div>
 
             <div class="col-12">
-                <label for="api_url_alunos_massa_intervalo" class="form-label">URL alunos em massa — frequência por intervalo <span class="text-danger">*</span></label>
+                <label for="api_url_alunos_massa_intervalo" class="form-label">URL alunos em massa — frequência por intervalo <span class="text-danger">*</span><?= $notaEnv('api_url_alunos_massa_intervalo') ?></label>
                 <textarea class="form-control font-monospace"
                           id="api_url_alunos_massa_intervalo"
                           name="api_url_alunos_massa_intervalo"
                           rows="2"
-                          required><?= htmlspecialchars($urlMassaIntervalo, ENT_QUOTES, 'UTF-8') ?></textarea>
+                          required<?= $soLeitura('api_url_alunos_massa_intervalo') ?>><?= htmlspecialchars($urlMassaIntervalo, ENT_QUOTES, 'UTF-8') ?></textarea>
                 <div class="form-text">
                     Endereço completo, com <code>{data_inicial}</code> e <code>{data_final}</code> onde as datas devem entrar.
                     Na coleta, são trocadas pela Data inicial e Data final acima, no formato <code>AAAA-MM-DD</code>.
@@ -227,9 +252,9 @@ if ($dataFinal === '') {
                            id="api_verify_ssl"
                            name="api_verify_ssl"
                            value="1"
-                           <?= $verifySsl ? 'checked' : '' ?>>
+                           <?= $verifySsl ? 'checked' : '' ?><?= isset($doEnv['api_verify_ssl']) ? ' disabled' : '' ?>>
                     <label class="form-check-label" for="api_verify_ssl">
-                        Verificar certificado SSL (recomendado em produção Linux)
+                        Verificar certificado SSL (recomendado em produção Linux)<?= $notaEnv('api_verify_ssl') ?>
                     </label>
                 </div>
             </div>

@@ -109,7 +109,7 @@ sudo chmod 775 /var/www/mapa/data
 
 Gravado no banco (não no `.env`):
 
-1. **Configurações → API** — OAuth/SIGAA (necessário para a coleta)
+1. **Configurações → API** — OAuth/SIGAA (necessário para a coleta). Credenciais e URLs também podem ir no `.env` (`API_CLIENT_ID`, `API_CLIENT_SECRET`, `API_URL_*`…, ver `.env.example`): o `.env` vale mais que a tela, e o campo aparece só para leitura
 2. **Configurações → LDAP** — opcional
 3. **Configurações → E-mail** — SMTP + interruptor (só envia se `EMAIL_SEND=true`)
 4. **Configurações → Alarmes** — critérios de risco: limite de frequência (padrão 75%),

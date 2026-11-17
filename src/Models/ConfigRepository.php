@@ -4,10 +4,27 @@ declare(strict_types=1);
 namespace Mapa\Models;
 
 use Mapa\Core\Database;
+use Mapa\Core\Env;
 use PDO;
 
 class ConfigRepository
 {
+    /**
+     * Credenciais e URLs da API que podem vir do .env (chave do banco =>
+     * variável). Período e datas mudam todo semestre e ficam só na tela.
+     * O Python tem a mesma lista em api_auth.CHAVES_ENV.
+     */
+    public const API_ENV = [
+        'api_oauth_url' => 'API_OAUTH_URL',
+        'api_client_id' => 'API_CLIENT_ID',
+        'api_client_secret' => 'API_CLIENT_SECRET',
+        'api_url_matriculados' => 'API_URL_MATRICULADOS',
+        'api_url_alunos' => 'API_URL_ALUNOS',
+        'api_url_alunos_massa_cadastro' => 'API_URL_ALUNOS_MASSA_CADASTRO',
+        'api_url_alunos_massa_intervalo' => 'API_URL_ALUNOS_MASSA_INTERVALO',
+        'api_verify_ssl' => 'API_VERIFY_SSL',
+    ];
+
     public const LDAP_HOST = 'ldap_host';
     public const LDAP_BASE_DN = 'ldap_base_dn';
     public const LDAP_BIND_DN = 'ldap_bind_dn';
@@ -200,19 +217,28 @@ class ConfigRepository
             $urlMatriculados = $this->removerPeriodoDaUrl($urlMatriculados);
         }
 
+        $env = self::apiDoEnv();
+        if (isset($env[self::API_URL_MATRICULADOS])) {
+            $urlMatriculados = $this->removerPeriodoDaUrl($env[self::API_URL_MATRICULADOS]);
+        }
+        $valor = fn(string $chave, string $padrao = ''): string => $env[$chave] ?? $this->get($chave, $padrao);
+
         return [
-            'oauth_url' => $this->get(self::API_OAUTH_URL),
-            'client_id' => $this->get(self::API_CLIENT_ID),
-            'client_secret' => $this->get(self::API_CLIENT_SECRET),
+            'oauth_url' => $valor(self::API_OAUTH_URL),
+            'client_id' => $valor(self::API_CLIENT_ID),
+            // Secret do .env nunca vai para a tela.
+            'client_secret' => isset($env[self::API_CLIENT_SECRET]) ? '' : $this->get(self::API_CLIENT_SECRET),
             'url_matriculados' => $urlMatriculados,
-            'url_alunos' => $this->get(self::API_URL_ALUNOS),
-            'url_alunos_massa_cadastro' => $this->get(self::API_URL_ALUNOS_MASSA_CADASTRO),
-            'url_alunos_massa_intervalo' => $this->get(self::API_URL_ALUNOS_MASSA_INTERVALO),
+            'url_alunos' => $valor(self::API_URL_ALUNOS),
+            'url_alunos_massa_cadastro' => $valor(self::API_URL_ALUNOS_MASSA_CADASTRO),
+            'url_alunos_massa_intervalo' => $valor(self::API_URL_ALUNOS_MASSA_INTERVALO),
             'verify_ssl' => in_array(
-                strtolower($this->get(self::API_VERIFY_SSL, 'false')),
+                strtolower($valor(self::API_VERIFY_SSL, 'false')),
                 ['1', 'true', 'yes', 'on'],
                 true
             ),
+            // chave do banco => variável do .env, para os campos que vêm do .env
+            'do_env' => array_intersect_key(self::API_ENV, $env),
             'periodo_letivo' => $periodo,
             'frequencia_data_inicial' => $this->get(self::FREQUENCIA_DATA_INICIAL),
             'frequencia_data_final' => $this->get(self::FREQUENCIA_DATA_FINAL),
@@ -243,21 +269,21 @@ class ConfigRepository
         // Período fica só em api_periodo_letivo; a URL base não o inclui.
         $urlMatriculados = $this->removerPeriodoDaUrl($dados['url_matriculados']);
 
-        $this->set(self::API_OAUTH_URL, $dados['oauth_url'], 'URL OAuth token da API SIGAA');
-        $this->set(self::API_CLIENT_ID, $dados['client_id'], 'Client ID OAuth da API SIGAA');
-        $this->set(self::API_URL_MATRICULADOS, $urlMatriculados, 'URL da consulta de matriculados (sem periodo_letivo)');
-        $this->set(self::API_URL_ALUNOS, $dados['url_alunos'], 'URL da consulta de alunos (use {login})');
-        $this->set(
+        $this->setApi(self::API_OAUTH_URL, $dados['oauth_url'], 'URL OAuth token da API SIGAA');
+        $this->setApi(self::API_CLIENT_ID, $dados['client_id'], 'Client ID OAuth da API SIGAA');
+        $this->setApi(self::API_URL_MATRICULADOS, $urlMatriculados, 'URL da consulta de matriculados (sem periodo_letivo)');
+        $this->setApi(self::API_URL_ALUNOS, $dados['url_alunos'], 'URL da consulta de alunos (use {login})');
+        $this->setApi(
             self::API_URL_ALUNOS_MASSA_CADASTRO,
             $dados['url_alunos_massa_cadastro'],
             'URL do cadastro de alunos em massa'
         );
-        $this->set(
+        $this->setApi(
             self::API_URL_ALUNOS_MASSA_INTERVALO,
             $dados['url_alunos_massa_intervalo'],
             'URL da frequência em massa por intervalo (use {data_inicial} e {data_final})'
         );
-        $this->set(
+        $this->setApi(
             self::API_VERIFY_SSL,
             !empty($dados['verify_ssl']) ? 'true' : 'false',
             'Verificar certificado SSL nas consultas Python'
@@ -288,7 +314,7 @@ class ConfigRepository
             && $dados['client_secret'] !== null
             && $dados['client_secret'] !== ''
         ) {
-            $this->set(
+            $this->setApi(
                 self::API_CLIENT_SECRET,
                 (string)$dados['client_secret'],
                 'Client Secret OAuth da API SIGAA'
@@ -304,7 +330,37 @@ class ConfigRepository
 
     public function hasApiClientSecret(): bool
     {
-        return trim($this->get(self::API_CLIENT_SECRET)) !== '';
+        return isset(self::apiDoEnv()[self::API_CLIENT_SECRET])
+            || trim($this->get(self::API_CLIENT_SECRET)) !== '';
+    }
+
+    /**
+     * Valores da API definidos no .env (ou no ambiente do sistema), por chave
+     * do banco. Têm prioridade sobre a tela: o campo fica só leitura e o
+     * Python (api_auth.carregar_config_api) aplica a mesma regra.
+     *
+     * @return array<string, string>
+     */
+    public static function apiDoEnv(): array
+    {
+        $valores = [];
+        foreach (self::API_ENV as $chave => $variavel) {
+            $valor = trim(Env::get($variavel, ''));
+            if ($valor !== '') {
+                $valores[$chave] = $valor;
+            }
+        }
+
+        return $valores;
+    }
+
+    /** Grava uma chave da API, a menos que ela venha do .env (aí o .env manda). */
+    private function setApi(string $chave, string $valor, string $descricao): void
+    {
+        if (isset(self::apiDoEnv()[$chave])) {
+            return;
+        }
+        $this->set($chave, $valor, $descricao);
     }
 
     public function isApiConfigured(): bool
