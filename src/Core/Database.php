@@ -458,6 +458,8 @@ class Database
 
         self::$connection->exec('DELETE FROM efeito_contatos_execucoes');
         self::$connection->exec('DROP TABLE efeito_contatos_alunos');
+    }
+
     /**
      * Permite curso_id NULL em disciplina_grade/disciplina_aulas e remove o
      * placeholder "Curso nao informado".
