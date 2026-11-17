@@ -52,7 +52,7 @@ class PerdaVagaController extends Controller
             }
 
             foreach ($candidatos as $candidato) {
-                $nomeCurso = (string)($candidato['nome_curso'] ?? 'Curso não informado');
+                $nomeCurso = (string)($candidato['nome_curso'] ?? 'Sem curso');
                 if (!isset($porCurso[$nomeCurso])) {
                     $porCurso[$nomeCurso] = [
                         'nome_curso' => $nomeCurso,

@@ -34,12 +34,18 @@ $alarmesDiaStaff = trim((string)($alarmesDiaStaff ?? 'quarta'));
 $alarmesDiaStaffRotulo = $rotuloDia($alarmesDiaStaff);
 ?>
 
-<div class="mb-4">
-    <h1 class="h4 mb-1">Configuração de e-mail</h1>
-    <p class="text-secondary mb-0">
-        Servidor SMTP usado nos e-mails automáticos do MAPA.
-        Chamadas em atraso, alarmes aos alunos e avisos ao staff são fluxos separados.
-    </p>
+<div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
+    <div>
+        <h1 class="h4 mb-1">Configuração de e-mail</h1>
+        <p class="text-secondary mb-0">
+            Servidor SMTP usado nos e-mails automáticos do MAPA.
+            Chamadas em atraso, alarmes aos alunos e avisos ao staff são fluxos separados.
+        </p>
+    </div>
+    <a class="btn btn-outline-secondary btn-sm"
+       href="<?= htmlspecialchars(url('/configuracoes/email/log'), ENT_QUOTES, 'UTF-8') ?>">
+        <i class="bi bi-envelope-paper"></i> Log de e-mails
+    </a>
 </div>
 
 <?php if (!empty($sucesso)): ?>

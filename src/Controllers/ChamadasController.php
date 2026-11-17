@@ -128,7 +128,7 @@ class ChamadasController extends Controller
             }
             $curso = trim((string)($linha['nome_curso'] ?? ''));
             if ($curso === '') {
-                $curso = 'Curso nao informado';
+                $curso = 'Sem curso';
             }
             $codigo = trim((string)($linha['codigo_disciplina'] ?? ''));
             if ($codigo === '') {

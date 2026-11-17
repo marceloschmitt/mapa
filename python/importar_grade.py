@@ -19,7 +19,7 @@ from datetime import date
 from pathlib import Path
 from typing import Any
 
-from db import conectar, fechar, row_to_dict
+from db import conectar, fechar, nome_curso_valido, row_to_dict
 from paths import JSON_RESPOSTA_MATRICULAS
 from turno_turma import dias_para_texto, extrair_datas_aula, extrair_dias_sigaa
 
@@ -46,9 +46,11 @@ def carregar_matriculas(caminho: Path) -> dict[str, Any]:
     raise ValueError("Formato inesperado: esperava objeto ou lista de matriculas.")
 
 
-def upsert_curso(cursor: Any, nome_curso: str) -> int:
-    """Insere ou reutiliza curso e retorna o id."""
-    nome = nome_curso.strip() or "Curso nao informado"
+def upsert_curso(cursor: Any, nome_curso: str) -> int | None:
+    """Insere ou reutiliza curso. Retorna None se o nome estiver vazio (sem curso)."""
+    nome = nome_curso_valido(nome_curso)
+    if nome is None:
+        return None
     cursor.execute(
         """
         INSERT INTO cursos (nome_curso)
@@ -82,7 +84,7 @@ def extrair_grades(
         if not isinstance(registro, dict):
             continue
 
-        nome_curso = str(registro.get("curso") or "").strip() or "Curso nao informado"
+        nome_curso = str(registro.get("curso") or "").strip()
         disciplinas = registro.get("disciplinas") or []
         if not isinstance(disciplinas, list):
             continue
@@ -100,6 +102,7 @@ def extrair_grades(
             datas = extrair_datas_aula(turno, incluir_sabado=True, incluir_domingo=False)
             dias = extrair_dias_sigaa(turno, incluir_sabado=True)
             semestre = normalizar_semestre(item.get("semestre_oferta_cursando"))
+            # nome_curso vazio = disciplina sem curso (curso_id NULL no banco).
             chave = (codigo, nome_curso)
             atual = grades.get(chave)
 
@@ -228,17 +231,26 @@ def carregar_feriados(cursor: Any) -> set[date]:
 def substituir_datas_aula(
     cursor: Any,
     codigo: str,
-    curso_id: int,
+    curso_id: int | None,
     datas: list[date],
 ) -> int:
-    """Substitui as datas efetivas da disciplina/curso."""
-    cursor.execute(
-        """
-        DELETE FROM disciplina_aulas
-        WHERE codigo_disciplina = ? AND curso_id = ?
-        """,
-        (codigo, curso_id),
-    )
+    """Substitui as datas efetivas da disciplina/curso (curso_id pode ser NULL)."""
+    if curso_id is None:
+        cursor.execute(
+            """
+            DELETE FROM disciplina_aulas
+            WHERE codigo_disciplina = ? AND curso_id IS NULL
+            """,
+            (codigo,),
+        )
+    else:
+        cursor.execute(
+            """
+            DELETE FROM disciplina_aulas
+            WHERE codigo_disciplina = ? AND curso_id = ?
+            """,
+            (codigo, curso_id),
+        )
     if not datas:
         return 0
 
@@ -254,7 +266,7 @@ def substituir_datas_aula(
 
 def upsert_grade(
     cursor: Any,
-    curso_id: int,
+    curso_id: int | None,
     item: dict[str, Any],
     feriados: set[date] | None = None,
 ) -> int:
@@ -274,27 +286,67 @@ def upsert_grade(
         )
 
     codigo = str(item["codigo_disciplina"])
-    cursor.execute(
-        """
-        INSERT INTO disciplina_grade (
-            codigo_disciplina, disciplina, curso_id,
-            dias_semana, semestre_oferta, turno_turma
-        ) VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(codigo_disciplina, curso_id) DO UPDATE SET
-            disciplina = excluded.disciplina,
-            dias_semana = excluded.dias_semana,
-            semestre_oferta = COALESCE(excluded.semestre_oferta, disciplina_grade.semestre_oferta),
-            turno_turma = COALESCE(excluded.turno_turma, disciplina_grade.turno_turma)
-        """,
-        (
-            codigo,
-            str(item["disciplina"]),
-            curso_id,
-            dias_para_texto(dias_lista),
-            item.get("semestre_oferta"),
-            item.get("turno_turma"),
-        ),
+    campos = (
+        codigo,
+        str(item["disciplina"]),
+        curso_id,
+        dias_para_texto(dias_lista),
+        item.get("semestre_oferta"),
+        item.get("turno_turma"),
     )
+    # ON CONFLICT(codigo_disciplina, curso_id) não cobre curso_id NULL no SQLite.
+    if curso_id is None:
+        cursor.execute(
+            """
+            SELECT id FROM disciplina_grade
+            WHERE codigo_disciplina = ? AND curso_id IS NULL
+            """,
+            (codigo,),
+        )
+        existente = cursor.fetchone()
+        if existente is None:
+            cursor.execute(
+                """
+                INSERT INTO disciplina_grade (
+                    codigo_disciplina, disciplina, curso_id,
+                    dias_semana, semestre_oferta, turno_turma
+                ) VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                campos,
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE disciplina_grade SET
+                    disciplina = ?,
+                    dias_semana = ?,
+                    semestre_oferta = COALESCE(?, semestre_oferta),
+                    turno_turma = COALESCE(?, turno_turma)
+                WHERE id = ?
+                """,
+                (
+                    str(item["disciplina"]),
+                    dias_para_texto(dias_lista),
+                    item.get("semestre_oferta"),
+                    item.get("turno_turma"),
+                    int(row_to_dict(existente)["id"]),
+                ),
+            )
+    else:
+        cursor.execute(
+            """
+            INSERT INTO disciplina_grade (
+                codigo_disciplina, disciplina, curso_id,
+                dias_semana, semestre_oferta, turno_turma
+            ) VALUES (?, ?, ?, ?, ?, ?)
+            ON CONFLICT(codigo_disciplina, curso_id) DO UPDATE SET
+                disciplina = excluded.disciplina,
+                dias_semana = excluded.dias_semana,
+                semestre_oferta = COALESCE(excluded.semestre_oferta, disciplina_grade.semestre_oferta),
+                turno_turma = COALESCE(excluded.turno_turma, disciplina_grade.turno_turma)
+            """,
+            campos,
+        )
 
     # Limpa CSV legado, se a coluna ainda existir.
     cols = {
@@ -302,14 +354,24 @@ def upsert_grade(
         for r in cursor.execute("PRAGMA table_info(disciplina_grade)").fetchall()
     }
     if "datas_aula" in cols:
-        cursor.execute(
-            """
-            UPDATE disciplina_grade
-            SET datas_aula = ''
-            WHERE codigo_disciplina = ? AND curso_id = ?
-            """,
-            (codigo, curso_id),
-        )
+        if curso_id is None:
+            cursor.execute(
+                """
+                UPDATE disciplina_grade
+                SET datas_aula = ''
+                WHERE codigo_disciplina = ? AND curso_id IS NULL
+                """,
+                (codigo,),
+            )
+        else:
+            cursor.execute(
+                """
+                UPDATE disciplina_grade
+                SET datas_aula = ''
+                WHERE codigo_disciplina = ? AND curso_id = ?
+                """,
+                (codigo, curso_id),
+            )
 
     return substituir_datas_aula(cursor, codigo, curso_id, datas_lista)
 

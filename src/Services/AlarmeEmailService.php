@@ -89,7 +89,13 @@ class AlarmeEmailService
             $corpo = $this->montarMensagem($grupo);
 
             try {
-                $mailer->send([$destinatario], $assunto, $corpo);
+                $nomeAluno = trim((string)($grupo['nome'] ?? ''));
+                $mailer->send(
+                    [$destinatario],
+                    $assunto,
+                    $corpo,
+                    $nomeAluno !== '' ? [$destinatario => $nomeAluno] : []
+                );
                 $this->registrarEnvio($coletaId, $grupo, $destinatario);
                 $this->marcarAlarmesEnviados($grupo['alarme_ids']);
                 $recentes['alunos'][$alunoId] = true;
@@ -258,6 +264,15 @@ class AlarmeEmailService
             $mailer->send([$destinatario], $this->montarAssunto(), $this->montarMensagem($grupo));
             $this->registrarEnvio($coletaId, $grupo, $destinatario, $usuarioId);
             $this->marcarAlarmesEnviados($grupo['alarme_ids']);
+            $nomeAluno = trim((string)($grupo['nome'] ?? ''));
+            $mailer->send(
+                [$destinatario],
+                $this->montarAssunto(),
+                $this->montarMensagem($grupo),
+                $nomeAluno !== '' ? [$destinatario => $nomeAluno] : []
+            );
+            $this->registrarEnvio($coletaId, $grupo, $destinatario);
+            $this->marcarAlarmesEnviados($grupo['alarme_ids'], $usuarioId);
         } catch (Throwable $e) {
             return [
                 'ok' => false,
@@ -1162,12 +1177,13 @@ class AlarmeEmailService
         }
 
         $statement = $this->pdo->prepare(
-            'SELECT dp.codigo_disciplina, TRIM(p.email) AS email
+            'SELECT dp.codigo_disciplina,
+                    TRIM(COALESCE(NULLIF(TRIM(u.email), \'\'), NULLIF(TRIM(p.email), \'\'))) AS email
              FROM disciplina_professores dp
              INNER JOIN professores p ON p.id = dp.professor_id
+             LEFT JOIN usuarios u ON u.cpf = p.cpf
              WHERE dp.codigo_disciplina IN (' . implode(', ', $placeholders) . ')
-               AND p.email IS NOT NULL
-               AND TRIM(p.email) != \'\''
+               AND COALESCE(NULLIF(TRIM(u.email), \'\'), NULLIF(TRIM(p.email), \'\')) IS NOT NULL'
         );
         $statement->execute($params);
 
@@ -1203,12 +1219,13 @@ class AlarmeEmailService
         // Lotes abaixo do limite de 999 parâmetros do SQLite antigo.
         foreach (array_chunk(array_values($idsTurma), 500) as $lote) {
             $statement = $this->pdo->prepare(
-                'SELECT tp.id_turma, TRIM(p.email) AS email
+                'SELECT tp.id_turma,
+                        TRIM(COALESCE(NULLIF(TRIM(u.email), \'\'), NULLIF(TRIM(p.email), \'\'))) AS email
                  FROM turma_professores tp
                  INNER JOIN professores p ON p.id = tp.professor_id
+                 LEFT JOIN usuarios u ON u.cpf = p.cpf
                  WHERE tp.id_turma IN (' . implode(', ', array_fill(0, count($lote), '?')) . ')
-                   AND p.email IS NOT NULL
-                   AND TRIM(p.email) != \'\''
+                   AND COALESCE(NULLIF(TRIM(u.email), \'\'), NULLIF(TRIM(p.email), \'\')) IS NOT NULL'
             );
             $statement->execute(array_map('intval', $lote));
             foreach ($statement->fetchAll() as $row) {

@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 namespace Mapa\Lib;
 
+use Mapa\Models\EmailLogRepository;
 use RuntimeException;
+use Throwable;
 
 /**
  * Cliente SMTP minimo (AUTH LOGIN, STARTTLS/SSL).
@@ -31,8 +33,9 @@ class SmtpMailer
 
     /**
      * @param list<string> $to
+     * @param array<string, string> $nomesPorEmail e-mail => nome do destinatário (opcional)
      */
-    public function send(array $to, string $subject, string $bodyText): void
+    public function send(array $to, string $subject, string $bodyText, array $nomesPorEmail = []): void
     {
         $destinatarios = [];
         foreach ($to as $email) {
@@ -121,6 +124,21 @@ class SmtpMailer
             $this->command($socket, 'QUIT', [221]);
         } finally {
             fclose($socket);
+        }
+
+        $this->registrarLog($destinatarios, $subject, $nomesPorEmail);
+    }
+
+    /**
+     * @param list<string> $destinatarios
+     * @param array<string, string> $nomesPorEmail
+     */
+    private function registrarLog(array $destinatarios, string $assunto, array $nomesPorEmail): void
+    {
+        try {
+            (new EmailLogRepository())->registrarEnvios($destinatarios, $assunto, $nomesPorEmail);
+        } catch (Throwable) {
+            // O envio já concluiu; falha no log não deve interromper o fluxo.
         }
     }
 

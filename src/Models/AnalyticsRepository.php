@@ -1216,9 +1216,13 @@ class AnalyticsRepository
             return [];
         }
 
+        $excluirPlaceholder = " AND LOWER(TRIM(nome_curso)) != LOWER('Curso nao informado')";
+
         if ($idsPermitidos === null) {
             $statement = $this->db->query(
-                'SELECT id, nome_curso FROM cursos ORDER BY nome_curso ASC'
+                'SELECT id, nome_curso FROM cursos
+                 WHERE 1 = 1' . $excluirPlaceholder . '
+                 ORDER BY nome_curso ASC'
             );
 
             return $statement->fetchAll();
@@ -1230,13 +1234,46 @@ class AnalyticsRepository
         }
 
         $sql = 'SELECT id, nome_curso FROM cursos
-                WHERE id IN (' . implode(', ', $placeholders) . ')
+                WHERE id IN (' . implode(', ', $placeholders) . ')'
+            . $excluirPlaceholder . '
                 ORDER BY nome_curso ASC';
         $statement = $this->db->prepare($sql);
         foreach (array_values($idsPermitidos) as $i => $cursoId) {
             $statement->bindValue('curso_' . $i, (int)$cursoId, PDO::PARAM_INT);
         }
         $statement->execute();
+
+        return $statement->fetchAll();
+    }
+
+    /**
+     * Disciplinas da grade sem curso no SIGAA (curso_id NULL).
+     *
+     * @return list<array<string, mixed>>
+     */
+    public function disciplinasSemCurso(): array
+    {
+        $statement = $this->db->query(
+            "SELECT g.codigo_disciplina,
+                    g.disciplina,
+                    g.dias_semana,
+                    g.semestre_oferta,
+                    g.turno_turma,
+                    (SELECT COUNT(*)
+                     FROM disciplina_aulas a
+                     WHERE a.codigo_disciplina = g.codigo_disciplina
+                       AND a.curso_id IS NULL) AS total_aulas,
+                    (SELECT GROUP_CONCAT(t.nome_turma, ', ')
+                     FROM turmas t
+                     WHERE t.codigo_disciplina = g.codigo_disciplina) AS turmas,
+                    (SELECT GROUP_CONCAT(p.nome, ', ')
+                     FROM disciplina_professores dp
+                     INNER JOIN professores p ON p.id = dp.professor_id
+                     WHERE dp.codigo_disciplina = g.codigo_disciplina) AS professores
+             FROM disciplina_grade g
+             WHERE g.curso_id IS NULL
+             ORDER BY g.disciplina ASC, g.codigo_disciplina ASC"
+        );
 
         return $statement->fetchAll();
     }

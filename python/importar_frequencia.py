@@ -26,7 +26,14 @@ from config_consultas import (
     frequencia_data_final,
     frequencia_data_inicial,
 )
-from db import conectar, fechar, nome_disciplina_conhecido, parsear_data_sql, row_to_dict
+from db import (
+    conectar,
+    fechar,
+    nome_curso_valido,
+    nome_disciplina_conhecido,
+    parsear_data_sql,
+    row_to_dict,
+)
 
 from paths import JSON_TABELA_FREQUENCIA
 
@@ -72,9 +79,11 @@ def upsert_aluno(cursor: Any, registro: dict[str, Any]) -> int:
     return int(row["id"])
 
 
-def upsert_curso(cursor: Any, nome_curso: str) -> int:
-    """Insere ou reutiliza curso e retorna o id."""
-    nome = nome_curso.strip() or "Curso nao informado"
+def upsert_curso(cursor: Any, nome_curso: str) -> int | None:
+    """Insere ou reutiliza curso. Retorna None se o nome estiver vazio."""
+    nome = nome_curso_valido(nome_curso)
+    if nome is None:
+        return None
     cursor.execute(
         """
         INSERT INTO cursos (nome_curso)
@@ -159,6 +168,9 @@ def importar(registros: list[dict[str, Any]]) -> dict[str, int]:
 
         aluno_id = upsert_aluno(cursor, registro)
         curso_id = upsert_curso(cursor, str(registro.get("nome_curso", "")))
+        if curso_id is None:
+            # Aluno especial / vínculo sem curso: fora do escopo da frequência.
+            continue
         upsert_aluno_curso(cursor, aluno_id, curso_id, registro)
 
         anual = registro.get("frequencia_anual")

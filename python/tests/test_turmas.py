@@ -19,8 +19,8 @@ import gerar_alarmes  # noqa: E402
 import gerar_efeito_contatos  # noqa: E402
 import importar_chamadas  # noqa: E402
 from analisar_frequencia import extrair_disciplinas, indexar_turmas  # noqa: E402
-from db import garantir_schema  # noqa: E402
-from importar_grade import extrair_turmas  # noqa: E402
+from db import garantir_schema, nome_curso_valido  # noqa: E402
+from importar_grade import extrair_grades, extrair_turmas, upsert_curso, upsert_grade  # noqa: E402
 from importar_professores import extrair_turmas_docentes  # noqa: E402
 
 CPF_ANA = "11111111111"
@@ -239,6 +239,41 @@ class EfeitoContatosTest(unittest.TestCase):
             )
             cur.execute("INSERT INTO faltas_dia (coleta_id, aluno_id, curso_id, codigo_disciplina, data_falta) "
                         "VALUES (1, ?, 1, 'POA-X01', '2026-09-21')", (aluno,))
+
+    def test_grade_sem_curso_nao_cria_placeholder(self) -> None:
+        self.assertIsNone(nome_curso_valido(""))
+        self.assertIsNone(nome_curso_valido("Curso nao informado"))
+        self.assertIsNone(upsert_curso(self.conn.cursor(), ""))
+
+        grades = extrair_grades(
+            {
+                "especial": {
+                    "curso": "",
+                    "disciplinas": [
+                        {
+                            "cod_disciplina": "POA-SEM01",
+                            "disciplina": "Sem Curso",
+                            "turno_turma": None,
+                        }
+                    ],
+                }
+            }
+        )
+        self.assertIn(("POA-SEM01", ""), grades)
+        item = grades[("POA-SEM01", "")]
+        upsert_grade(self.conn.cursor(), None, item)
+        self.conn.commit()
+
+        row = self.conn.execute(
+            "SELECT curso_id, disciplina FROM disciplina_grade WHERE codigo_disciplina = 'POA-SEM01'"
+        ).fetchone()
+        self.assertIsNotNone(row)
+        self.assertIsNone(row["curso_id"])
+        self.assertEqual(row["disciplina"], "Sem Curso")
+        placeholder = self.conn.execute(
+            "SELECT COUNT(*) AS n FROM cursos WHERE LOWER(nome_curso) = LOWER('Curso nao informado')"
+        ).fetchone()["n"]
+        self.assertEqual(int(placeholder), 0)
 
     def test_aulas_param_na_ultima_chamada_da_turma(self) -> None:
         contato = {date(2026, 9, 15): {"email"}}

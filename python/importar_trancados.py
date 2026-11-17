@@ -18,7 +18,7 @@ from datetime import datetime
 from pathlib import Path
 from typing import Any
 
-from db import conectar, fechar, row_to_dict
+from db import conectar, fechar, nome_curso_valido, row_to_dict
 from paths import JSON_RESPOSTA_ALUNOS_MASSA_CADASTRO
 from status_aluno import status_eh_trancado
 
@@ -98,9 +98,11 @@ def upsert_aluno(cursor: Any, registro: dict[str, Any]) -> int:
     return int(row["id"])
 
 
-def upsert_curso(cursor: Any, nome_curso: str) -> int:
-    """Insere ou reutiliza curso e retorna o id."""
-    nome = nome_curso.strip() or "Curso nao informado"
+def upsert_curso(cursor: Any, nome_curso: str) -> int | None:
+    """Insere ou reutiliza curso. Retorna None se o nome estiver vazio."""
+    nome = nome_curso_valido(nome_curso)
+    if nome is None:
+        return None
     cursor.execute(
         """
         INSERT INTO cursos (nome_curso)
@@ -132,6 +134,8 @@ def importar(registros: list[dict[str, Any]], coleta_id: int) -> int:
 
         aluno_id = upsert_aluno(cursor, registro)
         curso_id = upsert_curso(cursor, str(registro.get("nome_curso", "")))
+        if curso_id is None:
+            continue
         status = str(registro.get("status_discente") or "").strip() or "TRANCADO"
         ingresso = str(registro.get("ano_semestre_ingresso") or "").strip() or None
         turma = str(registro.get("turma_entrada") or "").strip() or None

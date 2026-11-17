@@ -78,6 +78,17 @@ def conectar(forcar_novo: bool = False) -> sqlite3.Connection:
     return _CONN
 
 
+CURSO_PLACEHOLDER = "Curso nao informado"
+
+
+def nome_curso_valido(nome: str | None) -> str | None:
+    """Normaliza nome de curso; None se vazio ou placeholder legado."""
+    texto = (nome or "").strip()
+    if texto == "" or texto.casefold() == CURSO_PLACEHOLDER.casefold():
+        return None
+    return texto
+
+
 def _ensure_column(conn: sqlite3.Connection, tabela: str, coluna: str, definicao: str) -> None:
     """Adiciona coluna se ainda nao existir (bancos ja criados)."""
     rows = conn.execute(f"PRAGMA table_info({tabela})").fetchall()
@@ -85,6 +96,150 @@ def _ensure_column(conn: sqlite3.Connection, tabela: str, coluna: str, definicao
     if coluna in nomes:
         return
     conn.execute(f"ALTER TABLE {tabela} ADD COLUMN {coluna} {definicao}")
+
+
+def _curso_id_obrigatorio(conn: sqlite3.Connection, tabela: str) -> bool:
+    """True se a DDL ainda exige curso_id NOT NULL."""
+    row = conn.execute(
+        "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = ?",
+        (tabela,),
+    ).fetchone()
+    if row is None:
+        return False
+    ddl = str(row["sql"] if isinstance(row, sqlite3.Row) else row[0] or "")
+    return "curso_id INTEGER NOT NULL" in ddl.replace("\n", " ")
+
+
+def _migrar_grade_curso_nullable(conn: sqlite3.Connection) -> None:
+    """Permite curso_id NULL em grade/aulas e remove o curso placeholder."""
+    precisa_grade = _curso_id_obrigatorio(conn, "disciplina_grade")
+    precisa_aulas = _curso_id_obrigatorio(conn, "disciplina_aulas")
+    if precisa_grade or precisa_aulas:
+        conn.execute("PRAGMA foreign_keys = OFF")
+        try:
+            if precisa_grade:
+                cols_grade = {
+                    str(r["name"] if isinstance(r, sqlite3.Row) else r[1])
+                    for r in conn.execute("PRAGMA table_info(disciplina_grade)").fetchall()
+                }
+                tem_datas = "datas_aula" in cols_grade
+                conn.execute(
+                    """
+                    CREATE TABLE disciplina_grade_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        codigo_disciplina TEXT NOT NULL,
+                        disciplina TEXT NOT NULL,
+                        curso_id INTEGER,
+                        dias_semana TEXT NOT NULL DEFAULT '',
+                        semestre_oferta TEXT,
+                        turno_turma TEXT,
+                        """
+                    + ("datas_aula TEXT NOT NULL DEFAULT ''," if tem_datas else "")
+                    + """
+                        FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE SET NULL,
+                        UNIQUE (codigo_disciplina, curso_id)
+                    )
+                    """
+                )
+                if tem_datas:
+                    conn.execute(
+                        """
+                        INSERT INTO disciplina_grade_new (
+                            id, codigo_disciplina, disciplina, curso_id,
+                            dias_semana, semestre_oferta, turno_turma, datas_aula
+                        )
+                        SELECT id, codigo_disciplina, disciplina, curso_id,
+                               dias_semana, semestre_oferta, turno_turma,
+                               COALESCE(datas_aula, '')
+                        FROM disciplina_grade
+                        """
+                    )
+                else:
+                    conn.execute(
+                        """
+                        INSERT INTO disciplina_grade_new (
+                            id, codigo_disciplina, disciplina, curso_id,
+                            dias_semana, semestre_oferta, turno_turma
+                        )
+                        SELECT id, codigo_disciplina, disciplina, curso_id,
+                               dias_semana, semestre_oferta, turno_turma
+                        FROM disciplina_grade
+                        """
+                    )
+                conn.execute("DROP TABLE disciplina_grade")
+                conn.execute(
+                    "ALTER TABLE disciplina_grade_new RENAME TO disciplina_grade"
+                )
+                conn.execute(
+                    """
+                    CREATE INDEX IF NOT EXISTS idx_disciplina_grade_codigo
+                        ON disciplina_grade(codigo_disciplina)
+                    """
+                )
+            if precisa_aulas:
+                conn.executescript(
+                    """
+                    CREATE TABLE disciplina_aulas_new (
+                        id INTEGER PRIMARY KEY AUTOINCREMENT,
+                        codigo_disciplina TEXT NOT NULL,
+                        curso_id INTEGER,
+                        data_aula TEXT NOT NULL,
+                        FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE SET NULL,
+                        UNIQUE (codigo_disciplina, curso_id, data_aula)
+                    );
+                    INSERT INTO disciplina_aulas_new (
+                        id, codigo_disciplina, curso_id, data_aula
+                    )
+                    SELECT id, codigo_disciplina, curso_id, data_aula
+                    FROM disciplina_aulas;
+                    DROP TABLE disciplina_aulas;
+                    ALTER TABLE disciplina_aulas_new RENAME TO disciplina_aulas;
+                    CREATE INDEX IF NOT EXISTS idx_disciplina_aulas_data
+                        ON disciplina_aulas(data_aula);
+                    CREATE INDEX IF NOT EXISTS idx_disciplina_aulas_disciplina
+                        ON disciplina_aulas(codigo_disciplina, curso_id);
+                    """
+                )
+        finally:
+            conn.execute("PRAGMA foreign_keys = ON")
+
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_disciplina_grade_sem_curso
+            ON disciplina_grade(codigo_disciplina) WHERE curso_id IS NULL
+        """
+    )
+    conn.execute(
+        """
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_disciplina_aulas_sem_curso
+            ON disciplina_aulas(codigo_disciplina, data_aula) WHERE curso_id IS NULL
+        """
+    )
+
+    placeholders = conn.execute(
+        """
+        SELECT id FROM cursos
+        WHERE LOWER(TRIM(nome_curso)) = LOWER(?)
+        """,
+        (CURSO_PLACEHOLDER,),
+    ).fetchall()
+    ids = [
+        int(row["id"] if isinstance(row, sqlite3.Row) else row[0])
+        for row in placeholders
+    ]
+    if not ids:
+        return
+
+    for curso_id in ids:
+        conn.execute(
+            "UPDATE disciplina_grade SET curso_id = NULL WHERE curso_id = ?",
+            (curso_id,),
+        )
+        conn.execute(
+            "UPDATE disciplina_aulas SET curso_id = NULL WHERE curso_id = ?",
+            (curso_id,),
+        )
+        conn.execute("DELETE FROM cursos WHERE id = ?", (curso_id,))
 
 
 def _migrar_datas_aula_csv(conn: sqlite3.Connection) -> None:
@@ -225,6 +380,7 @@ def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
     _descartar_efeito_contatos_antigo(conn)
     _migrar_contatos_aluno(conn)
     _migrar_datas_aula_csv(conn)
+    _migrar_grade_curso_nullable(conn)
     # Tabelas descontinuadas: removidas de bancos antigos.
     conn.execute("DROP TABLE IF EXISTS disciplina_carga_horaria")
     conn.execute("DROP TABLE IF EXISTS efeito_contatos_eventos")

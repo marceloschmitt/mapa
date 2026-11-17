@@ -39,7 +39,7 @@ from ausencias_especiais import (
     aplicar_situacao_trancamento,
     mapear_trancamento_cancelamento,
 )
-from db import conectar, fechar, nome_disciplina_conhecido, row_to_dict
+from db import conectar, fechar, nome_curso_valido, nome_disciplina_conhecido, row_to_dict
 from paths import JSON_RESPOSTA_MATRICULAS
 from status_aluno import status_eh_controle
 
@@ -279,13 +279,16 @@ def extrair_registros_passe_livre(aluno: dict[str, Any]) -> list[dict[str, Any]]
             if frequencia_geral is None and disciplinas == []:
                 continue
 
+            nome_curso = nome_curso_valido(curso.get("nome_curso"))
+            if nome_curso is None:
+                continue
             registros.append({
                 "nome": nome_civil or nome or login,
                 "nome_social": nome_social or None,
                 "login": login,
                 "matricula": matricula_curso,
                 "email": email,
-                "nome_curso": curso.get("nome_curso") or "Curso nao informado",
+                "nome_curso": nome_curso,
                 "status_discente": status_discente,
                 "frequencia_geral": frequencia_geral,
                 "disciplinas": disciplinas,
@@ -521,9 +524,11 @@ def upsert_aluno(cursor: Any, registro: dict[str, Any]) -> int:
     return int(row_to_dict(cursor.fetchone())["id"])
 
 
-def upsert_curso(cursor: Any, nome_curso: str) -> int:
-    """Insere/reutiliza curso."""
-    nome = (nome_curso or "").strip() or "Curso nao informado"
+def upsert_curso(cursor: Any, nome_curso: str) -> int | None:
+    """Insere/reutiliza curso. Retorna None se o nome estiver vazio."""
+    nome = nome_curso_valido(nome_curso)
+    if nome is None:
+        return None
     cursor.execute(
         """
         INSERT INTO cursos (nome_curso)
@@ -585,6 +590,8 @@ def inserir_registros(
     for registro in registros:
         aluno_id = upsert_aluno(cursor, registro)
         curso_id = upsert_curso(cursor, str(registro.get("nome_curso") or ""))
+        if curso_id is None:
+            continue
         geral = registro.get("frequencia_geral") or {}
         percentual = geral.get("percentual_frequencia_total")
         cursor.execute(

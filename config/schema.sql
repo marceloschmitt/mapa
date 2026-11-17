@@ -148,28 +148,32 @@ CREATE INDEX IF NOT EXISTS idx_turma_professores_professor
     ON turma_professores(professor_id);
 
 -- Grade da disciplina (metadados; datas efetivas em disciplina_aulas).
+-- curso_id NULL = disciplina sem curso no SIGAA (não inventar "Curso nao informado").
 CREATE TABLE IF NOT EXISTS disciplina_grade (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     codigo_disciplina TEXT NOT NULL,
     disciplina TEXT NOT NULL,
-    curso_id INTEGER NOT NULL,
+    curso_id INTEGER,
     dias_semana TEXT NOT NULL DEFAULT '',
     semestre_oferta TEXT,
     turno_turma TEXT,
-    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
+    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE SET NULL,
     UNIQUE (codigo_disciplina, curso_id)
 );
 
 CREATE INDEX IF NOT EXISTS idx_disciplina_grade_codigo
     ON disciplina_grade(codigo_disciplina);
 
+CREATE UNIQUE INDEX IF NOT EXISTS idx_disciplina_grade_sem_curso
+    ON disciplina_grade(codigo_disciplina) WHERE curso_id IS NULL;
+
 -- Datas efetivas de aula por disciplina/curso (normalizado a partir de turno_turma).
 CREATE TABLE IF NOT EXISTS disciplina_aulas (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     codigo_disciplina TEXT NOT NULL,
-    curso_id INTEGER NOT NULL,
+    curso_id INTEGER,
     data_aula TEXT NOT NULL,
-    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
+    FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE SET NULL,
     UNIQUE (codigo_disciplina, curso_id, data_aula)
 );
 
@@ -178,6 +182,9 @@ CREATE INDEX IF NOT EXISTS idx_disciplina_aulas_data
 
 CREATE INDEX IF NOT EXISTS idx_disciplina_aulas_disciplina
     ON disciplina_aulas(codigo_disciplina, curso_id);
+
+CREATE UNIQUE INDEX IF NOT EXISTS idx_disciplina_aulas_sem_curso
+    ON disciplina_aulas(codigo_disciplina, data_aula) WHERE curso_id IS NULL;
 
 -- Historico de datas de chamada/registro observadas na API (ultima_aula_ministrada).
 CREATE TABLE IF NOT EXISTS disciplina_chamadas (
@@ -442,6 +449,21 @@ CREATE TABLE IF NOT EXISTS staff_alarme_emails (
 
 CREATE INDEX IF NOT EXISTS idx_staff_alarme_emails_destinatario_enviado
     ON staff_alarme_emails(destinatario, enviado_em);
+
+-- Log unificado de e-mails enviados (alunos, professores e demais usuários).
+CREATE TABLE IF NOT EXISTS email_envios (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    email TEXT NOT NULL,
+    nome TEXT NOT NULL DEFAULT '',
+    assunto TEXT NOT NULL DEFAULT '',
+    enviado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime'))
+);
+
+CREATE INDEX IF NOT EXISTS idx_email_envios_enviado
+    ON email_envios(enviado_em DESC);
+
+CREATE INDEX IF NOT EXISTS idx_email_envios_email
+    ON email_envios(email);
 
 -- Alunos com status TRANCADO / TRANC. AUTOMATICO no cadastro em massa (fora de alarmes).
 CREATE TABLE IF NOT EXISTS alunos_trancados (

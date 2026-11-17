@@ -39,7 +39,7 @@ class DisciplinasTrancadasController extends Controller
         foreach ($linhas as $linha) {
             $chaveAluno = (string)($linha['aluno_id'] ?? '') . '|' . (string)($linha['curso_id'] ?? '');
             $alunosUnicos[$chaveAluno] = true;
-            $nomeCurso = (string)($linha['nome_curso'] ?? 'Curso não informado');
+            $nomeCurso = (string)($linha['nome_curso'] ?? 'Sem curso');
             $cursosUnicos[$nomeCurso] = true;
 
             if (!isset($porAluno[$chaveAluno])) {

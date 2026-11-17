@@ -189,5 +189,35 @@ $todos = $emailsDisciplina->invoke($servico, 'POA-X01');
 sort($todos);
 verificar('todos os professores da disciplina', ['ana@x.br', 'bruno@x.br'], $todos);
 
+$pdo->exec("UPDATE usuarios SET email = 'ana.institucional@poa.ifrs.edu.br' WHERE id = {$usuarioAna}");
+verificar(
+    'quando diverge, usa e-mail de usuarios',
+    ['ana.institucional@poa.ifrs.edu.br'],
+    $emailsTurma->invoke($servico, 1)
+);
+$todos = $emailsDisciplina->invoke($servico, 'POA-X01');
+sort($todos);
+verificar(
+    'disciplina: usuarios sobrescreve professores',
+    ['ana.institucional@poa.ifrs.edu.br', 'bruno@x.br'],
+    $todos
+);
+
+echo "== Disciplinas sem curso\n";
+$pdo->exec("INSERT INTO cursos (id, nome_curso) VALUES (99, 'Curso nao informado')");
+$pdo->exec("INSERT INTO disciplina_grade (codigo_disciplina, disciplina, curso_id)
+            VALUES ('POA-SEM01', 'Sem Curso', 99)");
+// A migração/consulta trata NULL; força o estado final esperado.
+$pdo->exec("UPDATE disciplina_grade SET curso_id = NULL WHERE codigo_disciplina = 'POA-SEM01'");
+$pdo->exec("DELETE FROM cursos WHERE id = 99");
+$semCurso = (new AnalyticsRepository())->disciplinasSemCurso();
+$codigosSemCurso = array_map(static fn(array $r): string => (string)$r['codigo_disciplina'], $semCurso);
+verificar('lista disciplina sem curso', true, in_array('POA-SEM01', $codigosSemCurso, true));
+$nomesCursos = array_map(
+    static fn(array $c): string => (string)$c['nome_curso'],
+    (new AnalyticsRepository())->listarCursos(null)
+);
+verificar('seletor não lista placeholder', false, in_array('Curso nao informado', $nomesCursos, true));
+
 echo "\n{$total} verificações, {$falhas} falha(s).\n";
 exit($falhas > 0 ? 1 : 0);

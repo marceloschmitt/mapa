@@ -27,7 +27,7 @@ from api_auth import (
     url_matriculados,
     verificar_ssl,
 )
-from db import conectar, fechar, row_to_dict
+from db import conectar, fechar, nome_curso_valido, row_to_dict
 from paths import DIR_JSON, JSON_RESPOSTA_MATRICULAS, garantir_diretorios
 
 
@@ -117,7 +117,7 @@ def todas_reprovadas(disciplinas: list[dict[str, Any]]) -> bool:
 def chave_aluno_curso(registro: dict[str, Any]) -> tuple[str, str]:
     """Chave estavel entre semestres: login + curso."""
     login = str(registro.get("login") or "").strip()
-    curso = str(registro.get("curso") or "").strip() or "Curso nao informado"
+    curso = nome_curso_valido(registro.get("curso")) or ""
     return login, curso
 
 
@@ -129,7 +129,7 @@ def mapa_todas_reprovadas(
     saida: dict[tuple[str, str], dict[str, Any]] = {}
     for registro in registros:
         chave = chave_aluno_curso(registro)
-        if chave[0] == "":
+        if chave[0] == "" or chave[1] == "":
             continue
         discs = disciplinas_do_periodo(registro, periodo)
         if not todas_reprovadas(discs):
@@ -158,7 +158,7 @@ def mapa_matriculados_periodo(
     saida: dict[tuple[str, str], dict[str, Any]] = {}
     for registro in registros:
         chave = chave_aluno_curso(registro)
-        if chave[0] == "":
+        if chave[0] == "" or chave[1] == "":
             continue
         saida[chave] = {
             "matricula": str(registro.get("matricula") or "").strip(),
@@ -236,9 +236,11 @@ def upsert_aluno(cursor: Any, candidato: dict[str, Any]) -> int:
     return int(row_to_dict(cursor.fetchone())["id"])
 
 
-def upsert_curso(cursor: Any, nome_curso: str) -> int:
-    """Insere/reutiliza curso e retorna id."""
-    nome = nome_curso.strip() or "Curso nao informado"
+def upsert_curso(cursor: Any, nome_curso: str) -> int | None:
+    """Insere/reutiliza curso. Retorna None se o nome estiver vazio."""
+    nome = nome_curso_valido(nome_curso)
+    if nome is None:
+        return None
     cursor.execute(
         """
         INSERT INTO cursos (nome_curso)
@@ -278,6 +280,8 @@ def gravar_candidatos(
     for cand in candidatos:
         aluno_id = upsert_aluno(cursor, cand)
         curso_id = upsert_curso(cursor, cand["nome_curso"])
+        if curso_id is None:
+            continue
         cursor.execute(
             """
             INSERT INTO perda_vaga_candidatos (

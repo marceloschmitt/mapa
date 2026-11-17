@@ -17,7 +17,7 @@ import sys
 from pathlib import Path
 from typing import Any
 
-from db import conectar, fechar, row_to_dict
+from db import conectar, fechar, nome_curso_valido, row_to_dict
 from paths import JSON_RESPOSTA_MATRICULAS
 
 
@@ -61,9 +61,11 @@ def carregar_matriculas(caminho: Path) -> dict[str, Any]:
     raise ValueError("Formato inesperado: esperava objeto ou lista de matriculas.")
 
 
-def upsert_curso(cursor: Any, nome_curso: str, curso_nivel: str | None = None) -> int:
-    """Insere ou reutiliza curso e retorna o id."""
-    nome = nome_curso.strip() or "Curso nao informado"
+def upsert_curso(cursor: Any, nome_curso: str, curso_nivel: str | None = None) -> int | None:
+    """Insere ou reutiliza curso. Retorna None se o nome estiver vazio."""
+    nome = nome_curso_valido(nome_curso)
+    if nome is None:
+        return None
     nivel = (curso_nivel or "").strip().upper() or None
     cursor.execute(
         """

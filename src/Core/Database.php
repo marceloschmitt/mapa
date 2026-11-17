@@ -116,6 +116,7 @@ class Database
         self::migrarPasseLivreAtestadosEstrutura();
         self::removerPasseLivrePeriodoAtual();
         self::migrarDatasAulaCsvParaTabela();
+        self::migrarGradeCursoNullable();
         // Tabelas descontinuadas: removidas de bancos antigos.
         self::$connection->exec('DROP TABLE IF EXISTS disciplina_carga_horaria');
         self::$connection->exec('DROP TABLE IF EXISTS efeito_contatos_eventos');
@@ -457,6 +458,142 @@ class Database
 
         self::$connection->exec('DELETE FROM efeito_contatos_execucoes');
         self::$connection->exec('DROP TABLE efeito_contatos_alunos');
+    /**
+     * Permite curso_id NULL em disciplina_grade/disciplina_aulas e remove o
+     * placeholder "Curso nao informado".
+     */
+    private static function migrarGradeCursoNullable(): void
+    {
+        $precisaGrade = self::colunaCursoIdObrigatoria('disciplina_grade');
+        $precisaAulas = self::colunaCursoIdObrigatoria('disciplina_aulas');
+
+        if ($precisaGrade || $precisaAulas) {
+            self::$connection->exec('PRAGMA foreign_keys = OFF');
+            self::$connection->exec('BEGIN');
+            try {
+                if ($precisaGrade) {
+                    $temDatas = false;
+                    foreach (self::$connection->query('PRAGMA table_info(disciplina_grade)')->fetchAll() as $info) {
+                        if (($info['name'] ?? '') === 'datas_aula') {
+                            $temDatas = true;
+                            break;
+                        }
+                    }
+                    self::$connection->exec(
+                        'CREATE TABLE disciplina_grade_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            codigo_disciplina TEXT NOT NULL,
+                            disciplina TEXT NOT NULL,
+                            curso_id INTEGER,
+                            dias_semana TEXT NOT NULL DEFAULT \'\',
+                            semestre_oferta TEXT,
+                            turno_turma TEXT'
+                        . ($temDatas ? ', datas_aula TEXT NOT NULL DEFAULT \'\'' : '')
+                        . ',
+                            FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE SET NULL,
+                            UNIQUE (codigo_disciplina, curso_id)
+                        )'
+                    );
+                    if ($temDatas) {
+                        self::$connection->exec(
+                            'INSERT INTO disciplina_grade_new (
+                                id, codigo_disciplina, disciplina, curso_id,
+                                dias_semana, semestre_oferta, turno_turma, datas_aula
+                             )
+                             SELECT id, codigo_disciplina, disciplina, curso_id,
+                                    dias_semana, semestre_oferta, turno_turma,
+                                    COALESCE(datas_aula, \'\')
+                             FROM disciplina_grade'
+                        );
+                    } else {
+                        self::$connection->exec(
+                            'INSERT INTO disciplina_grade_new (
+                                id, codigo_disciplina, disciplina, curso_id,
+                                dias_semana, semestre_oferta, turno_turma
+                             )
+                             SELECT id, codigo_disciplina, disciplina, curso_id,
+                                    dias_semana, semestre_oferta, turno_turma
+                             FROM disciplina_grade'
+                        );
+                    }
+                    self::$connection->exec('DROP TABLE disciplina_grade');
+                    self::$connection->exec('ALTER TABLE disciplina_grade_new RENAME TO disciplina_grade');
+                    self::$connection->exec(
+                        'CREATE INDEX IF NOT EXISTS idx_disciplina_grade_codigo
+                         ON disciplina_grade(codigo_disciplina)'
+                    );
+                }
+
+                if ($precisaAulas) {
+                    self::$connection->exec(
+                        'CREATE TABLE disciplina_aulas_new (
+                            id INTEGER PRIMARY KEY AUTOINCREMENT,
+                            codigo_disciplina TEXT NOT NULL,
+                            curso_id INTEGER,
+                            data_aula TEXT NOT NULL,
+                            FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE SET NULL,
+                            UNIQUE (codigo_disciplina, curso_id, data_aula)
+                        )'
+                    );
+                    self::$connection->exec(
+                        'INSERT INTO disciplina_aulas_new (id, codigo_disciplina, curso_id, data_aula)
+                         SELECT id, codigo_disciplina, curso_id, data_aula FROM disciplina_aulas'
+                    );
+                    self::$connection->exec('DROP TABLE disciplina_aulas');
+                    self::$connection->exec('ALTER TABLE disciplina_aulas_new RENAME TO disciplina_aulas');
+                    self::$connection->exec(
+                        'CREATE INDEX IF NOT EXISTS idx_disciplina_aulas_data
+                         ON disciplina_aulas(data_aula)'
+                    );
+                    self::$connection->exec(
+                        'CREATE INDEX IF NOT EXISTS idx_disciplina_aulas_disciplina
+                         ON disciplina_aulas(codigo_disciplina, curso_id)'
+                    );
+                }
+
+                self::$connection->exec('COMMIT');
+            } catch (\Throwable $e) {
+                self::$connection->exec('ROLLBACK');
+                self::$connection->exec('PRAGMA foreign_keys = ON');
+                throw $e;
+            }
+            self::$connection->exec('PRAGMA foreign_keys = ON');
+        }
+
+        self::$connection->exec(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_disciplina_grade_sem_curso
+             ON disciplina_grade(codigo_disciplina) WHERE curso_id IS NULL'
+        );
+        self::$connection->exec(
+            'CREATE UNIQUE INDEX IF NOT EXISTS idx_disciplina_aulas_sem_curso
+             ON disciplina_aulas(codigo_disciplina, data_aula) WHERE curso_id IS NULL'
+        );
+
+        $placeholders = self::$connection->query(
+            "SELECT id FROM cursos WHERE LOWER(TRIM(nome_curso)) = LOWER('Curso nao informado')"
+        )->fetchAll();
+        foreach ($placeholders as $row) {
+            $cursoId = (int)$row['id'];
+            self::$connection->prepare(
+                'UPDATE disciplina_grade SET curso_id = NULL WHERE curso_id = ?'
+            )->execute([$cursoId]);
+            self::$connection->prepare(
+                'UPDATE disciplina_aulas SET curso_id = NULL WHERE curso_id = ?'
+            )->execute([$cursoId]);
+            self::$connection->prepare('DELETE FROM cursos WHERE id = ?')->execute([$cursoId]);
+        }
+    }
+
+    private static function colunaCursoIdObrigatoria(string $tabela): bool
+    {
+        $row = self::$connection->query(
+            "SELECT sql FROM sqlite_master WHERE type = 'table' AND name = " . self::$connection->quote($tabela)
+        )->fetch();
+        if ($row === false || empty($row['sql'])) {
+            return false;
+        }
+
+        return str_contains(str_replace("\n", ' ', (string)$row['sql']), 'curso_id INTEGER NOT NULL');
     }
 
     /** Migra CSV legado disciplina_grade.datas_aula → disciplina_aulas (uma vez). */
