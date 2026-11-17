@@ -31,7 +31,7 @@ from pathlib import Path
 from typing import Any
 
 from analisar_frequencia import indexar_turmas
-from db import conectar, fechar, row_to_dict
+from db import conectar, fechar, nome_curso_valido, row_to_dict
 from paths import JSON_RESPOSTA_ALUNOS_MASSA, JSON_RESPOSTA_MATRICULAS
 
 
@@ -60,9 +60,11 @@ def normalizar_data_aula(valor: Any) -> str | None:
     return None
 
 
-def upsert_curso(cursor: Any, nome_curso: str) -> int:
-    """Insere ou reutiliza curso e retorna o id."""
-    nome = nome_curso.strip() or "Curso nao informado"
+def upsert_curso(cursor: Any, nome_curso: str) -> int | None:
+    """Insere ou reutiliza curso. Retorna None se o nome estiver vazio."""
+    nome = nome_curso_valido(nome_curso)
+    if nome is None:
+        return None
     cursor.execute(
         """
         INSERT INTO cursos (nome_curso)
@@ -216,7 +218,11 @@ def importar_turmas(
     cursos_turma: dict[int, list[int]] = {}
     turmas_por_disciplina: dict[tuple[str, int], set[int]] = {}
     for id_turma, item in agregado.items():
-        curso_ids = sorted(upsert_curso(cursor, nome) for nome in item["cursos"])
+        curso_ids = sorted(
+            curso_id
+            for curso_id in (upsert_curso(cursor, nome) for nome in item["cursos"])
+            if curso_id is not None
+        )
         cursos_turma[id_turma] = curso_ids
         for curso_id in curso_ids:
             turmas_por_disciplina.setdefault((item["codigo_disciplina"], curso_id), set()).add(id_turma)
@@ -310,6 +316,8 @@ def importar(
 
     for item in agregado.values():
         curso_id = upsert_curso(cursor, str(item["nome_curso"]))
+        if curso_id is None:
+            continue
         data = item.get("data_ultima_aula")
         codigo = str(item["codigo_disciplina"])
         nome = str(item["disciplina"])

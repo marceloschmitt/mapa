@@ -36,7 +36,7 @@ class TrancadosController extends Controller
         $porCurso = [];
         $alunosUnicos = [];
         foreach ($linhas as $linha) {
-            $nomeCurso = (string)($linha['nome_curso'] ?? 'Curso não informado');
+            $nomeCurso = (string)($linha['nome_curso'] ?? 'Sem curso');
             if (!isset($porCurso[$nomeCurso])) {
                 $porCurso[$nomeCurso] = [
                     'nome_curso' => $nomeCurso,

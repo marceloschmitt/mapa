@@ -252,12 +252,14 @@ class ChamadaEmailService
     private function emailsProfessoresTurma(int $idTurma): array
     {
         $statement = $this->pdo->prepare(
-            'SELECT DISTINCT TRIM(p.email) AS email
+            'SELECT DISTINCT TRIM(
+                COALESCE(NULLIF(TRIM(u.email), \'\'), NULLIF(TRIM(p.email), \'\'))
+             ) AS email
              FROM turma_professores tp
              INNER JOIN professores p ON p.id = tp.professor_id
+             LEFT JOIN usuarios u ON u.cpf = p.cpf
              WHERE tp.id_turma = :id_turma
-               AND p.email IS NOT NULL
-               AND TRIM(p.email) != \'\''
+               AND COALESCE(NULLIF(TRIM(u.email), \'\'), NULLIF(TRIM(p.email), \'\')) IS NOT NULL'
         );
         $statement->execute(['id_turma' => $idTurma]);
 
@@ -270,12 +272,14 @@ class ChamadaEmailService
     private function emailsProfessores(string $codigoDisciplina): array
     {
         $statement = $this->pdo->prepare(
-            'SELECT DISTINCT TRIM(p.email) AS email
+            'SELECT DISTINCT TRIM(
+                COALESCE(NULLIF(TRIM(u.email), \'\'), NULLIF(TRIM(p.email), \'\'))
+             ) AS email
              FROM disciplina_professores dp
              INNER JOIN professores p ON p.id = dp.professor_id
+             LEFT JOIN usuarios u ON u.cpf = p.cpf
              WHERE dp.codigo_disciplina = :codigo
-               AND p.email IS NOT NULL
-               AND TRIM(p.email) != \'\''
+               AND COALESCE(NULLIF(TRIM(u.email), \'\'), NULLIF(TRIM(p.email), \'\')) IS NOT NULL'
         );
         $statement->execute(['codigo' => $codigoDisciplina]);
 

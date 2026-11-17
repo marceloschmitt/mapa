@@ -42,6 +42,7 @@ class AccessLogRepository
         '/configuracoes/api' => 'Configurações — API',
         '/configuracoes/api/integrados-anual' => 'Configurações — buscar integrados (ano)',
         '/configuracoes/email' => 'Configurações — e-mail',
+        '/configuracoes/email/log' => 'Configurações — log de e-mails',
         '/configuracoes/coordenacao' => 'Configurações — coordenação',
         '/configuracoes/feriados' => 'Configurações — feriados',
         '/configuracoes/feriados/excluir' => 'Configurações — excluir feriado',

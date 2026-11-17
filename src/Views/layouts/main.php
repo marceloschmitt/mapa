@@ -52,6 +52,7 @@ $itensAcompanhamento = [
 $itensSituacao = [
     ['/trancados', 'bi-pause-circle', 'Alunos trancados', true],
     ['/disciplinas-trancadas', 'bi-journal-x', 'Disciplinas trancadas', true],
+    ['/disciplinas-sem-curso', 'bi-journal-minus', 'Disciplinas sem curso', true],
     ['/perda-vaga', 'bi-exclamation-triangle', 'Perda de vaga', true],
 ];
 $itensAdmin = [
@@ -61,6 +62,7 @@ $itensAdmin = [
     ['/configuracoes/api', 'bi-plug', 'API', true],
     ['/configuracoes/ldap', 'bi-diagram-3', 'LDAP', true],
     ['/configuracoes/email', 'bi-envelope', 'E-mail', true],
+    ['/configuracoes/email/log', 'bi-envelope-paper', 'Log de e-mails', true],
     ['divisor', '', 'Regras', true],
     ['/configuracoes/coordenacao', 'bi-mortarboard', 'Coordenação', true],
     ['/configuracoes/alarmes', 'bi-sliders', 'Alarmes', true],
