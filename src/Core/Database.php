@@ -37,6 +37,8 @@ class Database
         self::$connection->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
         self::$connection->setAttribute(PDO::ATTR_DEFAULT_FETCH_MODE, PDO::FETCH_ASSOC);
         self::$connection->exec('PRAGMA foreign_keys = ON');
+        // Espera até 60s se outro processo (Apache/coleta) estiver com o banco.
+        self::$connection->exec('PRAGMA busy_timeout = 60000');
 
         self::migrate();
 

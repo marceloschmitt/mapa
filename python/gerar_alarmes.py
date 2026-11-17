@@ -694,6 +694,9 @@ def carregar_aulas_por_disciplina(
     )
     mapa: dict[tuple[int, str], set[date]] = {}
     for row in cursor.fetchall():
+        if row["curso_id"] is None:
+            # Disciplina sem curso (curso_id NULL) fica fora das regras de alarme.
+            continue
         chave = (int(row["curso_id"]), str(row["codigo_disciplina"]))
         dia = row["data_aula"]
         data = dia if isinstance(dia, date) else date.fromisoformat(str(dia)[:10])

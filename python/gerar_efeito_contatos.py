@@ -365,8 +365,10 @@ def carregar_datas_aula(cursor: Any, inicio: date) -> tuple[dict[tuple[str, int]
         (inicio.isoformat(),),
     ).fetchall():
         dia = data_local(row[2])
-        if dia is not None:
-            por_disciplina[(str(row[0]), int(row[1]))].append(dia)
+        if dia is None or row[1] is None:
+            # Disciplina sem curso (curso_id NULL) fica fora desta análise.
+            continue
+        por_disciplina[(str(row[0]), int(row[1]))].append(dia)
 
     por_turma: dict[int, list[date]] = defaultdict(list)
     for row in cursor.execute(
