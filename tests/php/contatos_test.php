@@ -146,7 +146,13 @@ privado($servico, 'registrarEnvio', [1, array_values($grupos)[0], 'um@exemplo.br
 privado($servico, 'marcarAlarmesEnviados', [[201, 202]]);
 verificar('alarmes seguem abertos', 2,
     (int)$pdo->query('SELECT COUNT(*) FROM alarmes WHERE aluno_id = 1 AND visualizado = 0')->fetchColumn());
-verificar('envio virou contato automático', ['email_automatico', 'automatico', '7'], array_values(array_map(
+verificar('envio pelo usuário virou e-mail da equipe', ['email', 'manual', '7'], array_values(array_map(
+    'strval',
+    $pdo->query("SELECT canal, origem, registrado_por FROM contatos_aluno
+                 WHERE aluno_id = 1 AND alarme_email_id IS NOT NULL AND alarme_email_id <> 99")->fetch()
+)));
+privado($servico, 'registrarEnvio', [1, array_values($grupos)[0], 'um@exemplo.br', null]);
+verificar('reenvio automático não rebaixa o contato da equipe', ['email', 'manual', '7'], array_values(array_map(
     'strval',
     $pdo->query("SELECT canal, origem, registrado_por FROM contatos_aluno
                  WHERE aluno_id = 1 AND alarme_email_id IS NOT NULL AND alarme_email_id <> 99")->fetch()

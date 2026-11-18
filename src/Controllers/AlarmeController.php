@@ -446,8 +446,9 @@ class AlarmeController extends Controller
     }
 
     /**
-     * Força o e-mail (mesmo texto do automático) e marca os alarmes abertos
-     * do aluno/curso (ou só de uma disciplina) como email_automatico.
+     * Força o e-mail (mesmo texto do automático) e registra como contato da
+     * equipe (canal e-mail). Marca os alarmes abertos do aluno/curso (ou só
+     * de uma disciplina) como já avisados por e-mail.
      */
     public function enviarEmail(): void
     {

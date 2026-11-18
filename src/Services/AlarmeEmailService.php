@@ -261,9 +261,6 @@ class AlarmeEmailService
         }
 
         try {
-            $mailer->send([$destinatario], $this->montarAssunto(), $this->montarMensagem($grupo));
-            $this->registrarEnvio($coletaId, $grupo, $destinatario, $usuarioId);
-            $this->marcarAlarmesEnviados($grupo['alarme_ids']);
             $nomeAluno = trim((string)($grupo['nome'] ?? ''));
             $mailer->send(
                 [$destinatario],
@@ -271,8 +268,9 @@ class AlarmeEmailService
                 $this->montarMensagem($grupo),
                 $nomeAluno !== '' ? [$destinatario => $nomeAluno] : []
             );
-            $this->registrarEnvio($coletaId, $grupo, $destinatario);
-            $this->marcarAlarmesEnviados($grupo['alarme_ids'], $usuarioId);
+            // Botão na tela = contato da equipe (canal email); cron = email_automatico.
+            $this->registrarEnvio($coletaId, $grupo, $destinatario, $usuarioId);
+            $this->marcarAlarmesEnviados($grupo['alarme_ids']);
         } catch (Throwable $e) {
             return [
                 'ok' => false,
@@ -1770,12 +1768,15 @@ class AlarmeEmailService
             'aluno_id' => (int)$grupo['aluno_id'],
             'curso_id' => (int)$grupo['curso_id'],
         ]);
+        $manual = $usuarioId !== null && $usuarioId > 0;
         (new ContatoRepository($this->pdo))->registrar([
             'aluno_id' => (int)$grupo['aluno_id'],
             'curso_id' => (int)$grupo['curso_id'],
             'data_contato' => date('Y-m-d'),
-            'canal' => self::CONTATO_AUTOMATICO,
-            'origem' => 'automatico',
+            // Clique na tela (com usuário) conta como e-mail da equipe na eficácia.
+            // Pipeline automático continua como email_automatico (grupo de comparação).
+            'canal' => $manual ? 'email' : self::CONTATO_AUTOMATICO,
+            'origem' => $manual ? 'manual' : 'automatico',
             'registrado_por' => $usuarioId,
             'alarme_email_id' => (int)$envio->fetchColumn(),
         ]);

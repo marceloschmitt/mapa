@@ -121,7 +121,8 @@ class ContatoRepository
      */
     public function registrar(array $contato): int
     {
-        // O mesmo envio (alarme_email_id) vira um contato so, mesmo reenviado na coleta.
+        // O mesmo envio (alarme_email_id) vira um contato só. Se o automático já
+        // existia e alguém envia pelo botão (origem manual), promove a e-mail da equipe.
         $statement = $this->db->prepare(
             'INSERT INTO contatos_aluno (
                 aluno_id, curso_id, data_contato, canal, origem, conseguiu_falar, motivo,
@@ -130,7 +131,12 @@ class ContatoRepository
                 :aluno_id, :curso_id, :data_contato, :canal, :origem, :conseguiu_falar, :motivo,
                 :observacao, :codigo_disciplina, :registrado_por, :alarme_email_id
              )
-             ON CONFLICT(alarme_email_id) DO NOTHING'
+             ON CONFLICT(alarme_email_id) DO UPDATE SET
+                canal = excluded.canal,
+                origem = excluded.origem,
+                data_contato = excluded.data_contato,
+                registrado_por = COALESCE(excluded.registrado_por, contatos_aluno.registrado_por)
+             WHERE excluded.origem = \'manual\''
         );
         $registradoPor = $contato['registrado_por'] ?? null;
         $statement->execute([
