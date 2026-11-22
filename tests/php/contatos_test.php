@@ -115,9 +115,13 @@ $primeiro = $contatos->registrar(['aluno_id' => 1, 'curso_id' => 1, 'data_contat
     'canal' => 'email_automatico', 'origem' => 'automatico', 'alarme_email_id' => 99]);
 $repetido = $contatos->registrar(['aluno_id' => 1, 'curso_id' => 1, 'data_contato' => '2026-10-28',
     'canal' => 'email_automatico', 'origem' => 'automatico', 'alarme_email_id' => 99]);
-verificar('o mesmo envio vira um contato só', [true, 0, 1], [
-    $primeiro > 0, $repetido,
+$contatos->registrar(['aluno_id' => 1, 'curso_id' => 1, 'data_contato' => '2026-11-22',
+    'canal' => 'email_automatico', 'origem' => 'automatico', 'alarme_email_id' => 99]);
+verificar('o mesmo envio vira um contato só (e reenvio atualiza a data)', [true, $primeiro, 1, '2026-11-22'], [
+    $primeiro > 0,
+    $repetido,
     (int)$pdo->query('SELECT COUNT(*) FROM contatos_aluno WHERE alarme_email_id = 99')->fetchColumn(),
+    (string)$pdo->query('SELECT data_contato FROM contatos_aluno WHERE alarme_email_id = 99')->fetchColumn(),
 ]);
 
 echo "== Encerrar caso\n";

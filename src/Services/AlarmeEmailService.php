@@ -1813,10 +1813,12 @@ class AlarmeEmailService
             'curso_id' => (int)$grupo['curso_id'],
         ]);
         $manual = $usuarioId !== null && $usuarioId > 0;
+        $hojeSp = (new \DateTimeImmutable('now', new \DateTimeZone('America/Sao_Paulo')))
+            ->format('Y-m-d');
         (new ContatoRepository($this->pdo))->registrar([
             'aluno_id' => (int)$grupo['aluno_id'],
             'curso_id' => (int)$grupo['curso_id'],
-            'data_contato' => date('Y-m-d'),
+            'data_contato' => $hojeSp,
             // Clique na tela (com usuário) conta como e-mail da equipe na eficácia.
             // Pipeline automático continua como email_automatico (grupo de comparação).
             'canal' => $manual ? 'email' : self::CONTATO_AUTOMATICO,
@@ -1826,6 +1828,87 @@ class AlarmeEmailService
             'coleta_id' => $coletaId,
             'alarme_ids' => array_map('intval', $grupo['alarme_ids'] ?? []),
         ]);
+    }
+
+    /**
+     * Repara contatos ausentes/desatualizados a partir de alarme_emails
+     * (ex.: e-mail marcado no alarme sem linha nova em contatos_aluno).
+     *
+     * @return array{corrigidos: int, linhas: list<string>}
+     */
+    public function sincronizarContatosDeEmails(?string $filtro = null): array
+    {
+        $params = [];
+        $whereFiltro = '';
+        $filtroNorm = $filtro !== null ? trim($filtro) : '';
+        if ($filtroNorm !== '') {
+            $whereFiltro = ' AND (
+                CAST(ae.aluno_id AS TEXT) = :filtro
+                OR a.matricula = :filtro
+                OR lower(a.email) = lower(:filtro)
+                OR a.nome LIKE :filtro_like
+                OR IFNULL(a.nome_social, \'\') LIKE :filtro_like
+            )';
+            $params['filtro'] = $filtroNorm;
+            $params['filtro_like'] = '%' . $filtroNorm . '%';
+        }
+
+        $statement = $this->pdo->prepare(
+            'SELECT ae.id AS alarme_email_id, ae.coleta_id, ae.aluno_id, ae.curso_id,
+                    ae.alarme_ids, ae.enviado_em, substr(ae.enviado_em, 1, 10) AS data_envio,
+                    a.nome AS aluno_nome, a.matricula,
+                    c.id AS contato_id, c.data_contato AS contato_data
+             FROM alarme_emails ae
+             INNER JOIN alunos a ON a.id = ae.aluno_id
+             LEFT JOIN contatos_aluno c ON c.alarme_email_id = ae.id
+             WHERE (
+                    c.id IS NULL
+                    OR c.data_contato IS NULL
+                    OR c.data_contato < substr(ae.enviado_em, 1, 10)
+             )'
+            . $whereFiltro
+            . ' ORDER BY ae.enviado_em DESC'
+        );
+        $statement->execute($params);
+        $rows = $statement->fetchAll();
+
+        $repo = new ContatoRepository($this->pdo);
+        $corrigidos = 0;
+        $linhas = [];
+        foreach ($rows as $row) {
+            $alarmeIds = [];
+            foreach (preg_split('/\s*,\s*/', trim((string)($row['alarme_ids'] ?? ''))) as $idRaw) {
+                $id = (int)$idRaw;
+                if ($id > 0) {
+                    $alarmeIds[] = $id;
+                }
+            }
+            $repo->registrar([
+                'aluno_id' => (int)$row['aluno_id'],
+                'curso_id' => (int)$row['curso_id'],
+                'data_contato' => (string)$row['data_envio'],
+                'canal' => self::CONTATO_AUTOMATICO,
+                'origem' => 'automatico',
+                'alarme_email_id' => (int)$row['alarme_email_id'],
+                'coleta_id' => (int)$row['coleta_id'],
+                'alarme_ids' => $alarmeIds,
+            ]);
+            $corrigidos++;
+            $antes = $row['contato_id'] !== null
+                ? 'contato#' . $row['contato_id'] . ' data=' . ($row['contato_data'] ?? '?')
+                : 'sem contato';
+            $linhas[] = sprintf(
+                'OK %s matrícula %s | alarme_email #%s enviado %s | %s → data %s',
+                trim((string)$row['aluno_nome']),
+                trim((string)$row['matricula']),
+                (string)$row['alarme_email_id'],
+                (string)$row['enviado_em'],
+                $antes,
+                (string)$row['data_envio']
+            );
+        }
+
+        return ['corrigidos' => $corrigidos, 'linhas' => $linhas];
     }
 
     /**
@@ -2041,6 +2124,79 @@ class AlarmeEmailService
             $saida['linhas'][] = 'Obs.: processarAlunos aborta no início por EMAIL_SEND=false (mesmo com elegíveis).';
         } elseif (!$alunosOn) {
             $saida['linhas'][] = 'Obs.: processarAlunos aborta porque alarmes_alunos está desligado.';
+        }
+
+        if ($filtroNorm !== '') {
+            $saida['linhas'][] = '';
+            $saida['linhas'][] = '--- alarme_emails (últimos 8) ---';
+            $stEmail = $this->pdo->prepare(
+                'SELECT ae.id, ae.coleta_id, ae.aluno_id, ae.curso_id, ae.enviado_em, ae.alarme_ids
+                 FROM alarme_emails ae
+                 INNER JOIN alunos a ON a.id = ae.aluno_id
+                 WHERE CAST(ae.aluno_id AS TEXT) = :filtro
+                    OR a.matricula = :filtro
+                    OR lower(a.email) = lower(:filtro)
+                    OR a.nome LIKE :filtro_like
+                    OR IFNULL(a.nome_social, \'\') LIKE :filtro_like
+                 ORDER BY datetime(ae.enviado_em) DESC
+                 LIMIT 8'
+            );
+            $stEmail->execute([
+                'filtro' => $filtroNorm,
+                'filtro_like' => '%' . $filtroNorm . '%',
+            ]);
+            $emails = $stEmail->fetchAll();
+            if ($emails === []) {
+                $saida['linhas'][] = '(nenhum)';
+            }
+            foreach ($emails as $e) {
+                $saida['linhas'][] = sprintf(
+                    '  email#%s coleta=%s aluno=%s curso=%s em=%s alarmes=%s',
+                    (string)$e['id'],
+                    (string)$e['coleta_id'],
+                    (string)$e['aluno_id'],
+                    (string)$e['curso_id'],
+                    (string)$e['enviado_em'],
+                    (string)($e['alarme_ids'] ?? '')
+                );
+            }
+
+            $saida['linhas'][] = '--- contatos_aluno e-mail (últimos 8) ---';
+            $stCt = $this->pdo->prepare(
+                'SELECT c.id, c.aluno_id, c.curso_id, c.data_contato, c.canal, c.origem,
+                        c.alarme_email_id, c.coleta_id
+                 FROM contatos_aluno c
+                 INNER JOIN alunos a ON a.id = c.aluno_id
+                 WHERE (CAST(c.aluno_id AS TEXT) = :filtro
+                    OR a.matricula = :filtro
+                    OR lower(a.email) = lower(:filtro)
+                    OR a.nome LIKE :filtro_like
+                    OR IFNULL(a.nome_social, \'\') LIKE :filtro_like)
+                   AND c.canal IN (\'email\', \'email_automatico\')
+                 ORDER BY c.data_contato DESC, c.id DESC
+                 LIMIT 8'
+            );
+            $stCt->execute([
+                'filtro' => $filtroNorm,
+                'filtro_like' => '%' . $filtroNorm . '%',
+            ]);
+            $cts = $stCt->fetchAll();
+            if ($cts === []) {
+                $saida['linhas'][] = '(nenhum)';
+            }
+            foreach ($cts as $c) {
+                $saida['linhas'][] = sprintf(
+                    '  contato#%s aluno=%s curso=%s data=%s canal=%s origem=%s alarme_email_id=%s coleta=%s',
+                    (string)$c['id'],
+                    (string)$c['aluno_id'],
+                    (string)$c['curso_id'],
+                    (string)$c['data_contato'],
+                    (string)$c['canal'],
+                    (string)$c['origem'],
+                    (string)($c['alarme_email_id'] ?? 'null'),
+                    (string)($c['coleta_id'] ?? 'null')
+                );
+            }
         }
 
         return $saida;

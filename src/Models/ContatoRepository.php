@@ -123,8 +123,9 @@ class ContatoRepository
      */
     public function registrar(array $contato): int
     {
-        // O mesmo envio (alarme_email_id) vira um contato só. Se o automático já
-        // existia e alguém envia pelo botão (origem manual), promove a e-mail da equipe.
+        // O mesmo envio (alarme_email_id) vira um contato só.
+        // - Reenvio automático: atualiza data_contato/coleta, sem rebaixar e-mail da equipe.
+        // - Envio pelo botão (manual): promove canal/origem para e-mail da equipe.
         $statement = $this->db->prepare(
             'INSERT INTO contatos_aluno (
                 aluno_id, curso_id, data_contato, canal, origem, conseguiu_falar, motivo,
@@ -134,12 +135,25 @@ class ContatoRepository
                 :observacao, :codigo_disciplina, :coleta_id, :registrado_por, :alarme_email_id
              )
              ON CONFLICT(alarme_email_id) DO UPDATE SET
-                canal = excluded.canal,
-                origem = excluded.origem,
-                data_contato = excluded.data_contato,
+                data_contato = CASE
+                    WHEN excluded.data_contato > contatos_aluno.data_contato
+                        THEN excluded.data_contato
+                    ELSE contatos_aluno.data_contato
+                END,
                 coleta_id = COALESCE(excluded.coleta_id, contatos_aluno.coleta_id),
-                registrado_por = COALESCE(excluded.registrado_por, contatos_aluno.registrado_por)
-             WHERE excluded.origem = \'manual\''
+                canal = CASE
+                    WHEN excluded.origem = \'manual\' THEN excluded.canal
+                    ELSE contatos_aluno.canal
+                END,
+                origem = CASE
+                    WHEN excluded.origem = \'manual\' THEN excluded.origem
+                    ELSE contatos_aluno.origem
+                END,
+                registrado_por = CASE
+                    WHEN excluded.origem = \'manual\'
+                        THEN COALESCE(excluded.registrado_por, contatos_aluno.registrado_por)
+                    ELSE contatos_aluno.registrado_por
+                END'
         );
         $registradoPor = $contato['registrado_por'] ?? null;
         $coletaId = isset($contato['coleta_id']) ? (int)$contato['coleta_id'] : 0;
@@ -159,15 +173,18 @@ class ContatoRepository
             'alarme_email_id' => $alarmeEmailId,
         ]);
 
-        $alterouContato = $statement->rowCount() > 0;
-        $contatoId = $alterouContato ? (int)$this->db->lastInsertId() : 0;
-        // UPDATE por conflito: lastInsertId pode ser 0 — resolve pelo e-mail.
-        if ($contatoId <= 0 && $alarmeEmailId !== null && (int)$alarmeEmailId > 0) {
+        // Após ON CONFLICT DO UPDATE o lastInsertId do PDO/SQLite é instável:
+        // resolve sempre pelo alarme_email_id quando houver; senão lastInsertId.
+        $contatoId = 0;
+        if ($alarmeEmailId !== null && (int)$alarmeEmailId > 0) {
             $busca = $this->db->prepare(
                 'SELECT id FROM contatos_aluno WHERE alarme_email_id = :id LIMIT 1'
             );
             $busca->execute(['id' => (int)$alarmeEmailId]);
             $contatoId = (int)($busca->fetchColumn() ?: 0);
+        }
+        if ($contatoId <= 0) {
+            $contatoId = (int)$this->db->lastInsertId();
         }
 
         $alarmeIds = array_values(array_unique(array_filter(
@@ -178,8 +195,8 @@ class ContatoRepository
             $this->sincronizarAlarmesDoContato($contatoId, $alarmeIds);
         }
 
-        // 0 = nenhum contato novo/alterado (ex.: reenvio automático do mesmo e-mail).
-        return $alterouContato ? $contatoId : 0;
+        // Id do contato (novo ou já existente para este alarme_email_id); 0 se falhou.
+        return $contatoId;
     }
 
     /**
