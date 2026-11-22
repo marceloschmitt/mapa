@@ -134,7 +134,7 @@ verificar('encerrados à mão, sem tipo de contato', [['1', 'manual', null], ['1
     $pdo->query('SELECT visualizado, fechamento, contato_tipo FROM alarmes WHERE aluno_id = 2')->fetchAll()
 ));
 
-echo "== E-mail ao aluno não encerra e não se repete no episódio\n";
+echo "== E-mail ao aluno não encerra e não se repete antes de 14 dias\n";
 $pdo->exec("INSERT INTO alarmes (id, coleta_id, aluno_id, curso_id, codigo_disciplina, tipo, severidade, mensagem) VALUES
             (201, 1, 1, 1, 'X', 'faltas_3semanas', 'critico', 'm'),
             (202, 1, 1, 1, 'Y', 'percentual_baixo', 'alto', 'm')");
@@ -157,22 +157,21 @@ verificar('reenvio automático não rebaixa o contato da equipe', ['email', 'man
     $pdo->query("SELECT canal, origem, registrado_por FROM contatos_aluno
                  WHERE aluno_id = 1 AND alarme_email_id IS NOT NULL AND alarme_email_id <> 99")->fetch()
 )));
-verificar('não entra de novo no envio', [], privado($servico, 'agruparAlarmesParaEnvio', [1]));
+verificar('não entra de novo no envio (e-mail recente)', [], privado($servico, 'agruparAlarmesParaEnvio', [1]));
 verificar('a tela explica que o e-mail já foi enviado', ['1|1'],
     array_keys(privado($servico, 'criticosJaAvisados', [1])));
 
-echo "== E-mail de outro episódio não bloqueia o novo\n";
+echo "== E-mail há mais de 14 dias permite reenvio do mesmo alarme\n";
 $pdo->exec("DELETE FROM alarmes WHERE aluno_id = 1");
 $pdo->exec("INSERT INTO alarmes (id, coleta_id, aluno_id, curso_id, codigo_disciplina, tipo, severidade, mensagem,
                                  gerado_em, email_enviado_em) VALUES
             (301, 1, 1, 1, 'X', 'faltas_3semanas', 'critico', 'm',
-             '2026-11-19 10:00:00', '2026-09-22 13:00:00')");
-// Envio recente na tabela (antes: janela de 7 dias bloqueava qualquer e-mail ao aluno).
-$pdo->exec("UPDATE alarme_emails SET enviado_em = datetime('now', 'localtime', '-2 days')
-            WHERE coleta_id = 1 AND aluno_id = 1 AND curso_id = 1");
+             '2026-09-01 10:00:00', datetime('now', 'localtime', '-15 days'))");
 $gruposNovo = privado($servico, 'agruparAlarmesParaEnvio', [1]);
-verificar('crítico com e-mail antigo ao episódio entra no envio', [301],
+verificar('crítico com e-mail há 15 dias entra no envio', [301],
     $gruposNovo !== [] ? $gruposNovo[array_key_first($gruposNovo)]['alarme_ids'] : []);
+$pdo->exec("UPDATE alarmes SET email_enviado_em = datetime('now', 'localtime', '-2 days') WHERE id = 301");
+verificar('crítico com e-mail há 2 dias não entra', [], privado($servico, 'agruparAlarmesParaEnvio', [1]));
 
 echo "== Histórico da configuração de alarmes\n";
 $config = new ConfigRepository($pdo);

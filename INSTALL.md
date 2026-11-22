@@ -80,7 +80,7 @@ Com essa variável, só esse endereço recebe avisos — e apenas sobre alunos d
 
 Ao remover ou comentar a variável, na próxima execução do fluxo staff (quarta-feira, se configurado) **todos os contatos ainda pendentes** — inclusive os do período piloto — serão comunicados à equipe completa.
 
-Periodicidade do staff (alunos: um e-mail por episódio crítico, sem janela global de 7 dias):
+Periodicidade do staff (alunos: reenvio do mesmo alarme crítico após 14 dias, se continuar):
 
 ```env
 EMAIL_ALARMES_DIA_STAFF=quarta

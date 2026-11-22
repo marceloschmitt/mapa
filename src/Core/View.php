@@ -14,7 +14,7 @@ class View
 
         $executadaEm = (string)$coleta['executada_em'];
         $timestamp = strtotime($executadaEm);
-        $data = $timestamp !== false ? date('d/m/Y', $timestamp) : $executadaEm;
+        $data = $timestamp !== false ? date('d/m/Y H:i', $timestamp) : $executadaEm;
 
         return 'Coleta em ' . $data;
     }

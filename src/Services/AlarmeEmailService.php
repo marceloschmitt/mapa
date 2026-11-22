@@ -17,7 +17,11 @@ class AlarmeEmailService
 {
     public const CONTATO_AUTOMATICO = 'email_automatico';
 
+    /** Staff: no máximo 1 aviso por destinatário nesta janela. */
     public const INTERVALO_DIAS = 7;
+
+    /** Aluno: reenvia e-mail do mesmo alarme crítico após estes dias. */
+    public const DIAS_REENVIO_ALUNO = 14;
 
     private PDO $pdo;
     private ConfigRepository $config;
@@ -65,8 +69,8 @@ class AlarmeEmailService
             return $resumo;
         }
 
-        // Sem janela global de 7 dias: o bloqueio é por episódio (email_enviado_em
-        // na data do gerado_em ou depois). E-mail antigo de outro alarme não impede.
+        // Reenvio por alarme: após DIAS_REENVIO_ALUNO do último e-mail daquele alarme
+        // (não exige o alarme sumir). E-mail recente no mesmo alarme bloqueia.
         foreach ($grupos as $grupo) {
             $destinatario = trim((string)($grupo['email'] ?? ''));
 
@@ -315,7 +319,8 @@ class AlarmeEmailService
         }
 
         if ($exigirCritico) {
-            // Só alarme crítico ainda não avisado por e-mail neste episódio dispara o envio.
+            // Crítico sem e-mail recente (nunca ou há mais de DIAS_REENVIO_ALUNO dias).
+            $emailRecente = $this->sqlEmailRecenteAluno('al');
             $check = $this->pdo->prepare(
                 'SELECT 1
                  FROM alarmes al
@@ -324,7 +329,7 @@ class AlarmeEmailService
                    AND al.curso_id = :curso_id
                    AND al.severidade = \'critico\'
                    AND al.visualizado = 0
-                   AND al.email_enviado_em IS NULL'
+                   AND NOT (' . $emailRecente . ')'
                 . $filtroDisc
                 . ' LIMIT 1'
             );
@@ -1306,15 +1311,15 @@ class AlarmeEmailService
      */
     private function agruparAlarmesParaEnvio(int $coletaId): array
     {
-        // Crítico sem e-mail neste episódio (e-mail antigo, antes do gerado_em, não conta).
-        $emailEpisodio = $this->sqlEmailNoEpisodio('al');
+        // Crítico sem e-mail recente (nunca ou há >= DIAS_REENVIO_ALUNO dias).
+        $emailRecente = $this->sqlEmailRecenteAluno('al');
         $statement = $this->pdo->prepare(
             'SELECT DISTINCT al.aluno_id, al.curso_id
              FROM alarmes al
              WHERE al.coleta_id = :coleta_id
                AND al.severidade = \'critico\'
                AND al.visualizado = 0
-               AND NOT (' . $emailEpisodio . ')
+               AND NOT (' . $emailRecente . ')
                AND NOT EXISTS (
                    SELECT 1
                    FROM alunos_trancados at
@@ -1338,6 +1343,7 @@ class AlarmeEmailService
             return [];
         }
 
+        // Só inclui alarmes deste aluno que também estão sem e-mail recente.
         $statement = $this->pdo->prepare(
             'SELECT al.id, al.tipo, al.severidade, al.mensagem, al.codigo_disciplina, al.disciplina,
                     al.aluno_id, al.curso_id,
@@ -1349,6 +1355,7 @@ class AlarmeEmailService
              INNER JOIN cursos c ON c.id = al.curso_id
              WHERE al.coleta_id = :coleta_id
                AND al.visualizado = 0
+               AND NOT (' . $emailRecente . ')
                AND NOT EXISTS (
                    SELECT 1
                    FROM alunos_trancados at
@@ -1523,7 +1530,8 @@ class AlarmeEmailService
 
         $trancados = $this->mapaTrancadosColeta($coletaId);
         $enviosColeta = $this->enviosNestaColeta($coletaId);
-        $avisadosNoEpisodio = $this->criticosJaAvisados($coletaId);
+        $avisadosRecentes = $this->criticosJaAvisados($coletaId);
+        $diasReenvio = self::DIAS_REENVIO_ALUNO;
 
         foreach ($candidatos as $c) {
             $chave = $this->chaveAlunoCurso($c);
@@ -1534,10 +1542,11 @@ class AlarmeEmailService
                 continue;
             }
 
-            if (isset($avisadosNoEpisodio[$chave])) {
-                $motivos[$chave] = 'E-mail automático já enviado neste episódio em '
-                    . $this->formatarDataEnvio($avisadosNoEpisodio[$chave])
-                    . '; outro só sai se surgir um novo episódio crítico.';
+            if (isset($avisadosRecentes[$chave])) {
+                $motivos[$chave] = 'E-mail automático já enviado em '
+                    . $this->formatarDataEnvio($avisadosRecentes[$chave])
+                    . '; outro só sai após ' . $diasReenvio
+                    . ' dias do e-mail deste alarme, se ele continuar.';
                 continue;
             }
 
@@ -1561,16 +1570,16 @@ class AlarmeEmailService
 
     /**
      * Alunos/curso cujos alarmes críticos abertos já foram todos avisados por
-     * e-mail (chave "aluno|curso" => data do último envio).
+     * e-mail recente (chave "aluno|curso" => data do último envio).
      *
      * @return array<string, string>
      */
     private function criticosJaAvisados(int $coletaId): array
     {
-        $emailEpisodio = $this->sqlEmailNoEpisodio('alarmes');
+        $emailRecente = $this->sqlEmailRecenteAluno('alarmes');
         $statement = $this->pdo->prepare(
             'SELECT aluno_id, curso_id, MAX(email_enviado_em) AS enviado,
-                    SUM(CASE WHEN NOT (' . $emailEpisodio . ') THEN 1 ELSE 0 END) AS pendentes
+                    SUM(CASE WHEN NOT (' . $emailRecente . ') THEN 1 ELSE 0 END) AS pendentes
              FROM alarmes
              WHERE coleta_id = :coleta_id
                AND severidade = \'critico\'
@@ -1589,11 +1598,17 @@ class AlarmeEmailService
         return $saida;
     }
 
-    /** E-mail conta neste episódio se foi na data do gerado_em ou depois. */
-    private function sqlEmailNoEpisodio(string $alias = 'al'): string
+    /**
+     * E-mail ainda “vale” para este alarme: enviado nos últimos DIAS_REENVIO_ALUNO dias.
+     * Passado esse prazo, o mesmo alarme pode gerar novo e-mail sem ter sumido.
+     */
+    private function sqlEmailRecenteAluno(string $alias = 'al'): string
     {
+        $dias = (int)self::DIAS_REENVIO_ALUNO;
+
         return '(' . $alias . '.email_enviado_em IS NOT NULL'
-            . ' AND date(' . $alias . '.email_enviado_em) >= date(' . $alias . '.gerado_em))';
+            . ' AND date(' . $alias . '.email_enviado_em)'
+            . ' > date(\'now\', \'localtime\', \'-' . $dias . ' days\'))';
     }
 
     /**
@@ -1764,7 +1779,7 @@ class AlarmeEmailService
 
     /**
      * Marca os alarmes que o e-mail incluiu. Não encerra o caso: o alarme segue
-     * aberto (a equipe acompanha), mas não gera outro e-mail neste episódio.
+     * aberto (a equipe acompanha); novo e-mail só após DIAS_REENVIO_ALUNO dias.
      *
      * @param list<int> $alarmeIds
      */
