@@ -47,7 +47,8 @@ $itensAcompanhamento = [
     ['/ingressantes', 'bi-person-plus', 'Ingressantes', true],
     ['/chamadas', 'bi-clipboard-check', 'Últimas chamadas', !empty($podeVerChamadas)],
     ['/frequencia-anual', 'bi-calendar3', 'Frequência corrente', !empty($podeVerFrequenciaAnual)],
-    ['/acompanhamento', 'bi-graph-up-arrow', 'Eficácia dos alarmes', true],
+    // Código e rotas /acompanhamento mantidos; só oculto no menu por enquanto.
+    ['/acompanhamento', 'bi-graph-up-arrow', 'Eficácia dos alarmes', false],
 ];
 $itensSituacao = [
     ['/trancados', 'bi-pause-circle', 'Alunos trancados', true],

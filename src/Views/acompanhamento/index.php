@@ -836,7 +836,7 @@ if (is_array($curva)) {
                                         </div>
                                     </td>
                                     <td class="text-end">
-                                        <button type="button" class="btn btn-sm btn-outline-primary js-novo-contato">Registrar contato</button>
+                                        <button type="button" class="btn btn-sm btn-outline-primary js-novo-contato">Registrar contato realizado fora do sistema</button>
                                     </td>
                                 </tr>
                             <?php endforeach; ?>
@@ -884,7 +884,7 @@ if (is_array($curva)) {
         <div class="modal-dialog">
             <form class="modal-content" method="post" action="<?= $e(url('/acompanhamento/contato')) ?>">
                 <div class="modal-header">
-                    <h2 class="modal-title h5" id="modalContatoTitulo">Registrar contato</h2>
+                    <h2 class="modal-title h5" id="modalContatoTitulo">Registrar contato realizado fora do sistema</h2>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                 </div>
                 <div class="modal-body d-flex flex-column gap-3">
@@ -943,7 +943,7 @@ if (is_array($curva)) {
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">Registrar contato</button>
+                    <button type="submit" class="btn btn-primary">Registrar contato realizado fora do sistema</button>
                 </div>
             </form>
         </div>

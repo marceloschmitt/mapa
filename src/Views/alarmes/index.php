@@ -266,8 +266,8 @@ if (!function_exists('mapaResumoContato')) {
     // o formulário é montado no clique. Com formulários em cada menu, a lista de todos os
     // cursos passava de 60 MB de HTML e estourava a memória do PHP.
     // Registrar contato não encerra o caso; encerrar é uma ação à parte.
-    $itemContato = '<li><button type="button" class="dropdown-item js-acao-alarme" data-acao="contato">Registrar contato…</button></li>';
-    $itemEmail = '<li><button type="button" class="dropdown-item js-acao-alarme" data-acao="email">Enviar e-mail</button></li>';
+    $itemContato = '<li><button type="button" class="dropdown-item js-acao-alarme" data-acao="contato">Registrar contato realizado fora do sistema…</button></li>';
+    $itemEmail = '<li><button type="button" class="dropdown-item js-acao-alarme" data-acao="email">Enviar e-mail automático</button></li>';
     $divisor = '<li><hr class="dropdown-divider"></li>';
     ?>
     <template id="tpl-menu-geral"><?= $itemContato . $itemEmail . $divisor ?><li><button type="button" class="dropdown-item js-acao-alarme" data-acao="encerrar">Encerrar caso</button></li></template>
@@ -563,7 +563,7 @@ if (!function_exists('mapaResumoContato')) {
         <div class="modal-dialog">
             <form class="modal-content" method="post" action="<?= htmlspecialchars(url('/alarmes/contato'), ENT_QUOTES, 'UTF-8') ?>">
                 <div class="modal-header">
-                    <h2 class="modal-title h5" id="modalContatoTitulo">Registrar contato</h2>
+                    <h2 class="modal-title h5" id="modalContatoTitulo">Registrar contato realizado fora do sistema</h2>
                     <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
                 </div>
                 <div class="modal-body d-flex flex-column gap-3">
@@ -629,7 +629,7 @@ if (!function_exists('mapaResumoContato')) {
                 </div>
                 <div class="modal-footer">
                     <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
-                    <button type="submit" class="btn btn-primary">Registrar contato</button>
+                    <button type="submit" class="btn btn-primary">Registrar contato realizado fora do sistema</button>
                 </div>
             </form>
         </div>
@@ -708,8 +708,8 @@ if (!function_exists('mapaResumoContato')) {
 
             if (botao.dataset.acao === 'email') {
                 const pergunta = alarme
-                    ? 'Enviar o e-mail desta disciplina ao aluno agora?'
-                    : 'Enviar o e-mail ao aluno agora?';
+                    ? 'Enviar o e-mail automático desta disciplina ao aluno agora?'
+                    : 'Enviar o e-mail automático ao aluno agora?';
                 if (!confirm(pergunta)) {
                     return;
                 }

@@ -20,6 +20,22 @@ class AnalyticsRepository
                 GROUP BY curso_id
              ) fa ON fa.curso_id = f.curso_id';
 
+    /** Dias sem ação do usuário nem e-mail automático → alarme "não tratado". */
+    public const DIAS_NAO_TRATADO = 14;
+
+    public const STATUS_ABERTOS = 'abertos';
+    public const STATUS_TRATADOS = 'tratados';
+    public const STATUS_NAO_TRATADOS = 'nao_tratados';
+    public const STATUS_TODOS = 'todos';
+
+    /** @var list<string> */
+    public const STATUS_FILTROS = [
+        self::STATUS_ABERTOS,
+        self::STATUS_TRATADOS,
+        self::STATUS_NAO_TRATADOS,
+        self::STATUS_TODOS,
+    ];
+
     /** @var PDO */
     private $db;
 
@@ -1495,13 +1511,62 @@ class AnalyticsRepository
     }
 
     /**
+     * Expressão SQL: alarme tratado (ação do usuário, e-mail automático ou legado).
+     * Contato conta se for na data do episódio (gerado_em) ou depois.
+     */
+    public function sqlAlarmeTratado(string $alias = 'al'): string
+    {
+        return '('
+            . $alias . '.visualizado = 1'
+            . ' OR ' . $alias . '.email_enviado_em IS NOT NULL'
+            . ' OR EXISTS ('
+            . ' SELECT 1 FROM contatos_aluno ct'
+            . ' WHERE ct.aluno_id = ' . $alias . '.aluno_id'
+            . ' AND ct.curso_id = ' . $alias . '.curso_id'
+            . ' AND ct.data_contato >= date(' . $alias . '.gerado_em)'
+            . '))';
+    }
+
+    /** Expressão SQL do status do caso: aberto | tratado | nao_tratado. */
+    public function sqlStatusCaso(string $alias = 'al'): string
+    {
+        $tratado = $this->sqlAlarmeTratado($alias);
+        $dias = self::DIAS_NAO_TRATADO;
+
+        return 'CASE'
+            . ' WHEN ' . $tratado . ' THEN \'tratado\''
+            . ' WHEN date(' . $alias . '.gerado_em) <= date(\'now\', \'localtime\', \'-' . $dias . ' days\')'
+            . ' THEN \'nao_tratado\''
+            . ' ELSE \'aberto\''
+            . ' END';
+    }
+
+    /**
+     * Normaliza o filtro da tela (status=…; abertos=0/1 legado).
+     */
+    public static function normalizarStatusFiltro(mixed $status, mixed $abertosLegado = null): string
+    {
+        $valor = is_string($status) ? strtolower(trim($status)) : '';
+        if (in_array($valor, self::STATUS_FILTROS, true)) {
+            return $valor;
+        }
+        if ($abertosLegado !== null) {
+            return ((string)$abertosLegado === '1' || $abertosLegado === true)
+                ? self::STATUS_ABERTOS
+                : self::STATUS_TODOS;
+        }
+
+        return self::STATUS_ABERTOS;
+    }
+
+    /**
      * @param list<int>|null $cursoIds
      * @param list<string>|null $codigosDisciplina
      * @return list<array<string, mixed>>
      */
     public function alarmes(
         int $coletaId,
-        bool $somenteNaoVisualizados = false,
+        bool|string $somenteNaoVisualizadosOuStatus = false,
         ?string $tipo = null,
         ?int $limite = null,
         ?array $cursoIds = null,
@@ -1514,6 +1579,11 @@ class AnalyticsRepository
             return [];
         }
 
+        $status = is_string($somenteNaoVisualizadosOuStatus)
+            ? self::normalizarStatusFiltro($somenteNaoVisualizadosOuStatus)
+            : ($somenteNaoVisualizadosOuStatus ? self::STATUS_ABERTOS : self::STATUS_TODOS);
+
+        $sqlStatus = $this->sqlStatusCaso('al');
         $sql = 'SELECT al.id, al.tipo, al.severidade, al.mensagem, al.codigo_disciplina,
                        al.disciplina, al.visualizado, al.visualizado_em, al.visualizado_por,
                        al.contato_tipo, al.gerado_em, al.detalhe_json,
@@ -1525,7 +1595,8 @@ class AnalyticsRepository
                        c.nome_curso,
                        g.semestre_oferta,
                        ac.ano_semestre_ingresso, ac.turma_entrada,
-                       u.nome AS visualizado_por_nome, u.username AS visualizado_por_username
+                       u.nome AS visualizado_por_nome, u.username AS visualizado_por_username,
+                       (' . $sqlStatus . ') AS status_caso
                 FROM alarmes al
                 INNER JOIN alunos a ON a.id = al.aluno_id
                 INNER JOIN cursos c ON c.id = al.curso_id
@@ -1537,9 +1608,7 @@ class AnalyticsRepository
                 LEFT JOIN usuarios u ON u.id = al.visualizado_por
                 WHERE al.coleta_id = :coleta_id';
 
-        if ($somenteNaoVisualizados) {
-            $sql .= ' AND al.visualizado = 0';
-        }
+        $sql .= $this->sqlFiltroStatusCaso('al', $status);
 
         if ($tipo !== null && $tipo !== '') {
             $sql .= ' AND al.tipo = :tipo';
