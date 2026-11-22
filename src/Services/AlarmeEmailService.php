@@ -20,7 +20,7 @@ class AlarmeEmailService
     /** Staff: no máximo 1 aviso por destinatário nesta janela. */
     public const INTERVALO_DIAS = 7;
 
-    /** Aluno: reenvia e-mail do mesmo alarme crítico após estes dias. */
+    /** Aluno: reenvia o mesmo alarme após N dias do e-mail daquele alarme. */
     public const DIAS_REENVIO_ALUNO = 14;
 
     private PDO $pdo;
@@ -69,8 +69,8 @@ class AlarmeEmailService
             return $resumo;
         }
 
-        // Reenvio por alarme: após DIAS_REENVIO_ALUNO do último e-mail daquele alarme
-        // (não exige o alarme sumir). E-mail recente no mesmo alarme bloqueia.
+        // Reenvio por alarme: após DIAS_REENVIO_ALUNO do e-mail daquele alarme
+        // (não exige sumir; não usa último aviso global ao aluno).
         foreach ($grupos as $grupo) {
             $destinatario = trim((string)($grupo['email'] ?? ''));
 
@@ -319,8 +319,8 @@ class AlarmeEmailService
         }
 
         if ($exigirCritico) {
-            // Crítico sem e-mail recente (nunca ou há mais de DIAS_REENVIO_ALUNO dias).
-            $emailRecente = $this->sqlEmailRecenteAluno('al');
+            // Crítico sem e-mail recente neste alarme (email_enviado_em).
+            $emailRecente = $this->sqlEmailRecenteDoAlarme('al');
             $check = $this->pdo->prepare(
                 'SELECT 1
                  FROM alarmes al
@@ -1311,8 +1311,8 @@ class AlarmeEmailService
      */
     private function agruparAlarmesParaEnvio(int $coletaId): array
     {
-        // Crítico sem e-mail recente (nunca ou há >= DIAS_REENVIO_ALUNO dias).
-        $emailRecente = $this->sqlEmailRecenteAluno('al');
+        // Crítico sem e-mail recente neste alarme (email_enviado_em + 14 dias).
+        $emailRecente = $this->sqlEmailRecenteDoAlarme('al');
         $statement = $this->pdo->prepare(
             'SELECT DISTINCT al.aluno_id, al.curso_id
              FROM alarmes al
@@ -1343,7 +1343,7 @@ class AlarmeEmailService
             return [];
         }
 
-        // Só inclui alarmes deste aluno que também estão sem e-mail recente.
+        // Só inclui alarmes deste aluno também sem e-mail recente.
         $statement = $this->pdo->prepare(
             'SELECT al.id, al.tipo, al.severidade, al.mensagem, al.codigo_disciplina, al.disciplina,
                     al.aluno_id, al.curso_id,
@@ -1543,10 +1543,10 @@ class AlarmeEmailService
             }
 
             if (isset($avisadosRecentes[$chave])) {
-                $motivos[$chave] = 'E-mail automático já enviado em '
+                $motivos[$chave] = 'E-mail automático já enviado neste alarme em '
                     . $this->formatarDataEnvio($avisadosRecentes[$chave])
                     . '; outro só sai após ' . $diasReenvio
-                    . ' dias do e-mail deste alarme, se ele continuar.';
+                    . ' dias desse e-mail, se o alarme continuar.';
                 continue;
             }
 
@@ -1569,14 +1569,14 @@ class AlarmeEmailService
     }
 
     /**
-     * Alunos/curso cujos alarmes críticos abertos já foram todos avisados por
-     * e-mail recente (chave "aluno|curso" => data do último envio).
+     * Alunos/curso cujos críticos abertos já foram avisados há menos de
+     * DIAS_REENVIO_ALUNO dias (chave "aluno|curso" => email_enviado_em).
      *
      * @return array<string, string>
      */
     private function criticosJaAvisados(int $coletaId): array
     {
-        $emailRecente = $this->sqlEmailRecenteAluno('alarmes');
+        $emailRecente = $this->sqlEmailRecenteDoAlarme('alarmes');
         $statement = $this->pdo->prepare(
             'SELECT aluno_id, curso_id, MAX(email_enviado_em) AS enviado,
                     SUM(CASE WHEN NOT (' . $emailRecente . ') THEN 1 ELSE 0 END) AS pendentes
@@ -1599,10 +1599,11 @@ class AlarmeEmailService
     }
 
     /**
-     * E-mail ainda “vale” para este alarme: enviado nos últimos DIAS_REENVIO_ALUNO dias.
-     * Passado esse prazo, o mesmo alarme pode gerar novo e-mail sem ter sumido.
+     * E-mail deste alarme ainda recente: email_enviado_em nos últimos
+     * DIAS_REENVIO_ALUNO dias. Não usa aviso global ao aluno; o alarme
+     * não precisa sumir para reenviar depois do prazo.
      */
-    private function sqlEmailRecenteAluno(string $alias = 'al'): string
+    private function sqlEmailRecenteDoAlarme(string $alias = 'al'): string
     {
         $dias = (int)self::DIAS_REENVIO_ALUNO;
 
@@ -1779,7 +1780,8 @@ class AlarmeEmailService
 
     /**
      * Marca os alarmes que o e-mail incluiu. Não encerra o caso: o alarme segue
-     * aberto (a equipe acompanha); novo e-mail só após DIAS_REENVIO_ALUNO dias.
+     * aberto (a equipe acompanha); novo e-mail após DIAS_REENVIO_ALUNO dias
+     * do e-mail daquele alarme, se continuar.
      *
      * @param list<int> $alarmeIds
      */

@@ -89,11 +89,11 @@ $alarmesDiaStaffRotulo = $rotuloDia($alarmesDiaStaff);
         <strong><?= htmlspecialchars($alarmesDiaStaffRotulo, ENT_QUOTES, 'UTF-8') ?></strong>,
         fuso <code>America/Sao_Paulo</code>
         (<code>EMAIL_ALARMES_DIA_STAFF</code>).
-        E-mails aos alunos: um por alarme crítico; se o alarme continuar, novo e-mail após 14 dias.
+        E-mails aos alunos: um por alarme crítico; se continuar, novo e-mail após 14 dias do e-mail daquele alarme.
     </div>
 <?php else: ?>
     <div class="alert alert-info">
-        E-mails aos alunos: um por alarme crítico; se o alarme continuar, novo e-mail após 14 dias.
+        E-mails aos alunos: um por alarme crítico; se continuar, novo e-mail após 14 dias do e-mail daquele alarme.
     </div>
 <?php endif; ?>
 
@@ -129,7 +129,7 @@ $alarmesDiaStaffRotulo = $rotuloDia($alarmesDiaStaff);
                            <?= $alarmesAlunosEnabled ? 'checked' : '' ?>>
                     <label class="form-check-label" for="email_alarmes_alunos_enabled">
                         Enviar e-mails de alarmes críticos aos alunos
-                        (reenvio após 14 dias se o mesmo alarme crítico continuar)
+                        (reenvio após 14 dias do e-mail daquele alarme, se continuar)
                     </label>
                 </div>
             </div>

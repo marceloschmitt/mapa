@@ -161,7 +161,7 @@ verificar('não entra de novo no envio (e-mail recente)', [], privado($servico, 
 verificar('a tela explica que o e-mail já foi enviado', ['1|1'],
     array_keys(privado($servico, 'criticosJaAvisados', [1])));
 
-echo "== E-mail há mais de 14 dias permite reenvio do mesmo alarme\n";
+echo "== E-mail há mais de 14 dias neste alarme permite reenvio\n";
 $pdo->exec("DELETE FROM alarmes WHERE aluno_id = 1");
 $pdo->exec("INSERT INTO alarmes (id, coleta_id, aluno_id, curso_id, codigo_disciplina, tipo, severidade, mensagem,
                                  gerado_em, email_enviado_em) VALUES
