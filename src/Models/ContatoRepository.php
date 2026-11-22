@@ -7,8 +7,9 @@ use Mapa\Core\Database;
 use PDO;
 
 /**
- * Contatos com o aluno (contatos_aluno): registrados na tela de alarmes ou
- * pelo e-mail automatico. Registrar um contato nao encerra o caso.
+ * Contatos/ações com o aluno (contatos_aluno): e-mail automático, e-mail pelo
+ * botão, WhatsApp etc. Os alarmes cobertos ficam em contato_alarmes.
+ * Registrar um contato nao encerra o caso.
  */
 class ContatoRepository
 {
@@ -116,7 +117,8 @@ class ContatoRepository
      *   aluno_id: int, curso_id: int, data_contato: string, canal: string,
      *   origem?: string, conseguiu_falar?: int|null, motivo?: string|null,
      *   observacao?: string|null, codigo_disciplina?: string|null,
-     *   registrado_por?: int|null, alarme_email_id?: int|null
+     *   registrado_por?: int|null, alarme_email_id?: int|null,
+     *   coleta_id?: int|null, alarme_ids?: list<int>
      * } $contato
      */
     public function registrar(array $contato): int
@@ -126,19 +128,22 @@ class ContatoRepository
         $statement = $this->db->prepare(
             'INSERT INTO contatos_aluno (
                 aluno_id, curso_id, data_contato, canal, origem, conseguiu_falar, motivo,
-                observacao, codigo_disciplina, registrado_por, alarme_email_id
+                observacao, codigo_disciplina, coleta_id, registrado_por, alarme_email_id
              ) VALUES (
                 :aluno_id, :curso_id, :data_contato, :canal, :origem, :conseguiu_falar, :motivo,
-                :observacao, :codigo_disciplina, :registrado_por, :alarme_email_id
+                :observacao, :codigo_disciplina, :coleta_id, :registrado_por, :alarme_email_id
              )
              ON CONFLICT(alarme_email_id) DO UPDATE SET
                 canal = excluded.canal,
                 origem = excluded.origem,
                 data_contato = excluded.data_contato,
+                coleta_id = COALESCE(excluded.coleta_id, contatos_aluno.coleta_id),
                 registrado_por = COALESCE(excluded.registrado_por, contatos_aluno.registrado_por)
              WHERE excluded.origem = \'manual\''
         );
         $registradoPor = $contato['registrado_por'] ?? null;
+        $coletaId = isset($contato['coleta_id']) ? (int)$contato['coleta_id'] : 0;
+        $alarmeEmailId = $contato['alarme_email_id'] ?? null;
         $statement->execute([
             'aluno_id' => (int)$contato['aluno_id'],
             'curso_id' => (int)$contato['curso_id'],
@@ -149,11 +154,118 @@ class ContatoRepository
             'motivo' => $contato['motivo'] ?? null,
             'observacao' => $contato['observacao'] ?? null,
             'codigo_disciplina' => ($contato['codigo_disciplina'] ?? '') !== '' ? $contato['codigo_disciplina'] : null,
+            'coleta_id' => $coletaId > 0 ? $coletaId : null,
             'registrado_por' => $registradoPor !== null && $registradoPor > 0 ? $registradoPor : null,
-            'alarme_email_id' => $contato['alarme_email_id'] ?? null,
+            'alarme_email_id' => $alarmeEmailId,
         ]);
 
-        return $statement->rowCount() > 0 ? (int)$this->db->lastInsertId() : 0;
+        $alterouContato = $statement->rowCount() > 0;
+        $contatoId = $alterouContato ? (int)$this->db->lastInsertId() : 0;
+        // UPDATE por conflito: lastInsertId pode ser 0 — resolve pelo e-mail.
+        if ($contatoId <= 0 && $alarmeEmailId !== null && (int)$alarmeEmailId > 0) {
+            $busca = $this->db->prepare(
+                'SELECT id FROM contatos_aluno WHERE alarme_email_id = :id LIMIT 1'
+            );
+            $busca->execute(['id' => (int)$alarmeEmailId]);
+            $contatoId = (int)($busca->fetchColumn() ?: 0);
+        }
+
+        $alarmeIds = array_values(array_unique(array_filter(
+            array_map('intval', $contato['alarme_ids'] ?? []),
+            static fn(int $id): bool => $id > 0
+        )));
+        if ($contatoId > 0 && $alarmeIds !== []) {
+            $this->sincronizarAlarmesDoContato($contatoId, $alarmeIds);
+        }
+
+        // 0 = nenhum contato novo/alterado (ex.: reenvio automático do mesmo e-mail).
+        return $alterouContato ? $contatoId : 0;
+    }
+
+    /**
+     * IDs de alarmes da coleta para o aluno/curso (opcionalmente uma disciplina).
+     *
+     * @return list<int>
+     */
+    public function idsAlarmesDaColeta(
+        int $coletaId,
+        int $alunoId,
+        int $cursoId,
+        ?string $codigoDisciplina = null
+    ): array {
+        if ($coletaId <= 0 || $alunoId <= 0 || $cursoId <= 0) {
+            return [];
+        }
+
+        $sql = 'SELECT id FROM alarmes
+                WHERE coleta_id = :coleta_id
+                  AND aluno_id = :aluno_id
+                  AND curso_id = :curso_id';
+        $params = [
+            'coleta_id' => $coletaId,
+            'aluno_id' => $alunoId,
+            'curso_id' => $cursoId,
+        ];
+        $codigo = trim((string)($codigoDisciplina ?? ''));
+        if ($codigo !== '') {
+            $sql .= ' AND codigo_disciplina = :codigo';
+            $params['codigo'] = $codigo;
+        }
+        $statement = $this->db->prepare($sql);
+        $statement->execute($params);
+
+        return array_map('intval', $statement->fetchAll(PDO::FETCH_COLUMN));
+    }
+
+    /** @param list<int> $alarmeIds */
+    private function sincronizarAlarmesDoContato(int $contatoId, array $alarmeIds): void
+    {
+        $insert = $this->db->prepare(
+            'INSERT OR IGNORE INTO contato_alarmes (contato_id, alarme_id)
+             VALUES (:contato_id, :alarme_id)'
+        );
+        foreach ($alarmeIds as $alarmeId) {
+            $insert->execute([
+                'contato_id' => $contatoId,
+                'alarme_id' => $alarmeId,
+            ]);
+        }
+    }
+
+    /**
+     * Datas de e-mail (automático ou pelo botão) por aluno/curso, ordem cronológica.
+     *
+     * @param list<int> $alunoIds
+     * @return array<string, list<array{data_contato: string, canal: string}>>
+     */
+    public function enviosEmailPorAluno(array $alunoIds): array
+    {
+        $alunoIds = array_values(array_unique(array_map('intval', $alunoIds)));
+        if ($alunoIds === []) {
+            return [];
+        }
+
+        $saida = [];
+        foreach (array_chunk($alunoIds, 500) as $lote) {
+            $placeholders = implode(', ', array_fill(0, count($lote), '?'));
+            $statement = $this->db->prepare(
+                'SELECT aluno_id, curso_id, data_contato, canal
+                 FROM contatos_aluno
+                 WHERE aluno_id IN (' . $placeholders . ')
+                   AND canal IN (\'email\', \'email_automatico\')
+                 ORDER BY data_contato, id'
+            );
+            $statement->execute($lote);
+            foreach ($statement->fetchAll() as $row) {
+                $chave = (int)$row['aluno_id'] . '|' . (int)$row['curso_id'];
+                $saida[$chave][] = [
+                    'data_contato' => (string)$row['data_contato'],
+                    'canal' => (string)$row['canal'],
+                ];
+            }
+        }
+
+        return $saida;
     }
 
     /**

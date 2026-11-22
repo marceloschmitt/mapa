@@ -110,6 +110,19 @@ class Database
         self::ensureColumn('efeito_contatos_execucoes', 'intervalo_segundo', 'INTEGER NOT NULL DEFAULT 7');
         self::ensureColumn('efeito_contatos_execucoes', 'intervalo_equipe', 'INTEGER NOT NULL DEFAULT 3');
         self::ensureColumn('efeito_contatos_series', 'falou', 'INTEGER');
+        self::ensureColumn('contatos_aluno', 'coleta_id', 'INTEGER');
+        self::$connection->exec(
+            'CREATE TABLE IF NOT EXISTS contato_alarmes (
+                contato_id INTEGER NOT NULL,
+                alarme_id INTEGER NOT NULL,
+                PRIMARY KEY (contato_id, alarme_id),
+                FOREIGN KEY (contato_id) REFERENCES contatos_aluno(id) ON DELETE CASCADE
+             )'
+        );
+        self::$connection->exec(
+            'CREATE INDEX IF NOT EXISTS idx_contato_alarmes_alarme
+             ON contato_alarmes(alarme_id)'
+        );
         self::$connection->exec(
             'CREATE INDEX IF NOT EXISTS idx_frequencia_disciplina_turma
              ON frequencia_disciplina(coleta_id, id_turma)'
@@ -132,6 +145,41 @@ class Database
         self::ensureColumn('alarmes', 'email_enviado_em', 'TEXT');
         self::ensureColumn('alarmes', 'fechamento', 'TEXT');
         self::migrarContatosAluno();
+        self::migrarContatoAlarmesDeEmails();
+        self::migrarAlarmesSemVisualizado();
+    }
+
+    /**
+     * Tratado deixa de depender de visualizado/encerrar.
+     * O fechamento usual era o e-mail automático (visualizado=1 + contato_tipo
+     * email*): copia isso para email_enviado_em. Encerrar manual sem e-mail/contato
+     * deixa de contar como tratado (a coluna visualizado é ignorada na tela).
+     */
+    private static function migrarAlarmesSemVisualizado(): void
+    {
+        $chave = 'alarmes_sem_visualizado';
+        $feito = self::$connection->prepare('SELECT 1 FROM configuracoes WHERE chave = :chave');
+        $feito->execute(['chave' => $chave]);
+        if ($feito->fetchColumn() !== false) {
+            return;
+        }
+
+        // Pode tocar muitas linhas (historico de coletas); so preenche e-mail faltante.
+        self::$connection->exec(
+            "UPDATE alarmes
+             SET email_enviado_em = COALESCE(email_enviado_em, visualizado_em)
+             WHERE email_enviado_em IS NULL
+               AND contato_tipo IN ('email_automatico', 'email')
+               AND visualizado_em IS NOT NULL"
+        );
+
+        $ins = self::$connection->prepare(
+            'INSERT INTO configuracoes (chave, valor, descricao) VALUES (:chave, \'1\', :descricao)'
+        );
+        $ins->execute([
+            'chave' => $chave,
+            'descricao' => 'Alarmes: tratado por e-mail/contato; visualizado/encerrar ignorados',
+        ]);
     }
 
     /**
@@ -174,6 +222,62 @@ class Database
             'INSERT INTO configuracoes (chave, valor, descricao) VALUES (:chave, \'1\', :descricao)'
         );
         $marca->execute(['chave' => $chave, 'descricao' => 'Contatos antigos copiados para contatos_aluno']);
+    }
+
+    /**
+     * Expande alarme_emails.alarme_ids em contato_alarmes para contatos já
+     * ligados por alarme_email_id (e preenche coleta_id quando vazio).
+     */
+    private static function migrarContatoAlarmesDeEmails(): void
+    {
+        $chave = 'contato_alarmes_de_emails_migrado';
+        $feito = self::$connection->prepare('SELECT 1 FROM configuracoes WHERE chave = :chave');
+        $feito->execute(['chave' => $chave]);
+        if ($feito->fetchColumn() !== false) {
+            return;
+        }
+
+        self::$connection->exec(
+            'UPDATE contatos_aluno
+             SET coleta_id = (
+                    SELECT ae.coleta_id FROM alarme_emails ae
+                    WHERE ae.id = contatos_aluno.alarme_email_id
+                 )
+             WHERE alarme_email_id IS NOT NULL
+               AND (coleta_id IS NULL OR coleta_id = 0)'
+        );
+
+        $linhas = self::$connection->query(
+            'SELECT c.id AS contato_id, ae.alarme_ids
+             FROM contatos_aluno c
+             INNER JOIN alarme_emails ae ON ae.id = c.alarme_email_id
+             WHERE ae.alarme_ids IS NOT NULL AND TRIM(ae.alarme_ids) <> \'\''
+        );
+        $insert = self::$connection->prepare(
+            'INSERT OR IGNORE INTO contato_alarmes (contato_id, alarme_id)
+             VALUES (:contato_id, :alarme_id)'
+        );
+        foreach ($linhas as $row) {
+            $contatoId = (int)$row['contato_id'];
+            foreach (preg_split('/\s*,\s*/', trim((string)$row['alarme_ids'])) as $idRaw) {
+                $alarmeId = (int)$idRaw;
+                if ($alarmeId <= 0) {
+                    continue;
+                }
+                $insert->execute([
+                    'contato_id' => $contatoId,
+                    'alarme_id' => $alarmeId,
+                ]);
+            }
+        }
+
+        $marca = self::$connection->prepare(
+            'INSERT INTO configuracoes (chave, valor, descricao) VALUES (:chave, \'1\', :descricao)'
+        );
+        $marca->execute([
+            'chave' => $chave,
+            'descricao' => 'alarme_ids de e-mails copiados para contato_alarmes',
+        ]);
     }
 
     /**

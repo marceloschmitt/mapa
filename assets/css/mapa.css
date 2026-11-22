@@ -232,6 +232,27 @@ a.indicador-card:hover {
 .alarme-card-nao-tratado {
     background: #fdecec;
 }
+.alarme-card-resolvido {
+    background: #e8f4f8;
+}
+.alarme-card-parcial {
+    background: #f7f0e4;
+}
+.tabela-alarmes tr.alarme-linha-aberto > td {
+    background: #fff6e8;
+}
+.tabela-alarmes tr.alarme-linha-tratado > td {
+    background: #eaf5ea;
+}
+.tabela-alarmes tr.alarme-linha-nao-tratado > td {
+    background: #fdecec;
+}
+.tabela-alarmes tr.alarme-linha-resolvido > td {
+    background: #e8f4f8;
+}
+.tabela-alarmes tr.alarme-linha-parcial > td {
+    background: #f7f0e4;
+}
 .alarme-badge-aberto {
     background: #ffe2b8;
     color: #7a3d06;
@@ -243,6 +264,173 @@ a.indicador-card:hover {
 .alarme-badge-nao-tratado {
     background: #f5c6c6;
     color: #7a1f1f;
+}
+.alarme-badge-resolvido {
+    background: #c5e4ef;
+    color: #0f4c5c;
+}
+.alarme-badge-parcial {
+    background: #f0d9b5;
+    color: #6b4508;
+}
+/* Filtros de status — grupos lado a lado + botão ativo bem marcado */
+.alarme-filtros-grupos {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+}
+.alarme-filtro-grupo {
+    flex: 1 1 18rem;
+    min-width: 0;
+    padding: 0.75rem 0.85rem;
+    border: 1px solid #d7dce3;
+    border-radius: 0.75rem;
+    background: #f8f9fb;
+    box-shadow: 0 1px 2px rgba(16, 24, 40, 0.04);
+}
+.alarme-filtro-grupo-ativo {
+    background: #fff;
+    border-color: #9aa7b8;
+    box-shadow: 0 2px 8px rgba(16, 24, 40, 0.08);
+}
+.alarme-filtro-grupo-titulo {
+    margin-bottom: 0.55rem;
+    font-size: 0.72rem;
+    font-weight: 700;
+    letter-spacing: 0.04em;
+    text-transform: uppercase;
+    color: #4b5563;
+}
+.alarme-filtro-botoes {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.4rem;
+}
+.btn-alarme-status {
+    border-width: 1.5px;
+    border-style: solid;
+    border-radius: 999px;
+    padding: 0.35rem 0.85rem;
+    font-size: 0.84rem;
+    font-weight: 600;
+    line-height: 1.2;
+    box-shadow: none;
+    transition: background-color 0.12s ease, border-color 0.12s ease, box-shadow 0.12s ease, transform 0.12s ease;
+}
+.btn-alarme-status:hover {
+    transform: translateY(-1px);
+}
+.btn-alarme-status.ativo {
+    font-weight: 700;
+    box-shadow: 0 0 0 3px rgba(15, 23, 42, 0.12);
+    transform: none;
+}
+.btn-alarme-status-aberto {
+    background: #fff;
+    border-color: #e2b87a;
+    color: #7a3d06;
+}
+.btn-alarme-status-aberto:hover {
+    background: #fff6e8;
+    border-color: #c98a3a;
+    color: #7a3d06;
+}
+.btn-alarme-status-aberto.ativo {
+    background: #ffe2b8;
+    border-color: #b06a18;
+    color: #5c2e04;
+    box-shadow: 0 0 0 3px rgba(201, 138, 58, 0.35);
+}
+.btn-alarme-status-tratado {
+    background: #fff;
+    border-color: #9cc89c;
+    color: #1e5a28;
+}
+.btn-alarme-status-tratado:hover {
+    background: #eaf5ea;
+    border-color: #6fa86f;
+    color: #1e5a28;
+}
+.btn-alarme-status-tratado.ativo {
+    background: #cfe9cf;
+    border-color: #2f7a3a;
+    color: #14401c;
+    box-shadow: 0 0 0 3px rgba(111, 168, 111, 0.4);
+}
+.btn-alarme-status-nao-tratado {
+    background: #fff;
+    border-color: #e0a0a0;
+    color: #7a1f1f;
+}
+.btn-alarme-status-nao-tratado:hover {
+    background: #fdecec;
+    border-color: #c97a7a;
+    color: #7a1f1f;
+}
+.btn-alarme-status-nao-tratado.ativo {
+    background: #f5c6c6;
+    border-color: #a33a3a;
+    color: #5c1212;
+    box-shadow: 0 0 0 3px rgba(201, 122, 122, 0.4);
+}
+.btn-alarme-status-todos {
+    background: #fff;
+    border-color: #c5c9d0;
+    color: #374151;
+}
+.btn-alarme-status-todos:hover {
+    background: #f3f4f6;
+    border-color: #9ca3af;
+    color: #111827;
+}
+.btn-alarme-status-todos.ativo {
+    background: #e5e7eb;
+    border-color: #4b5563;
+    color: #111827;
+    box-shadow: 0 0 0 3px rgba(107, 114, 128, 0.35);
+}
+.btn-alarme-status-resolvido {
+    background: #fff;
+    border-color: #8ebfd0;
+    color: #0f4c5c;
+}
+.btn-alarme-status-resolvido:hover {
+    background: #e8f4f8;
+    border-color: #5a9db0;
+    color: #0f4c5c;
+}
+.btn-alarme-status-resolvido.ativo {
+    background: #c5e4ef;
+    border-color: #0f4c5c;
+    color: #08323d;
+    box-shadow: 0 0 0 3px rgba(90, 157, 176, 0.4);
+}
+.btn-alarme-status-parcial {
+    background: #fff;
+    border-color: #d4b88a;
+    color: #6b4508;
+}
+.btn-alarme-status-parcial:hover {
+    background: #f7f0e4;
+    border-color: #c49a5a;
+    color: #6b4508;
+}
+.btn-alarme-status-parcial.ativo {
+    background: #f0d9b5;
+    border-color: #8a5a12;
+    color: #4a2f05;
+    box-shadow: 0 0 0 3px rgba(196, 154, 90, 0.4);
+}
+.alarme-relatorio-resumo {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.75rem 1.5rem;
+    padding: 0.65rem 0.85rem;
+    border: 1px solid #d7dce3;
+    border-radius: 0.65rem;
+    background: #fff;
+    color: #1f2937;
+    font-size: 0.95rem;
 }
 
 /* Eficácia dos alarmes */

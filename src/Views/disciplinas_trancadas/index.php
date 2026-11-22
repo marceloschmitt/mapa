@@ -13,6 +13,7 @@ $semSeletorCurso = !empty($semSeletorCurso);
 $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
 $cursosDisponiveis = $cursosDisponiveis ?? [];
 $mostrarBadgeCurso = $semSeletorCurso;
+$dadosFrequenciaCorrente = $dadosFrequenciaCorrente ?? [];
 ?>
 
 <div class="d-flex flex-wrap justify-content-between align-items-start gap-3 mb-4">
@@ -307,13 +308,24 @@ $mostrarBadgeCurso = $semSeletorCurso;
             $disciplinas = $grupo['disciplinas'] ?? [];
             $nDisc = count($disciplinas);
             $todasTrancadas = !empty($grupo['todas_trancadas']);
+            $chaveFreqAluno = (int)$aluno['id'] . '-' . (int)$aluno['curso_id'];
+            $temFreqCorrente = isset($dadosFrequenciaCorrente[$chaveFreqAluno]);
             ?>
             <article class="card border-0 shadow-sm<?= $todasTrancadas ? ' border-start border-4 border-danger' : '' ?>">
                 <div class="card-header <?= $todasTrancadas ? 'bg-danger-subtle' : 'bg-white' ?> border-0 pb-0 pt-3 px-3">
                     <div class="d-flex justify-content-between align-items-start gap-2">
                         <div>
                             <div class="fw-semibold fs-6">
-                                <?= htmlspecialchars($nomeExibido, ENT_QUOTES, 'UTF-8') ?>
+                                <?php if ($temFreqCorrente): ?>
+                                    <button type="button"
+                                            class="btn btn-link p-0 align-baseline fw-semibold text-decoration-underline js-abrir-frequencia-corrente"
+                                            data-id="<?= htmlspecialchars($chaveFreqAluno, ENT_QUOTES, 'UTF-8') ?>"
+                                            title="Ver frequência corrente">
+                                        <?= htmlspecialchars($nomeExibido, ENT_QUOTES, 'UTF-8') ?>
+                                    </button>
+                                <?php else: ?>
+                                    <?= htmlspecialchars($nomeExibido, ENT_QUOTES, 'UTF-8') ?>
+                                <?php endif; ?>
                                 <?php if ($emailAluno !== ''): ?>
                                     <span class="fw-normal text-secondary">
                                         · <?= htmlspecialchars($emailAluno, ENT_QUOTES, 'UTF-8') ?>
@@ -379,4 +391,170 @@ $mostrarBadgeCurso = $semSeletorCurso;
             </article>
         <?php endforeach; ?>
     </div>
+
+    <script type="application/json" id="dadosFrequenciaCorrenteTrancadas"><?= json_encode(
+        (object)$dadosFrequenciaCorrente,
+        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP
+    ) ?></script>
+
+    <div class="modal fade" id="modalFrequenciaCorrenteTrancadas" tabindex="-1"
+         aria-labelledby="modalFrequenciaCorrenteTrancadasTitulo" aria-hidden="true">
+        <div class="modal-dialog modal-xl modal-dialog-scrollable">
+            <div class="modal-content border-0 shadow">
+                <div class="modal-header py-2 px-3 bg-primary text-white">
+                    <h2 class="modal-title h6 mb-0" id="modalFrequenciaCorrenteTrancadasTitulo">Frequência por disciplina</h2>
+                    <button type="button" class="btn-close btn-close-white" data-bs-dismiss="modal"
+                            aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body p-3 p-md-4 bg-light">
+                    <div class="atestado-passe-livre mx-auto bg-white border shadow-sm p-4 p-md-5">
+                        <p class="small text-justify mb-4" id="modalFrequenciaCorrenteTrancadasTexto"></p>
+                        <div class="table-responsive mb-3">
+                            <table class="table table-sm table-bordered align-middle mb-0 small atestado-tabela">
+                                <thead class="table-light">
+                                    <tr>
+                                        <th>Semestre</th>
+                                        <th>Código</th>
+                                        <th>Disciplina</th>
+                                        <th class="text-end">Frequência*</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="modalFrequenciaCorrenteTrancadasDisciplinas"></tbody>
+                            </table>
+                        </div>
+                        <p class="small text-secondary mb-0">
+                            * A frequência é o percentual de presença em relação ao número de aulas ministradas.
+                        </p>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Fechar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <style>
+        .js-abrir-frequencia-corrente {
+            color: inherit;
+            text-underline-offset: 0.15em;
+        }
+        .js-abrir-frequencia-corrente:hover,
+        .js-abrir-frequencia-corrente:focus {
+            color: #2c5282;
+        }
+        .atestado-passe-livre {
+            max-width: 820px;
+            color: #111;
+            line-height: 1.45;
+        }
+        .atestado-tabela th,
+        .atestado-tabela td {
+            vertical-align: middle;
+        }
+    </style>
+    <script>
+    window.addEventListener('load', function () {
+        const modalFreqEl = document.getElementById('modalFrequenciaCorrenteTrancadas');
+        const dadosFreqEl = document.getElementById('dadosFrequenciaCorrenteTrancadas');
+        if (!modalFreqEl || !dadosFreqEl || typeof bootstrap === 'undefined') {
+            return;
+        }
+        const textoFreq = document.getElementById('modalFrequenciaCorrenteTrancadasTexto');
+        const tbodyFreq = document.getElementById('modalFrequenciaCorrenteTrancadasDisciplinas');
+        let dadosFreq = {};
+        try {
+            dadosFreq = JSON.parse(dadosFreqEl.textContent || '{}');
+        } catch (e) {
+            dadosFreq = {};
+        }
+
+        function fmtPctFreq(valor) {
+            if (valor === null || valor === undefined || valor === '' || Number.isNaN(Number(valor))) {
+                return '—';
+            }
+            return Number(valor).toLocaleString('pt-BR', {
+                minimumFractionDigits: 1,
+                maximumFractionDigits: 1
+            }) + '%';
+        }
+
+        function escapeHtmlFreq(texto) {
+            return String(texto)
+                .replace(/&/g, '&amp;')
+                .replace(/</g, '&lt;')
+                .replace(/>/g, '&gt;')
+                .replace(/"/g, '&quot;')
+                .replace(/'/g, '&#039;');
+        }
+
+        function fmtFreqDiscHtml(d) {
+            const sit = String((d && d.situacao) || '').trim();
+            if (sit !== '') {
+                const data = String((d && d.data_trancamento) || '').trim();
+                if (data !== '') {
+                    return escapeHtmlFreq(sit) + '<br>' + escapeHtmlFreq(data);
+                }
+                return escapeHtmlFreq(sit);
+            }
+            return escapeHtmlFreq(fmtPctFreq(d && d.frequencia));
+        }
+
+        function valorOu(traco, valor) {
+            const limpo = String(valor || '').trim();
+            return limpo !== '' ? limpo : traco;
+        }
+
+        function abrirFrequenciaCorrente(dados) {
+            const nome = valorOu('---', dados.nome);
+            const matricula = valorOu('---', dados.matricula);
+            const ingresso = valorOu('---', dados.ingresso);
+            const curso = valorOu('---', dados.curso);
+            const periodo = valorOu('---', dados.periodo);
+            const anualDesde = String(dados.anual_desde || '').trim();
+            const rotuloPeriodo = anualDesde !== '' ? 'Ano letivo' : periodo;
+
+            textoFreq.textContent =
+                'Frequência do(a) aluno(a) '
+                + nome
+                + ', matrícula nº '
+                + matricula
+                + ', com ingresso em '
+                + ingresso
+                + ', no curso '
+                + curso
+                + (anualDesde !== ''
+                    ? ', no ano letivo, desde ' + anualDesde
+                    : ', no semestre letivo ' + periodo)
+                + ':';
+
+            tbodyFreq.innerHTML = '';
+            const discs = Array.isArray(dados.disciplinas) ? dados.disciplinas : [];
+            discs.forEach(function (d) {
+                const tr = document.createElement('tr');
+                tr.innerHTML =
+                    '<td>' + escapeHtmlFreq(rotuloPeriodo) + '</td>' +
+                    '<td>' + (d.codigo
+                        ? '<code>' + escapeHtmlFreq(d.codigo) + '</code>'
+                        : '<span class="text-secondary">—</span>') + '</td>' +
+                    '<td>' + escapeHtmlFreq(d.nome || '') + '</td>' +
+                    '<td class="text-end">' + fmtFreqDiscHtml(d) + '</td>';
+                tbodyFreq.appendChild(tr);
+            });
+
+            bootstrap.Modal.getOrCreateInstance(modalFreqEl).show();
+        }
+
+        document.addEventListener('click', function (evento) {
+            const botao = evento.target.closest('.js-abrir-frequencia-corrente');
+            if (!botao) {
+                return;
+            }
+            const dados = dadosFreq[botao.dataset.id];
+            if (dados) {
+                abrirFrequenciaCorrente(dados);
+            }
+        });
+    });
+    </script>
 <?php endif; ?>

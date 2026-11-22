@@ -410,12 +410,12 @@ CREATE INDEX IF NOT EXISTS idx_alarme_emails_coleta
 CREATE INDEX IF NOT EXISTS idx_alarme_emails_aluno_enviado
     ON alarme_emails(aluno_id, enviado_em);
 
--- Contatos com o aluno: registro permanente, fora da limpeza de coletas (alarme_emails
--- some em cascata com a coleta). origem: manual (tela de alarmes), automatico (e-mail do
--- MAPA) ou migrado (registrado antes desta tabela). data_contato = dia em que o contato
--- aconteceu, nao o do registro. conseguiu_falar: 1 sim, 0 nao, NULL nao se aplica (e-mail).
--- codigo_disciplina: disciplina de onde o contato partiu, se houver.
--- alarme_email_id: envio de origem de um contato automatico (sem FK: sobrevive a ele).
+-- Contatos/ações com o aluno: registro permanente, fora da limpeza de coletas
+-- (alarme_emails some em cascata com a coleta). Tipos (canal): email_automatico,
+-- email (botão ou registrado), whatsapp, telefone, presencial, assistencia.
+-- origem: manual, automatico ou migrado. data_contato = dia do contato.
+-- coleta_id: coleta no momento da ação. alarme_email_id: log de envio, se houver.
+-- Os alarmes cobertos pela ação ficam em contato_alarmes.
 CREATE TABLE IF NOT EXISTS contatos_aluno (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     aluno_id INTEGER NOT NULL,
@@ -427,6 +427,7 @@ CREATE TABLE IF NOT EXISTS contatos_aluno (
     motivo TEXT,
     observacao TEXT,
     codigo_disciplina TEXT,
+    coleta_id INTEGER,
     registrado_em TEXT NOT NULL DEFAULT (datetime('now', 'localtime')),
     registrado_por INTEGER,
     alarme_email_id INTEGER UNIQUE,
@@ -437,6 +438,18 @@ CREATE TABLE IF NOT EXISTS contatos_aluno (
 
 CREATE INDEX IF NOT EXISTS idx_contatos_aluno_aluno
     ON contatos_aluno(aluno_id, curso_id, data_contato);
+
+-- Alarmes cobertos por um contato/ação (snapshot histórico; alarme_id sem FK
+-- porque alarmes podem sumir com a coleta).
+CREATE TABLE IF NOT EXISTS contato_alarmes (
+    contato_id INTEGER NOT NULL,
+    alarme_id INTEGER NOT NULL,
+    PRIMARY KEY (contato_id, alarme_id),
+    FOREIGN KEY (contato_id) REFERENCES contatos_aluno(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_contato_alarmes_alarme
+    ON contato_alarmes(alarme_id);
 
 -- Historico de e-mails de aviso ao staff (max. 1 por destinatario a cada 7 dias).
 CREATE TABLE IF NOT EXISTS staff_alarme_emails (

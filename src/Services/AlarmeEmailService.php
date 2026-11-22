@@ -65,17 +65,10 @@ class AlarmeEmailService
             return $resumo;
         }
 
-        $recentes = $this->enviosRecentes();
-
+        // Sem janela global de 7 dias: o bloqueio é por episódio (email_enviado_em
+        // na data do gerado_em ou depois). E-mail antigo de outro alarme não impede.
         foreach ($grupos as $grupo) {
             $destinatario = trim((string)($grupo['email'] ?? ''));
-            $alunoId = (int)($grupo['aluno_id'] ?? 0);
-            $emailNorm = strtolower($destinatario);
-
-            if (isset($recentes['alunos'][$alunoId]) || ($emailNorm !== '' && isset($recentes['emails'][$emailNorm]))) {
-                $resumo['ignorados']++;
-                continue;
-            }
 
             if ($destinatario === '' || !filter_var($destinatario, FILTER_VALIDATE_EMAIL)) {
                 $resumo['ignorados']++;
@@ -98,8 +91,6 @@ class AlarmeEmailService
                 );
                 $this->registrarEnvio($coletaId, $grupo, $destinatario);
                 $this->marcarAlarmesEnviados($grupo['alarme_ids']);
-                $recentes['alunos'][$alunoId] = true;
-                $recentes['emails'][$emailNorm] = true;
                 $resumo['enviados']++;
             } catch (Throwable $e) {
                 $resumo['falhas']++;
@@ -206,7 +197,7 @@ class AlarmeEmailService
 
     /**
      * Envio manual (professor/coordenador): mesma mensagem do automático,
-     * ignora janela de 7 dias e o interruptor de alarmes aos alunos.
+     * ignora o interruptor de alarmes aos alunos (envio forçado na tela).
      * Registra o contato e marca os alarmes como avisados (sem encerrá-los).
      *
      * @param string|null $codigoDisciplina Se informado, limita aos alarmes dessa disciplina.
@@ -1315,14 +1306,15 @@ class AlarmeEmailService
      */
     private function agruparAlarmesParaEnvio(int $coletaId): array
     {
-        // Dispara com alarme crítico aberto ainda não avisado; o e-mail lista todos os abertos.
+        // Crítico sem e-mail neste episódio (e-mail antigo, antes do gerado_em, não conta).
+        $emailEpisodio = $this->sqlEmailNoEpisodio('al');
         $statement = $this->pdo->prepare(
             'SELECT DISTINCT al.aluno_id, al.curso_id
              FROM alarmes al
              WHERE al.coleta_id = :coleta_id
                AND al.severidade = \'critico\'
                AND al.visualizado = 0
-               AND al.email_enviado_em IS NULL
+               AND NOT (' . $emailEpisodio . ')
                AND NOT EXISTS (
                    SELECT 1
                    FROM alunos_trancados at
@@ -1510,7 +1502,6 @@ class AlarmeEmailService
             return [];
         }
 
-        $dias = (int)self::INTERVALO_DIAS;
         $motivos = [];
 
         if (!$this->config->permiteEnvioEmail()) {
@@ -1532,13 +1523,10 @@ class AlarmeEmailService
 
         $trancados = $this->mapaTrancadosColeta($coletaId);
         $enviosColeta = $this->enviosNestaColeta($coletaId);
-        $recentes = $this->enviosRecentesDetalhados();
         $avisadosNoEpisodio = $this->criticosJaAvisados($coletaId);
 
         foreach ($candidatos as $c) {
             $chave = $this->chaveAlunoCurso($c);
-            $alunoId = (int)($c['aluno_id'] ?? 0);
-            $cursoId = (int)($c['curso_id'] ?? 0);
             $email = strtolower(trim((string)($c['email'] ?? '')));
 
             if (isset($trancados[$chave])) {
@@ -1547,9 +1535,9 @@ class AlarmeEmailService
             }
 
             if (isset($avisadosNoEpisodio[$chave])) {
-                $motivos[$chave] = 'E-mail automático já enviado em '
+                $motivos[$chave] = 'E-mail automático já enviado neste episódio em '
                     . $this->formatarDataEnvio($avisadosNoEpisodio[$chave])
-                    . '; outro só sai se surgir um novo alarme crítico.';
+                    . '; outro só sai se surgir um novo episódio crítico.';
                 continue;
             }
 
@@ -1557,24 +1545,6 @@ class AlarmeEmailService
                 $motivos[$chave] = 'E-mail automático já registrado nesta coleta em '
                     . $this->formatarDataEnvio($enviosColeta[$chave])
                     . '.';
-                continue;
-            }
-
-            if (isset($recentes['alunos'][$alunoId])) {
-                $motivos[$chave] = 'E-mail automático já enviado há menos de '
-                    . $dias
-                    . ' dias (em '
-                    . $this->formatarDataEnvio($recentes['alunos'][$alunoId])
-                    . ').';
-                continue;
-            }
-
-            if ($email !== '' && isset($recentes['emails'][$email])) {
-                $motivos[$chave] = 'O mesmo endereço já recebeu e-mail automático há menos de '
-                    . $dias
-                    . ' dias (em '
-                    . $this->formatarDataEnvio($recentes['emails'][$email])
-                    . ').';
                 continue;
             }
 
@@ -1597,9 +1567,10 @@ class AlarmeEmailService
      */
     private function criticosJaAvisados(int $coletaId): array
     {
+        $emailEpisodio = $this->sqlEmailNoEpisodio('alarmes');
         $statement = $this->pdo->prepare(
             'SELECT aluno_id, curso_id, MAX(email_enviado_em) AS enviado,
-                    SUM(CASE WHEN email_enviado_em IS NULL THEN 1 ELSE 0 END) AS pendentes
+                    SUM(CASE WHEN NOT (' . $emailEpisodio . ') THEN 1 ELSE 0 END) AS pendentes
              FROM alarmes
              WHERE coleta_id = :coleta_id
                AND severidade = \'critico\'
@@ -1616,6 +1587,13 @@ class AlarmeEmailService
         }
 
         return $saida;
+    }
+
+    /** E-mail conta neste episódio se foi na data do gerado_em ou depois. */
+    private function sqlEmailNoEpisodio(string $alias = 'al'): string
+    {
+        return '(' . $alias . '.email_enviado_em IS NOT NULL'
+            . ' AND date(' . $alias . '.email_enviado_em) >= date(' . $alias . '.gerado_em))';
     }
 
     /**
@@ -1779,6 +1757,8 @@ class AlarmeEmailService
             'origem' => $manual ? 'manual' : 'automatico',
             'registrado_por' => $usuarioId,
             'alarme_email_id' => (int)$envio->fetchColumn(),
+            'coleta_id' => $coletaId,
+            'alarme_ids' => array_map('intval', $grupo['alarme_ids'] ?? []),
         ]);
     }
 
@@ -1805,8 +1785,7 @@ class AlarmeEmailService
         $statement = $this->pdo->prepare(
             'UPDATE alarmes
              SET email_enviado_em = datetime(\'now\', \'localtime\')
-             WHERE id IN (' . implode(', ', $placeholders) . ')
-               AND email_enviado_em IS NULL'
+             WHERE id IN (' . implode(', ', $placeholders) . ')'
         );
         $statement->execute($params);
     }

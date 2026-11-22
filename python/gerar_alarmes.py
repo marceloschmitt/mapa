@@ -29,9 +29,10 @@ que junta os dias de todas as turmas.
 Cada regra pode ser desligada no portal: sem a regra ativa, os alarmes
 abertos daquele tipo somem na proxima geracao.
 
-Alarmes com acao (visualizado=1) nao sao apagados na regeneracao.
-Na nova coleta, os tratados da coleta anterior sao copiados para
-permanecerem visiveis no portal.
+A regeneracao apaga os alarmes da coleta e recria pelas regras. E-mail
+ja enviado e o inicio do episodio (gerado_em) sao herdados se o mesmo
+alarme continua. Contato da equipe fica em contatos_aluno. Sem risco na
+coleta nova, o alarme some da tela.
 
 Uso:
     python3 gerar_alarmes.py
@@ -154,18 +155,16 @@ def proxima_semana(ano: int, semana: int) -> tuple[int, int]:
 
 
 def limpar_alarmes_coleta(cursor: Any, coleta_id: int) -> None:
-    """Remove apenas alarmes abertos da coleta antes de regenerar.
+    """Remove todos os alarmes da coleta antes de regenerar.
 
-    Alarmes com acao registrada (visualizado = 1) sao preservados.
+    Tratamento nao mora mais em visualizado: e-mail e gerado_em do episodio
+    sao herdados depois; contato fica em contatos_aluno.
 
     Args:
         cursor: Cursor SQLite.
         coleta_id: ID da coleta.
     """
-    cursor.execute(
-        "DELETE FROM alarmes WHERE coleta_id = ? AND visualizado = 0",
-        (coleta_id,),
-    )
+    cursor.execute("DELETE FROM alarmes WHERE coleta_id = ?", (coleta_id,))
 
 
 def coleta_anterior_id(cursor: Any, coleta_id: int) -> int | None:
@@ -272,7 +271,7 @@ ChaveAlarme = tuple[int, int, str, str]
 
 
 def emails_enviados_abertos(cursor: Any, coleta_id: int) -> dict[ChaveAlarme, str]:
-    """email_enviado_em dos alarmes abertos da coleta, por (aluno, curso, disciplina, tipo).
+    """email_enviado_em da coleta, por (aluno, curso, disciplina, tipo).
 
     Lido antes de limpar_alarmes_coleta: regerar a mesma coleta nao pode
     apagar o registro de que o aluno ja recebeu o e-mail.
@@ -283,7 +282,7 @@ def emails_enviados_abertos(cursor: Any, coleta_id: int) -> dict[ChaveAlarme, st
             """
             SELECT aluno_id, curso_id, codigo_disciplina, tipo, email_enviado_em
             FROM alarmes
-            WHERE coleta_id = ? AND visualizado = 0 AND email_enviado_em IS NOT NULL
+            WHERE coleta_id = ? AND email_enviado_em IS NOT NULL
             """,
             (coleta_id,),
         ).fetchall()
@@ -291,22 +290,23 @@ def emails_enviados_abertos(cursor: Any, coleta_id: int) -> dict[ChaveAlarme, st
 
 
 def gerado_em_abertos(cursor: Any, coleta_id: int) -> dict[ChaveAlarme, str]:
-    """Inicio do episodio (gerado_em) dos alarmes abertos da coleta.
+    """Inicio do episodio (gerado_em minimo) na coleta.
 
     Precisa sobreviver a regeneracao: o relogio de "nao tratado" (14 dias)
     conta desde a primeira aparicao do episodio, nao da ultima coleta.
     """
-    return {
-        (int(r[0]), int(r[1]), str(r[2]), str(r[3])): str(r[4])
-        for r in cursor.execute(
-            """
-            SELECT aluno_id, curso_id, codigo_disciplina, tipo, gerado_em
-            FROM alarmes
-            WHERE coleta_id = ? AND visualizado = 0 AND gerado_em IS NOT NULL
-            """,
-            (coleta_id,),
-        ).fetchall()
-    }
+    saida: dict[ChaveAlarme, str] = {}
+    for r in cursor.execute(
+        """
+        SELECT aluno_id, curso_id, codigo_disciplina, tipo, MIN(gerado_em)
+        FROM alarmes
+        WHERE coleta_id = ? AND gerado_em IS NOT NULL
+        GROUP BY aluno_id, curso_id, codigo_disciplina, tipo
+        """,
+        (coleta_id,),
+    ).fetchall():
+        saida[(int(r[0]), int(r[1]), str(r[2]), str(r[3]))] = str(r[4])
+    return saida
 
 
 def herdar_emails_enviados(
@@ -314,10 +314,11 @@ def herdar_emails_enviados(
     coleta_id: int,
     guardados: dict[ChaveAlarme, str],
 ) -> int:
-    """Leva o email_enviado_em para os alarmes abertos que continuam (mesmo episodio).
+    """Leva o email_enviado_em para o mesmo episodio (nao para episodio novo).
 
-    Fontes: o que a propria coleta ja tinha (guardados) e a coleta completa
-    anterior. Alarme que sumiu e voltou depois e outro episodio: nao herda.
+    Fontes: a propria coleta (antes do limpar) e a coleta completa anterior.
+    So aplica se o envio for na data do gerado_em do alarme atual ou depois;
+    e-mail de setembro nao trata faltas de novembro.
     """
     herdados = dict(guardados)
     anterior = coleta_anterior_id(cursor, coleta_id)
@@ -334,12 +335,104 @@ def herdar_emails_enviados(
             UPDATE alarmes SET email_enviado_em = ?
             WHERE coleta_id = ? AND aluno_id = ? AND curso_id = ?
               AND codigo_disciplina = ? AND tipo = ?
-              AND visualizado = 0 AND email_enviado_em IS NULL
+              AND email_enviado_em IS NULL
+              AND gerado_em IS NOT NULL
+              AND date(?) >= date(gerado_em)
             """,
-            (enviado, coleta_id, aluno_id, curso_id, codigo, tipo),
+            (enviado, coleta_id, aluno_id, curso_id, codigo, tipo, enviado),
         )
         total += int(cursor.rowcount or 0)
     return total
+
+
+def limpar_emails_antes_do_episodio(cursor: Any, coleta_id: int) -> int:
+    """Remove email_enviado_em anterior ao gerado_em (outro episodio)."""
+    cursor.execute(
+        """
+        UPDATE alarmes
+        SET email_enviado_em = NULL
+        WHERE coleta_id = ?
+          AND email_enviado_em IS NOT NULL
+          AND gerado_em IS NOT NULL
+          AND date(email_enviado_em) < date(gerado_em)
+        """,
+        (coleta_id,),
+    )
+    return int(cursor.rowcount or 0)
+
+
+def coletas_completas_ate(cursor: Any, coleta_id: int, limite: int = 400) -> list[tuple[int, str]]:
+    """(id, executada_em) das coletas completas ate a atual, da mais recente a mais antiga."""
+    rows = cursor.execute(
+        f"""
+        SELECT id, COALESCE(executada_em, '')
+        FROM coletas
+        WHERE id <= ?
+          AND (status IS NULL OR status = 'completa')
+        ORDER BY id DESC
+        LIMIT {int(limite)}
+        """,
+        (coleta_id,),
+    ).fetchall()
+    return [(int(r[0]), str(r[1] or "")) for r in rows]
+
+
+def inicio_episodio_continuo(
+    cursor: Any,
+    coleta_id: int,
+    guardados: dict[ChaveAlarme, str] | None = None,
+) -> dict[ChaveAlarme, str]:
+    """Inicio de cada episodio = data da coleta mais antiga da sequencia continua.
+
+    Em producao o gerado_em era regravado a cada coleta; nao serve como inicio.
+    O episodio e a faixa de coletas seguidas em que o mesmo alarme (chave) existe.
+    """
+    atuais = set(gerado_em_abertos(cursor, coleta_id).keys())
+    if not atuais and guardados:
+        atuais = set(guardados.keys())
+    if not atuais:
+        return {}
+
+    coletas = coletas_completas_ate(cursor, coleta_id)
+    if not coletas:
+        return dict(guardados or {})
+
+    ids = [cid for cid, _ in coletas]
+    id_min, id_max = min(ids), max(ids)
+    por_coleta: dict[int, set[ChaveAlarme]] = {cid: set() for cid in ids}
+    # So as chaves da coleta atual (evita varrer milhoes de alarmes tratados antigos).
+    for r in cursor.execute(
+        """
+        SELECT b.coleta_id, b.aluno_id, b.curso_id, b.codigo_disciplina, b.tipo
+        FROM alarmes a
+        INNER JOIN alarmes b
+          ON b.aluno_id = a.aluno_id AND b.curso_id = a.curso_id
+         AND b.codigo_disciplina = a.codigo_disciplina AND b.tipo = a.tipo
+         AND b.coleta_id BETWEEN ? AND ?
+        WHERE a.coleta_id = ?
+        GROUP BY b.coleta_id, b.aluno_id, b.curso_id, b.codigo_disciplina, b.tipo
+        """,
+        (id_min, id_max, coleta_id),
+    ).fetchall():
+        chave = (int(r[1]), int(r[2]), str(r[3]), str(r[4]))
+        if chave in atuais:
+            por_coleta.setdefault(int(r[0]), set()).add(chave)
+
+    data_coleta = {cid: (executada or "") for cid, executada in coletas}
+    inicios: dict[ChaveAlarme, str] = {}
+    for chave in atuais:
+        inicio: str | None = None
+        for cid, _ in coletas:
+            if chave not in por_coleta.get(cid, set()):
+                break
+            marca = data_coleta.get(cid) or ""
+            if marca and (inicio is None or marca < inicio):
+                inicio = marca
+        if inicio:
+            inicios[chave] = inicio
+        elif guardados and chave in guardados:
+            inicios[chave] = guardados[chave]
+    return inicios
 
 
 def herdar_gerado_em(
@@ -347,31 +440,93 @@ def herdar_gerado_em(
     coleta_id: int,
     guardados: dict[ChaveAlarme, str],
 ) -> int:
-    """Preserva o gerado_em mais antigo do episodio nos alarmes abertos.
-
-    Fontes: a propria coleta (antes do limpar) e a coleta completa anterior.
-    """
-    herdados = dict(guardados)
-    anterior = coleta_anterior_id(cursor, coleta_id)
-    if anterior is not None:
-        for chave, gerado in gerado_em_abertos(cursor, anterior).items():
-            atual = herdados.get(chave)
-            if atual is None or gerado < atual:
-                herdados[chave] = gerado
-    if not herdados:
+    """Grava no gerado_em o inicio real do episodio continuo."""
+    inicios = inicio_episodio_continuo(cursor, coleta_id, guardados)
+    if not inicios:
         return 0
 
     total = 0
-    for (aluno_id, curso_id, codigo, tipo), gerado in herdados.items():
+    for (aluno_id, curso_id, codigo, tipo), gerado in inicios.items():
         cursor.execute(
             """
             UPDATE alarmes SET gerado_em = ?
             WHERE coleta_id = ? AND aluno_id = ? AND curso_id = ?
               AND codigo_disciplina = ? AND tipo = ?
-              AND visualizado = 0
               AND (gerado_em IS NULL OR gerado_em > ?)
             """,
             (gerado, coleta_id, aluno_id, curso_id, codigo, tipo, gerado),
+        )
+        total += int(cursor.rowcount or 0)
+    return total
+
+
+def restaurar_emails_do_episodio(cursor: Any, coleta_id: int) -> int:
+    """Recoloca email_enviado_em a partir do historico recente ou de contatos_aluno."""
+    atuais = cursor.execute(
+        """
+        SELECT aluno_id, curso_id, codigo_disciplina, tipo, gerado_em
+        FROM alarmes
+        WHERE coleta_id = ?
+          AND (email_enviado_em IS NULL OR date(email_enviado_em) < date(gerado_em))
+        """,
+        (coleta_id,),
+    ).fetchall()
+    if not atuais:
+        return 0
+
+    chaves = {(int(r[0]), int(r[1]), str(r[2]), str(r[3])): str(r[4] or "") for r in atuais}
+    id_min = max(1, coleta_id - 400)
+
+    # Ultimo e-mail por chave nas coletas recentes (uma varredura).
+    emails_hist: dict[ChaveAlarme, str] = {}
+    for r in cursor.execute(
+        """
+        SELECT b.aluno_id, b.curso_id, b.codigo_disciplina, b.tipo, MAX(b.email_enviado_em)
+        FROM alarmes a
+        INNER JOIN alarmes b
+          ON b.aluno_id = a.aluno_id AND b.curso_id = a.curso_id
+         AND b.codigo_disciplina = a.codigo_disciplina AND b.tipo = a.tipo
+         AND b.coleta_id BETWEEN ? AND ?
+         AND b.email_enviado_em IS NOT NULL
+        WHERE a.coleta_id = ?
+        GROUP BY b.aluno_id, b.curso_id, b.codigo_disciplina, b.tipo
+        """,
+        (id_min, coleta_id, coleta_id),
+    ).fetchall():
+        emails_hist[(int(r[0]), int(r[1]), str(r[2]), str(r[3]))] = str(r[4])
+
+    # Ultimo contato de e-mail por aluno/curso.
+    contatos: dict[tuple[int, int], str] = {}
+    for r in cursor.execute(
+        """
+        SELECT aluno_id, curso_id, MAX(data_contato)
+        FROM contatos_aluno
+        WHERE canal IN ('email', 'email_automatico')
+        GROUP BY aluno_id, curso_id
+        """
+    ).fetchall():
+        contatos[(int(r[0]), int(r[1]))] = str(r[2]) + " 12:00:00"
+
+    total = 0
+    for chave, gerado in chaves.items():
+        aluno_id, curso_id, codigo, tipo = chave
+        dia_gerado = (gerado or "")[:10]
+        enviado = emails_hist.get(chave)
+        if enviado and dia_gerado and enviado[:10] < dia_gerado:
+            enviado = None
+        if not enviado:
+            cdata = contatos.get((aluno_id, curso_id))
+            if cdata and (not dia_gerado or cdata[:10] >= dia_gerado):
+                enviado = cdata
+        if not enviado:
+            continue
+        cursor.execute(
+            """
+            UPDATE alarmes SET email_enviado_em = ?
+            WHERE coleta_id = ? AND aluno_id = ? AND curso_id = ?
+              AND codigo_disciplina = ? AND tipo = ?
+            """,
+            (enviado, coleta_id, aluno_id, curso_id, codigo, tipo),
         )
         total += int(cursor.rowcount or 0)
     return total
@@ -458,11 +613,8 @@ def inserir_alarme(
             detalhe_json = excluded.detalhe_json,
             disciplina = COALESCE(excluded.disciplina, alarmes.disciplina),
             id_turma = COALESCE(excluded.id_turma, alarmes.id_turma),
-            gerado_em = datetime('now', 'localtime'),
-            visualizado = alarmes.visualizado,
-            visualizado_em = alarmes.visualizado_em,
-            visualizado_por = alarmes.visualizado_por,
-            contato_tipo = alarmes.contato_tipo
+            gerado_em = COALESCE(alarmes.gerado_em, excluded.gerado_em),
+            email_enviado_em = alarmes.email_enviado_em
         """,
         (
             coleta_id,
@@ -1055,18 +1207,18 @@ def gerar(coleta_id: int | None = None) -> dict[str, Any]:
     emails_guardados = emails_enviados_abertos(cursor, coleta_id)
     gerado_guardados = gerado_em_abertos(cursor, coleta_id)
     limpar_alarmes_coleta(cursor, coleta_id)
-    n_tratados = trazer_alarmes_tratados(cursor, coleta_id)
     n_percentual = gerar_percentual_baixo(cursor, coleta_id, referencia, config)
     n_4dias = gerar_faltas_4dias(cursor, coleta_id, referencia, config)
     n_3semanas = gerar_faltas_3semanas(cursor, coleta_id, referencia, config)
-    herdar_emails_enviados(cursor, coleta_id, emails_guardados)
     herdar_gerado_em(cursor, coleta_id, gerado_guardados)
+    herdar_emails_enviados(cursor, coleta_id, emails_guardados)
+    restaurar_emails_do_episodio(cursor, coleta_id)
+    limpar_emails_antes_do_episodio(cursor, coleta_id)
     n_staff_cancelados = cancelar_avisos_staff_alunos_ausentes(cursor, coleta_id)
 
     conn.commit()
     return {
         "coleta_id": coleta_id,
-        "tratados_preservados": n_tratados,
         "percentual_baixo": n_percentual,
         "faltas_4dias": n_4dias,
         "faltas_3semanas": n_3semanas,
@@ -1115,7 +1267,6 @@ def main() -> int:
 
     print("Alarmes gerados")
     print(f"Coleta ID: {resumo['coleta_id']}")
-    print(f"Tratados preservados: {resumo['tratados_preservados']}")
     print(f"{rotulo_percentual}: {resumo['percentual_baixo']}")
     print(f"{rotulo_dias}: {resumo['faltas_4dias']}")
     print(f"{rotulo_semanas}: {resumo['faltas_3semanas']}")

@@ -161,6 +161,19 @@ verificar('não entra de novo no envio', [], privado($servico, 'agruparAlarmesPa
 verificar('a tela explica que o e-mail já foi enviado', ['1|1'],
     array_keys(privado($servico, 'criticosJaAvisados', [1])));
 
+echo "== E-mail de outro episódio não bloqueia o novo\n";
+$pdo->exec("DELETE FROM alarmes WHERE aluno_id = 1");
+$pdo->exec("INSERT INTO alarmes (id, coleta_id, aluno_id, curso_id, codigo_disciplina, tipo, severidade, mensagem,
+                                 gerado_em, email_enviado_em) VALUES
+            (301, 1, 1, 1, 'X', 'faltas_3semanas', 'critico', 'm',
+             '2026-11-19 10:00:00', '2026-09-22 13:00:00')");
+// Envio recente na tabela (antes: janela de 7 dias bloqueava qualquer e-mail ao aluno).
+$pdo->exec("UPDATE alarme_emails SET enviado_em = datetime('now', 'localtime', '-2 days')
+            WHERE coleta_id = 1 AND aluno_id = 1 AND curso_id = 1");
+$gruposNovo = privado($servico, 'agruparAlarmesParaEnvio', [1]);
+verificar('crítico com e-mail antigo ao episódio entra no envio', [301],
+    $gruposNovo !== [] ? $gruposNovo[array_key_first($gruposNovo)]['alarme_ids'] : []);
+
 echo "== Histórico da configuração de alarmes\n";
 $config = new ConfigRepository($pdo);
 $config->saveAlarmeConfig(['frequencia_limite' => 70] + ConfigRepository::ALARME_PADRAO, 7);

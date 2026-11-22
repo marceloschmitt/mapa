@@ -7,6 +7,7 @@ use Mapa\Core\Auth;
 use Mapa\Core\Controller;
 use Mapa\Core\Session;
 use Mapa\Models\AnalyticsRepository;
+use Mapa\Models\ConfigRepository;
 use Mapa\Models\ContatoRepository;
 use Mapa\Models\UserRepository;
 use Mapa\Services\AlarmeEmailService;
@@ -51,6 +52,9 @@ class AlarmeController extends Controller
             'codigosMinhasDisciplinas' => $isProfessor ? ($codigosDisciplina ?? []) : [],
             'statusFiltro' => $statusFiltro,
             'diasNaoTratado' => AnalyticsRepository::DIAS_NAO_TRATADO,
+            'mesesAulasResolvido' => AnalyticsRepository::MESES_AULAS_RESOLVIDO,
+            'periodoAtual' => trim((string)((new ConfigRepository())->get(ConfigRepository::API_PERIODO_LETIVO) ?? '')),
+            'dadosFrequenciaCorrente' => [],
             'rotulosContato' => ContatoRepository::CANAIS,
             'rotulosContatoExibicao' => ContatoRepository::ROTULOS_CANAL,
             'rotulosMotivo' => ContatoRepository::MOTIVOS,
@@ -66,6 +70,12 @@ class AlarmeController extends Controller
                 'alarmes_tratados' => 0,
                 'alunos_nao_tratados' => 0,
                 'alarmes_nao_tratados' => 0,
+                'alunos_resolvidos' => 0,
+                'alunos_parciais' => 0,
+                'disciplinas_resolvidas' => 0,
+                'disciplinas_parciais' => 0,
+                'alarmes_resolvidos' => 0,
+                'alarmes_parciais' => 0,
             ],
             'isAdmin' => Auth::isAdmin(),
         ];
@@ -110,22 +120,81 @@ class AlarmeController extends Controller
             $codigosDisciplina,
             $incluirOutras
         );
-        $alarmes = $repo->alarmes(
-            $coletaId,
+        $modoResolvidos = in_array(
             $statusFiltro,
-            null,
-            null,
-            $cursoIds,
-            $codigosDisciplina,
-            $incluirOutras
+            AnalyticsRepository::STATUS_HISTORICO_RESOLUCAO,
+            true
         );
-        $totaisPorTipo = $repo->contagemAlarmesPorTipo(
-            $coletaId,
-            $statusFiltro,
-            $cursoIds,
-            $codigosDisciplina,
-            $incluirOutras
-        );
+        $modoParcialmenteResolvidos = $statusFiltro
+            === AnalyticsRepository::STATUS_PARCIALMENTE_RESOLVIDOS;
+        if ($modoResolvidos) {
+            // Uma consulta; a tela atual filtra resolvido × parcial.
+            $todosResolucao = $this->agruparEnviosResolvidos(
+                $repo->alarmesResolvidos(
+                    $coletaId,
+                    $cursoIds,
+                    $codigosDisciplina,
+                    $incluirOutras
+                )
+            );
+            $totaisPorTipo = [
+                'percentual_baixo' => 0,
+                'faltas_4dias' => 0,
+                'faltas_3semanas' => 0,
+            ];
+            $alunosResolvidosUnicos = [];
+            $alunosParciaisUnicos = [];
+            $disciplinasResolvidasUnicas = [];
+            $disciplinasParciaisUnicas = [];
+            $alarmesResolvidos = [];
+            $alarmesParciais = [];
+            foreach ($todosResolucao as $alarme) {
+                $alunoChave = (int)$alarme['aluno_id'] . '-' . (int)$alarme['curso_id'];
+                $discChave = $alunoChave . '-' . trim((string)($alarme['codigo_disciplina'] ?? ''));
+                $ehParcial = (string)($alarme['status_caso'] ?? '') === 'parcialmente_resolvido';
+                if ($ehParcial) {
+                    $alunosParciaisUnicos[$alunoChave] = true;
+                    $disciplinasParciaisUnicas[$discChave] = true;
+                    $alarmesParciais[] = $alarme;
+                } else {
+                    $alunosResolvidosUnicos[$alunoChave] = true;
+                    $disciplinasResolvidasUnicas[$discChave] = true;
+                    $alarmesResolvidos[] = $alarme;
+                }
+            }
+            $resumoStatus['alunos_resolvidos'] = count($alunosResolvidosUnicos);
+            $resumoStatus['alunos_parciais'] = count($alunosParciaisUnicos);
+            $resumoStatus['disciplinas_resolvidas'] = count($disciplinasResolvidasUnicas);
+            $resumoStatus['disciplinas_parciais'] = count($disciplinasParciaisUnicas);
+            $resumoStatus['alarmes_resolvidos'] = count($alarmesResolvidos);
+            $resumoStatus['alarmes_parciais'] = count($alarmesParciais);
+
+            $alarmes = $modoParcialmenteResolvidos ? $alarmesParciais : $alarmesResolvidos;
+            foreach ($alarmes as $alarme) {
+                $tipo = (string)($alarme['tipo'] ?? '');
+                if (array_key_exists($tipo, $totaisPorTipo)) {
+                    $totaisPorTipo[$tipo]++;
+                }
+            }
+        } else {
+            // Alertas atuais: não roda a consulta pesada de resolvidos.
+            $alarmes = $repo->alarmes(
+                $coletaId,
+                $statusFiltro,
+                null,
+                null,
+                $cursoIds,
+                $codigosDisciplina,
+                $incluirOutras
+            );
+            $totaisPorTipo = $repo->contagemAlarmesPorTipo(
+                $coletaId,
+                $statusFiltro,
+                $cursoIds,
+                $codigosDisciplina,
+                $incluirOutras
+            );
+        }
         $totalAlarmes = array_sum($totaisPorTipo);
 
         $alarmesPorAluno = [];
@@ -149,7 +218,9 @@ class AlarmeController extends Controller
                     'total_alarmes' => 0,
                     'abertos' => 0,
                     'pendentes' => 0,
-                    'status_caso' => 'tratado',
+                    'status_caso' => $modoResolvidos
+                        ? ($modoParcialmenteResolvidos ? 'parcialmente_resolvido' : 'resolvido')
+                        : 'tratado',
                 ];
             }
 
@@ -186,10 +257,16 @@ class AlarmeController extends Controller
             } elseif ($statusCaso === 'nao_tratado') {
                 $alarmesPorAluno[$chaveAluno]['pendentes']++;
             }
-            $alarmesPorAluno[$chaveAluno]['status_caso'] = $this->piorStatusCaso(
-                (string)$alarmesPorAluno[$chaveAluno]['status_caso'],
-                $statusCaso
-            );
+            if ($modoResolvidos) {
+                $alarmesPorAluno[$chaveAluno]['status_caso'] = $modoParcialmenteResolvidos
+                    ? 'parcialmente_resolvido'
+                    : 'resolvido';
+            } else {
+                $alarmesPorAluno[$chaveAluno]['status_caso'] = $this->piorStatusCaso(
+                    (string)$alarmesPorAluno[$chaveAluno]['status_caso'],
+                    $statusCaso
+                );
+            }
         }
 
         $codigosDisc = [];
@@ -279,20 +356,66 @@ class AlarmeController extends Controller
         }
 
         // Contatos de cada aluno; com pendentes, quem ainda não teve contato e quem aguarda retorno.
-        $resumoContatos = (new ContatoRepository())->resumoPorAluno(array_map(
+        $contatoRepo = new ContatoRepository();
+        $idsAlunos = array_map(
             static fn(array $grupo): int => (int)$grupo['aluno']['id'],
             array_values($alarmesPorAluno)
-        ));
+        );
+        $resumoContatos = $contatoRepo->resumoPorAluno($idsAlunos);
+        $enviosEmail = $contatoRepo->enviosEmailPorAluno($idsAlunos);
         $alunosSemContato = 0;
         $alunosAguardandoRetorno = 0;
         foreach ($alarmesPorAluno as &$grupo) {
             $chave = (int)$grupo['aluno']['id'] . '|' . (int)$grupo['aluno']['curso_id'];
             $grupo['contatos'] = $resumoContatos[$chave] ?? null;
+            $grupo['envios_email'] = $enviosEmail[$chave] ?? [];
             if ((int)$grupo['pendentes'] > 0) {
                 $grupo['contatos'] === null ? $alunosSemContato++ : $alunosAguardandoRetorno++;
             }
         }
         unset($grupo);
+
+        $disciplinasFreq = $repo->disciplinasFrequenciaCorrente($coletaId, $idsAlunos);
+        $freqCurso = $repo->frequenciaCursoPorAlunos($coletaId, $idsAlunos);
+        $periodoAtual = (string)($dadosBase['periodoAtual'] ?? '');
+        $dadosFrequenciaCorrente = [];
+        foreach ($alarmesPorAluno as $grupo) {
+            $aluno = $grupo['aluno'];
+            $chaveFreq = (int)$aluno['id'] . '-' . (int)$aluno['curso_id'];
+            $nomeSocial = trim((string)($aluno['nome_social'] ?? ''));
+            $nome = $nomeSocial !== '' ? $nomeSocial : trim((string)($aluno['nome'] ?? ''));
+            $fc = $freqCurso[$chaveFreq] ?? [];
+            $desdeRaw = trim((string)($fc['frequencia_desde'] ?? ''));
+            $desdeTs = $desdeRaw !== '' ? strtotime($desdeRaw) : false;
+            $disciplinas = $disciplinasFreq[$chaveFreq] ?? [];
+            $dadosFrequenciaCorrente[$chaveFreq] = [
+                'nome' => $nome,
+                'matricula' => (string)($aluno['matricula'] ?? ''),
+                'curso' => (string)($aluno['nome_curso'] ?? ''),
+                'periodo' => $periodoAtual,
+                'anual_desde' => $desdeTs !== false ? date('d/m/Y', $desdeTs) : '',
+                'ingresso' => (string)($aluno['ano_semestre_ingresso'] ?? ''),
+                'frequencia' => $fc['frequencia'] ?? null,
+                'disciplinas' => array_map(
+                    static function (array $d): array {
+                        return array_filter([
+                            'codigo' => (string)($d['codigo_disciplina'] ?? ''),
+                            'nome' => (string)($d['disciplina'] ?? ''),
+                            'frequencia' => $d['frequencia'] ?? null,
+                            'situacao' => (string)($d['situacao'] ?? ''),
+                            'data_trancamento' => (string)($d['data_trancamento'] ?? ''),
+                        ], static fn($v): bool => $v !== '' && $v !== null);
+                    },
+                    $disciplinas
+                ),
+            ];
+        }
+
+        $relatorioAlunos = count($alarmesPorAluno);
+        $relatorioDisciplinas = 0;
+        foreach ($alarmesPorAluno as $grupoRelatorio) {
+            $relatorioDisciplinas += count($grupoRelatorio['disciplinas'] ?? []);
+        }
 
         $this->render('alarmes/index', array_merge($dadosBase, [
             'alunosSemContato' => $alunosSemContato,
@@ -300,8 +423,11 @@ class AlarmeController extends Controller
             'resumoStatus' => $resumoStatus,
             'coleta' => $coleta,
             'alarmesPorAluno' => array_values($alarmesPorAluno),
+            'dadosFrequenciaCorrente' => $dadosFrequenciaCorrente,
             'totalAlarmes' => $totalAlarmes,
             'exibidos' => count($alarmes),
+            'relatorioAlunos' => $relatorioAlunos,
+            'relatorioDisciplinas' => $relatorioDisciplinas,
             'alunosNaoTratados' => (int)$resumoStatus['alunos_nao_tratados'],
             'alarmesNaoTratados' => (int)$resumoStatus['alarmes_nao_tratados'],
             'alunosComAlarmes' => (int)$resumoStatus['alunos_total'],
@@ -309,6 +435,53 @@ class AlarmeController extends Controller
             'sucesso' => Session::flash('sucesso'),
             'erro' => Session::flash('erro'),
         ]));
+    }
+
+    /**
+     * Junta linhas envio×alarme em uma chave com lista cronológica de envios.
+     *
+     * @param list<array<string, mixed>> $linhas
+     * @return list<array<string, mixed>>
+     */
+    private function agruparEnviosResolvidos(array $linhas): array
+    {
+        $porChave = [];
+        foreach ($linhas as $linha) {
+            $chave = (int)$linha['aluno_id']
+                . '|' . (int)$linha['curso_id']
+                . '|' . trim((string)($linha['codigo_disciplina'] ?? ''))
+                . '|' . (string)$linha['tipo'];
+            $envio = [
+                'alarme_email_id' => (int)($linha['alarme_email_id'] ?? 0),
+                'enviado_em' => (string)($linha['enviado_em'] ?? ''),
+                'canal' => (string)($linha['canal_email'] ?? 'email_automatico'),
+                'coleta_id' => (int)($linha['coleta_id'] ?? 0),
+                'alarme_id' => (int)($linha['id'] ?? 0),
+                'severidade' => (string)($linha['severidade'] ?? ''),
+                'mensagem' => (string)($linha['mensagem'] ?? ''),
+                'detalhe_json' => (string)($linha['detalhe_json'] ?? ''),
+            ];
+            if (!isset($porChave[$chave])) {
+                $alarme = $linha;
+                unset($alarme['alarme_email_id'], $alarme['enviado_em'], $alarme['canal_email']);
+                $statusCaso = (string)($linha['status_caso'] ?? 'resolvido');
+                $alarme['status_caso'] = $statusCaso === 'parcialmente_resolvido'
+                    ? 'parcialmente_resolvido'
+                    : 'resolvido';
+                $alarme['envios'] = [$envio];
+                $porChave[$chave] = $alarme;
+                continue;
+            }
+            $porChave[$chave]['envios'][] = $envio;
+            // Mantém o snapshot mais recente no nível do alarme (última evolução).
+            $porChave[$chave]['id'] = $envio['alarme_id'];
+            $porChave[$chave]['coleta_id'] = $envio['coleta_id'];
+            $porChave[$chave]['severidade'] = $envio['severidade'];
+            $porChave[$chave]['mensagem'] = $envio['mensagem'];
+            $porChave[$chave]['detalhe_json'] = $envio['detalhe_json'];
+        }
+
+        return array_values($porChave);
     }
 
     /** Prioridade visual: não tratado > aberto > tratado. */
@@ -350,12 +523,21 @@ class AlarmeController extends Controller
             $this->redirect($redirect);
         }
 
-        (new ContatoRepository())->registrar($validacao['dados'] + [
+        $contatoRepo = new ContatoRepository();
+        $alarmeIds = $contatoRepo->idsAlarmesDaColeta(
+            $coletaId,
+            $alunoId,
+            $cursoId,
+            $codigoDisciplina !== '' ? $codigoDisciplina : null
+        );
+        $contatoRepo->registrar($validacao['dados'] + [
             'aluno_id' => $alunoId,
             'curso_id' => $cursoId,
             'origem' => 'manual',
             'codigo_disciplina' => $codigoDisciplina,
             'registrado_por' => (int)$user['id'],
+            'coleta_id' => $coletaId,
+            'alarme_ids' => $alarmeIds,
         ]);
 
         Session::flash('sucesso', 'Contato registrado. O alarme passa a constar como tratado.');

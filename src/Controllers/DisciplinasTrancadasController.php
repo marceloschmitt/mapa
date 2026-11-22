@@ -6,6 +6,7 @@ namespace Mapa\Controllers;
 use Mapa\Core\Auth;
 use Mapa\Core\Controller;
 use Mapa\Models\AnalyticsRepository;
+use Mapa\Models\ConfigRepository;
 
 class DisciplinasTrancadasController extends Controller
 {
@@ -23,6 +24,7 @@ class DisciplinasTrancadasController extends Controller
         $cursosDisponiveis = $semSeletorCurso ? [] : $repo->listarCursos(null);
         $cursoSelecionado = $this->cursoSelecionado($cursosDisponiveis);
         $escopo = $this->resolverEscopo($repo, $cursoSelecionado);
+        $periodoAtual = trim((string)((new ConfigRepository())->get(ConfigRepository::API_PERIODO_LETIVO) ?? ''));
 
         $linhas = [];
         if ($coleta !== null && $escopo['aviso'] === null) {
@@ -54,6 +56,7 @@ class DisciplinasTrancadasController extends Controller
                         'matricula' => (string)($linha['matricula'] ?? ''),
                         'email' => (string)($linha['email'] ?? ''),
                         'nome_curso' => $nomeCurso,
+                        'ano_semestre_ingresso' => trim((string)($linha['ano_semestre_ingresso'] ?? '')),
                     ],
                     'todas_trancadas' => !empty($linha['todas_trancadas']),
                     'disciplinas' => [],
@@ -67,9 +70,56 @@ class DisciplinasTrancadasController extends Controller
             ];
         }
 
+        $listaAlunos = array_values($porAluno);
+        $this->ordenarAlunosAlfabetico($listaAlunos);
+
+        $dadosFrequenciaCorrente = [];
+        if ($coleta !== null && $listaAlunos !== []) {
+            $coletaId = (int)$coleta['id'];
+            $idsAlunos = array_map(
+                static fn(array $grupo): int => (int)$grupo['aluno']['id'],
+                $listaAlunos
+            );
+            $disciplinasFreq = $repo->disciplinasFrequenciaCorrente($coletaId, $idsAlunos);
+            $freqCurso = $repo->frequenciaCursoPorAlunos($coletaId, $idsAlunos);
+            foreach ($listaAlunos as $grupo) {
+                $aluno = $grupo['aluno'];
+                $chaveFreq = (int)$aluno['id'] . '-' . (int)$aluno['curso_id'];
+                $nomeSocial = trim((string)($aluno['nome_social'] ?? ''));
+                $nome = $nomeSocial !== '' ? $nomeSocial : trim((string)($aluno['nome'] ?? ''));
+                $fc = $freqCurso[$chaveFreq] ?? [];
+                $desdeRaw = trim((string)($fc['frequencia_desde'] ?? ''));
+                $desdeTs = $desdeRaw !== '' ? strtotime($desdeRaw) : false;
+                $disciplinas = $disciplinasFreq[$chaveFreq] ?? [];
+                $dadosFrequenciaCorrente[$chaveFreq] = [
+                    'nome' => $nome,
+                    'matricula' => (string)($aluno['matricula'] ?? ''),
+                    'curso' => (string)($aluno['nome_curso'] ?? ''),
+                    'periodo' => $periodoAtual,
+                    'anual_desde' => $desdeTs !== false ? date('d/m/Y', $desdeTs) : '',
+                    'ingresso' => (string)($aluno['ano_semestre_ingresso'] ?? ''),
+                    'frequencia' => $fc['frequencia'] ?? null,
+                    'disciplinas' => array_map(
+                        static function (array $d): array {
+                            return array_filter([
+                                'codigo' => (string)($d['codigo_disciplina'] ?? ''),
+                                'nome' => (string)($d['disciplina'] ?? ''),
+                                'frequencia' => $d['frequencia'] ?? null,
+                                'situacao' => (string)($d['situacao'] ?? ''),
+                                'data_trancamento' => (string)($d['data_trancamento'] ?? ''),
+                            ], static fn($v): bool => $v !== '' && $v !== null);
+                        },
+                        $disciplinas
+                    ),
+                ];
+            }
+        }
+
         $this->render('disciplinas_trancadas/index', [
             'coleta' => $coleta,
-            'porAluno' => array_values($porAluno),
+            'porAluno' => $listaAlunos,
+            'dadosFrequenciaCorrente' => $dadosFrequenciaCorrente,
+            'periodoAtual' => $periodoAtual,
             'totalAlunos' => count($alunosUnicos),
             'totalCursos' => count($cursosUnicos),
             'totalRegistros' => count($linhas),
@@ -88,6 +138,37 @@ class DisciplinasTrancadasController extends Controller
             'erro' => $coleta === null ? 'Nenhuma coleta importada.' : null,
             'isAdmin' => Auth::isAdmin(),
         ]);
+    }
+
+    /**
+     * @param list<array<string, mixed>> $lista
+     */
+    private function ordenarAlunosAlfabetico(array &$lista): void
+    {
+        $collator = class_exists(\Collator::class) ? new \Collator('pt_BR') : null;
+        usort($lista, static function (array $a, array $b) use ($collator): int {
+            $nomeA = trim((string)($a['aluno']['nome_social'] ?? ''));
+            if ($nomeA === '') {
+                $nomeA = trim((string)($a['aluno']['nome'] ?? ''));
+            }
+            $nomeB = trim((string)($b['aluno']['nome_social'] ?? ''));
+            if ($nomeB === '') {
+                $nomeB = trim((string)($b['aluno']['nome'] ?? ''));
+            }
+            if ($collator !== null) {
+                $cmp = $collator->compare($nomeA, $nomeB);
+            } else {
+                $cmp = strcasecmp($nomeA, $nomeB);
+            }
+            if ($cmp !== 0) {
+                return $cmp;
+            }
+
+            return strcasecmp(
+                (string)($a['aluno']['nome_curso'] ?? ''),
+                (string)($b['aluno']['nome_curso'] ?? '')
+            );
+        });
     }
 
     /**

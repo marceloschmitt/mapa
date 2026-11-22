@@ -23,9 +23,17 @@ class AnalyticsRepository
     /** Dias sem ação do usuário nem e-mail automático → alarme "não tratado". */
     public const DIAS_NAO_TRATADO = 14;
 
+    /**
+     * Resolvidos só contam e-mails a partir de 1 mês após a 1ª aula da disciplina
+     * (evita lotes muito cedo no semestre).
+     */
+    public const MESES_AULAS_RESOLVIDO = 1;
+
     public const STATUS_ABERTOS = 'abertos';
     public const STATUS_TRATADOS = 'tratados';
     public const STATUS_NAO_TRATADOS = 'nao_tratados';
+    public const STATUS_RESOLVIDOS = 'resolvidos';
+    public const STATUS_PARCIALMENTE_RESOLVIDOS = 'parcialmente_resolvidos';
     public const STATUS_TODOS = 'todos';
 
     /** @var list<string> */
@@ -33,7 +41,15 @@ class AnalyticsRepository
         self::STATUS_ABERTOS,
         self::STATUS_TRATADOS,
         self::STATUS_NAO_TRATADOS,
+        self::STATUS_RESOLVIDOS,
+        self::STATUS_PARCIALMENTE_RESOLVIDOS,
         self::STATUS_TODOS,
+    ];
+
+    /** @var list<string> */
+    public const STATUS_HISTORICO_RESOLUCAO = [
+        self::STATUS_RESOLVIDOS,
+        self::STATUS_PARCIALMENTE_RESOLVIDOS,
     ];
 
     /** @var PDO */
@@ -156,17 +172,19 @@ class AnalyticsRepository
         $freq->execute();
         $freqRow = $freq->fetch() ?: [];
 
+        $statusExpr = $this->sqlStatusCaso('al');
         [$alarmeSql, $alarmeParams] = $this->appendCursoFilter(
             'SELECT
                 COUNT(*) AS total_alarmes,
-                SUM(CASE WHEN visualizado = 0 THEN 1 ELSE 0 END) AS nao_visualizados,
-                SUM(CASE WHEN tipo = \'percentual_baixo\' THEN 1 ELSE 0 END) AS percentual_baixo,
-                SUM(CASE WHEN tipo = \'faltas_4dias\' THEN 1 ELSE 0 END) AS faltas_4dias,
-                SUM(CASE WHEN tipo = \'faltas_3semanas\' THEN 1 ELSE 0 END) AS faltas_3semanas
-             FROM alarmes
-             WHERE coleta_id = :coleta_id',
+                SUM(CASE WHEN (' . $statusExpr . ') IN (\'aberto\', \'nao_tratado\') THEN 1 ELSE 0 END)
+                    AS nao_visualizados,
+                SUM(CASE WHEN al.tipo = \'percentual_baixo\' THEN 1 ELSE 0 END) AS percentual_baixo,
+                SUM(CASE WHEN al.tipo = \'faltas_4dias\' THEN 1 ELSE 0 END) AS faltas_4dias,
+                SUM(CASE WHEN al.tipo = \'faltas_3semanas\' THEN 1 ELSE 0 END) AS faltas_3semanas
+             FROM alarmes al
+             WHERE al.coleta_id = :coleta_id',
             $cursoIds,
-            'curso_id'
+            'al.curso_id'
         );
         $alarmes = $this->db->prepare($alarmeSql);
         $alarmes->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
@@ -1511,14 +1529,19 @@ class AnalyticsRepository
     }
 
     /**
-     * Expressão SQL: alarme tratado (ação do usuário, e-mail automático ou legado).
-     * Contato conta se for na data do episódio (gerado_em) ou depois.
+     * Tratado = houve encerramento por ação neste episódio:
+     * - contato registrado fora do sistema (contatos_aluno), ou
+     * - e-mail pelo botão, ou
+     * - e-mail automático do sistema.
+     * E-mail/contato só contam na data do episódio (gerado_em) ou depois —
+     * e-mail antigo herdado de outro episódio não trata o alarme atual.
+     * A coluna visualizado (legado) não entra nesta regra.
      */
     public function sqlAlarmeTratado(string $alias = 'al'): string
     {
         return '('
-            . $alias . '.visualizado = 1'
-            . ' OR ' . $alias . '.email_enviado_em IS NOT NULL'
+            . '(' . $alias . '.email_enviado_em IS NOT NULL'
+            . ' AND date(' . $alias . '.email_enviado_em) >= date(' . $alias . '.gerado_em))'
             . ' OR EXISTS ('
             . ' SELECT 1 FROM contatos_aluno ct'
             . ' WHERE ct.aluno_id = ' . $alias . '.aluno_id'
@@ -1565,6 +1588,10 @@ class AnalyticsRepository
         $status = self::normalizarStatusFiltro($status);
         if ($status === self::STATUS_TODOS) {
             return '';
+        }
+        // Resolvidos / parciais não estão na coleta atual — consulta própria.
+        if (in_array($status, self::STATUS_HISTORICO_RESOLUCAO, true)) {
+            return ' AND 0';
         }
 
         return ' AND (' . $this->sqlStatusCaso($alias) . ') = \''
@@ -1686,6 +1713,256 @@ class AnalyticsRepository
     }
 
     /**
+     * Alarmes cobertos por uma ação (contato) cuja chave sumiu da última coleta.
+     * Fonte: contatos_aluno + contato_alarmes (e-mail, WhatsApp, etc.).
+     * Uma linha por contato × alarme (snapshot da coleta da ação).
+     *
+     * @param list<int>|null $cursoIds
+     * @param list<string>|null $codigosDisciplina
+     * @param 'resolvido'|'parcialmente_resolvido'|null $somenteStatusCaso
+     * @return list<array<string, mixed>>
+     */
+    public function alarmesResolvidos(
+        int $coletaIdUltima,
+        ?array $cursoIds = null,
+        ?array $codigosDisciplina = null,
+        bool $incluirOutrasDisciplinasDosAlunos = false,
+        ?string $somenteStatusCaso = null
+    ): array {
+        if (($cursoIds !== null && $cursoIds === [])
+            || ($codigosDisciplina !== null && $codigosDisciplina === [])
+        ) {
+            return [];
+        }
+
+        $meses = (int)self::MESES_AULAS_RESOLVIDO;
+        // 1ª aula pré-agregada (evita subconsulta correlacionada por linha).
+        // Matrícula atrasada: piso em data_inicio_aulas; anual: frequencia_desde.
+        $sqlPrimeiraAula = 'COALESCE(it.data_inicio, ida.data_inicio)';
+        $sqlInicioAjustado = 'CASE'
+            . ' WHEN (' . $sqlPrimeiraAula . ') IS NULL THEN NULL'
+            . ' WHEN fc.data_inicio_aulas IS NOT NULL AND TRIM(fc.data_inicio_aulas) <> \'\''
+            . ' AND date(fc.data_inicio_aulas) > date(' . $sqlPrimeiraAula . ')'
+            . ' THEN date(fc.data_inicio_aulas)'
+            . ' ELSE date(' . $sqlPrimeiraAula . ')'
+            . ' END';
+        $sqlInicioAulas = 'CASE'
+            . ' WHEN (' . $sqlInicioAjustado . ') IS NULL THEN NULL'
+            . ' WHEN fc.frequencia_desde IS NOT NULL AND TRIM(fc.frequencia_desde) <> \'\''
+            . ' AND date(fc.frequencia_desde) < (' . $sqlInicioAjustado . ')'
+            . ' THEN date(fc.frequencia_desde)'
+            . ' ELSE (' . $sqlInicioAjustado . ')'
+            . ' END';
+
+        // Tipo sumiu da coleta atual, mas a disciplina pode ainda ter outro alarme:
+        // sem nenhum alarme na disciplina → resolvido; com algum → parcialmente_resolvido.
+        $sql = 'WITH atuais AS (
+                    SELECT aluno_id, curso_id,
+                           COALESCE(codigo_disciplina, \'\') AS codigo_disciplina,
+                           tipo
+                    FROM alarmes
+                    WHERE coleta_id = :coleta_id
+                ),
+                atuais_disc AS (
+                    SELECT DISTINCT aluno_id, curso_id, codigo_disciplina
+                    FROM atuais
+                ),
+                inicio_turma AS (
+                    SELECT id_turma, MIN(data_aula) AS data_inicio
+                    FROM turma_aulas
+                    GROUP BY id_turma
+                ),
+                inicio_disc AS (
+                    SELECT codigo_disciplina, curso_id, MIN(data_aula) AS data_inicio
+                    FROM disciplina_aulas
+                    GROUP BY codigo_disciplina, curso_id
+                ),
+                freq_ativas AS (
+                    SELECT aluno_id, curso_id, codigo_disciplina
+                    FROM frequencia_disciplina
+                    WHERE coleta_id = :coleta_id
+                      AND (situacao IS NULL OR situacao = \'\')
+                )
+                SELECT al.id, al.tipo, al.severidade, al.mensagem, al.codigo_disciplina,
+                       al.disciplina, al.detalhe_json, al.gerado_em, al.coleta_id,
+                       al.aluno_id, al.curso_id, al.id_turma, t.nome_turma,
+                       a.nome AS aluno_nome, a.nome_social AS aluno_nome_social,
+                       a.email AS aluno_email, a.login, a.matricula,
+                       c.nome_curso,
+                       g.semestre_oferta,
+                       ac.ano_semestre_ingresso, ac.turma_entrada,
+                       ct.id AS alarme_email_id,
+                       ct.data_contato AS enviado_em,
+                       ct.canal AS canal_email,
+                       CASE
+                           WHEN ad.aluno_id IS NULL THEN \'resolvido\'
+                           ELSE \'parcialmente_resolvido\'
+                       END AS status_caso
+                FROM contatos_aluno ct
+                INNER JOIN contato_alarmes ca ON ca.contato_id = ct.id
+                INNER JOIN alarmes al ON al.id = ca.alarme_id
+                INNER JOIN alunos a ON a.id = al.aluno_id
+                INNER JOIN cursos c ON c.id = al.curso_id
+                LEFT JOIN turmas t ON t.id_turma = al.id_turma
+                LEFT JOIN aluno_cursos ac ON ac.aluno_id = al.aluno_id AND ac.curso_id = al.curso_id
+                LEFT JOIN disciplina_grade g
+                  ON g.codigo_disciplina = al.codigo_disciplina
+                 AND g.curso_id = al.curso_id
+                LEFT JOIN frequencia_curso fc
+                  ON fc.coleta_id = COALESCE(ct.coleta_id, al.coleta_id)
+                 AND fc.aluno_id = al.aluno_id
+                 AND fc.curso_id = al.curso_id
+                LEFT JOIN inicio_turma it ON it.id_turma = al.id_turma
+                LEFT JOIN inicio_disc ida
+                  ON ida.codigo_disciplina = al.codigo_disciplina
+                 AND ida.curso_id = al.curso_id
+                LEFT JOIN atuais at
+                  ON at.aluno_id = al.aluno_id
+                 AND at.curso_id = al.curso_id
+                 AND at.codigo_disciplina = COALESCE(al.codigo_disciplina, \'\')
+                 AND at.tipo = al.tipo
+                LEFT JOIN atuais_disc ad
+                  ON ad.aluno_id = al.aluno_id
+                 AND ad.curso_id = al.curso_id
+                 AND ad.codigo_disciplina = COALESCE(al.codigo_disciplina, \'\')
+                LEFT JOIN freq_ativas fa
+                  ON fa.aluno_id = al.aluno_id
+                 AND fa.curso_id = al.curso_id
+                 AND fa.codigo_disciplina = al.codigo_disciplina
+                LEFT JOIN alunos_trancados atr
+                  ON atr.coleta_id = :coleta_id
+                 AND atr.aluno_id = al.aluno_id
+                 AND atr.curso_id = al.curso_id
+                WHERE at.aluno_id IS NULL
+                  AND atr.aluno_id IS NULL
+                  AND (
+                        TRIM(COALESCE(al.codigo_disciplina, \'\')) = \'\'
+                        OR fa.aluno_id IS NOT NULL
+                  )
+                  AND (' . $sqlInicioAulas . ') IS NOT NULL
+                  AND date(ct.data_contato) >= date((' . $sqlInicioAulas . '), \'+'
+                    . $meses . ' month\')';
+
+        if ($somenteStatusCaso === 'resolvido') {
+            $sql .= ' AND ad.aluno_id IS NULL';
+        } elseif ($somenteStatusCaso === 'parcialmente_resolvido') {
+            $sql .= ' AND ad.aluno_id IS NOT NULL';
+        }
+
+        [$sql, $cursoParams] = $this->appendCursoFilter($sql, $cursoIds, 'al.curso_id');
+        if ($incluirOutrasDisciplinasDosAlunos) {
+            [$sql, $discParams] = $this->appendFiltroAlunosDasDisciplinas(
+                $sql,
+                $codigosDisciplina,
+                'al'
+            );
+        } else {
+            [$sql, $discParams] = $this->appendCodigoDisciplinaFilter(
+                $sql,
+                $codigosDisciplina,
+                'al.codigo_disciplina',
+                'al.id_turma'
+            );
+        }
+
+        $sql .= ' ORDER BY COALESCE(NULLIF(TRIM(a.nome_social), \'\'), a.nome) ASC,
+                    COALESCE(al.disciplina, \'\') ASC,
+                    CASE al.tipo
+                        WHEN \'percentual_baixo\' THEN 1
+                        WHEN \'faltas_4dias\' THEN 2
+                        WHEN \'faltas_3semanas\' THEN 3
+                        ELSE 4
+                    END,
+                    ct.data_contato ASC,
+                    al.id ASC';
+
+        $statement = $this->db->prepare($sql);
+        $statement->bindValue('coleta_id', $coletaIdUltima, PDO::PARAM_INT);
+        $this->bindNamedParams($statement, $cursoParams);
+        $this->bindNamedParams($statement, $discParams);
+        $statement->execute();
+
+        return $statement->fetchAll();
+    }
+
+    /**
+     * Contagem de resolvidos (chaves distintas e alunos distintos).
+     *
+     * @param list<int>|null $cursoIds
+     * @param list<string>|null $codigosDisciplina
+     * @return array{
+     *   alunos: int,
+     *   alunos_parciais: int,
+     *   disciplinas: int,
+     *   disciplinas_parciais: int,
+     *   alarmes: int,
+     *   alarmes_parciais: int
+     * }
+     */
+    public function resumoAlarmesResolvidos(
+        int $coletaIdUltima,
+        ?array $cursoIds = null,
+        ?array $codigosDisciplina = null,
+        bool $incluirOutrasDisciplinasDosAlunos = false
+    ): array {
+        $vazio = [
+            'alunos' => 0,
+            'alunos_parciais' => 0,
+            'disciplinas' => 0,
+            'disciplinas_parciais' => 0,
+            'alarmes' => 0,
+            'alarmes_parciais' => 0,
+        ];
+        if (($cursoIds !== null && $cursoIds === [])
+            || ($codigosDisciplina !== null && $codigosDisciplina === [])
+        ) {
+            return $vazio;
+        }
+
+        // Reusa a consulta rápida de listagem (anti-join via CTE); COUNT(DISTINCT)
+        // no SQLite nesta junção fica ~60× mais lento.
+        $alunos = [];
+        $alunosParciais = [];
+        $disciplinas = [];
+        $disciplinasParciais = [];
+        $chaves = [];
+        $chavesParciais = [];
+        foreach ($this->alarmesResolvidos(
+            $coletaIdUltima,
+            $cursoIds,
+            $codigosDisciplina,
+            $incluirOutrasDisciplinasDosAlunos
+        ) as $row) {
+            $alunoChave = (int)$row['aluno_id'] . '-' . (int)$row['curso_id'];
+            $codigoDisc = trim((string)($row['codigo_disciplina'] ?? ''));
+            $discChave = $alunoChave . '-' . $codigoDisc;
+            $alarmeChave = $discChave . '-' . (string)$row['tipo'];
+            if ((string)($row['status_caso'] ?? '') === 'parcialmente_resolvido') {
+                $alunosParciais[$alunoChave] = true;
+                $disciplinasParciais[$discChave] = true;
+                $chavesParciais[$alarmeChave] = true;
+            } else {
+                $alunos[$alunoChave] = true;
+                $disciplinas[$discChave] = true;
+                $chaves[$alarmeChave] = true;
+            }
+        }
+        // Disciplina com linhas resolvidas e parciais conta só como parcial.
+        foreach ($disciplinasParciais as $discChave => $_) {
+            unset($disciplinas[$discChave]);
+        }
+
+        return [
+            'alunos' => count($alunos),
+            'alunos_parciais' => count($alunosParciais),
+            'disciplinas' => count($disciplinas),
+            'disciplinas_parciais' => count($disciplinasParciais),
+            'alarmes' => count($chaves),
+            'alarmes_parciais' => count($chavesParciais),
+        ];
+    }
+
+    /**
      * @param list<int>|null $cursoIds
      * @param list<string>|null $codigosDisciplina
      * @return array<string, int>
@@ -1763,6 +2040,7 @@ class AnalyticsRepository
      *   alunos_abertos: int, alarmes_abertos: int,
      *   alunos_tratados: int, alarmes_tratados: int,
      *   alunos_nao_tratados: int, alarmes_nao_tratados: int,
+     *   alunos_resolvidos: int, disciplinas_resolvidas: int, alarmes_resolvidos: int,
      *   alunos_total: int, alarmes_total: int
      * }
      */
@@ -1781,6 +2059,9 @@ class AnalyticsRepository
             'alarmes_tratados' => 0,
             'alunos_nao_tratados' => 0,
             'alarmes_nao_tratados' => 0,
+            'alunos_resolvidos' => 0,
+            'disciplinas_resolvidas' => 0,
+            'alarmes_resolvidos' => 0,
             'alunos_total' => 0,
             'alarmes_total' => 0,
         ];
@@ -1867,6 +2148,9 @@ class AnalyticsRepository
             'alarmes_tratados' => $porStatus['tratado']['alarmes'],
             'alunos_nao_tratados' => $porStatus['nao_tratado']['alunos'],
             'alarmes_nao_tratados' => $porStatus['nao_tratado']['alarmes'],
+            'alunos_resolvidos' => 0,
+            'disciplinas_resolvidas' => 0,
+            'alarmes_resolvidos' => 0,
             'alunos_total' => (int)($rowTotal['alunos'] ?? 0),
             'alarmes_total' => (int)($rowTotal['alarmes'] ?? $alarmesTotal),
         ];
@@ -2221,6 +2505,7 @@ class AnalyticsRepository
                        fd.situacao, fd.data_trancamento,
                        a.login, a.matricula, a.nome, a.nome_social, a.email,
                        c.nome_curso,
+                       ac.ano_semestre_ingresso,
                        NOT EXISTS (
                            SELECT 1 FROM frequencia_disciplina ativa
                            WHERE ativa.coleta_id = fd.coleta_id
@@ -2236,6 +2521,8 @@ class AnalyticsRepository
                 FROM frequencia_disciplina fd
                 INNER JOIN alunos a ON a.id = fd.aluno_id
                 INNER JOIN cursos c ON c.id = fd.curso_id
+                LEFT JOIN aluno_cursos ac
+                  ON ac.aluno_id = fd.aluno_id AND ac.curso_id = fd.curso_id
                 WHERE fd.coleta_id = :coleta_id
                   AND fd.situacao IS NOT NULL
                   AND TRIM(fd.situacao) != \'\'';
@@ -2661,6 +2948,47 @@ class AnalyticsRepository
                     trim((string)($row['codigo_disciplina'] ?? '')),
                 ];
             });
+        }
+
+        return $mapa;
+    }
+
+    /**
+     * Frequência do curso na coleta por aluno/curso (chave "aluno_id-curso_id").
+     *
+     * @param list<int> $alunoIds
+     * @return array<string, array{frequencia: mixed, frequencia_desde: ?string}>
+     */
+    public function frequenciaCursoPorAlunos(int $coletaId, array $alunoIds): array
+    {
+        if ($alunoIds === []) {
+            return [];
+        }
+
+        $placeholders = [];
+        $params = ['coleta' => $coletaId];
+        foreach (array_values(array_unique(array_map('intval', $alunoIds))) as $i => $id) {
+            $key = 'aluno_' . $i;
+            $placeholders[] = ':' . $key;
+            $params[$key] = $id;
+        }
+
+        $sql = 'SELECT aluno_id, curso_id, percentual_frequencia AS frequencia, frequencia_desde
+                FROM frequencia_curso
+                WHERE coleta_id = :coleta
+                  AND aluno_id IN (' . implode(', ', $placeholders) . ')';
+        $statement = $this->db->prepare($sql);
+        $this->bindNamedParams($statement, $params);
+        $statement->execute();
+
+        $mapa = [];
+        foreach ($statement->fetchAll() as $row) {
+            $mapa[(int)$row['aluno_id'] . '-' . (int)$row['curso_id']] = [
+                'frequencia' => $row['frequencia'],
+                'frequencia_desde' => isset($row['frequencia_desde'])
+                    ? (string)$row['frequencia_desde']
+                    : null,
+            ];
         }
 
         return $mapa;
