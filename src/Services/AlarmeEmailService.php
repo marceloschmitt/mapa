@@ -1569,6 +1569,56 @@ class AlarmeEmailService
     }
 
     /**
+     * Mesmas regras de motivosNaoEnvioCritico, sem EMAIL_SEND / interruptor
+     * (para depuração quando o ambiente local não envia).
+     *
+     * @param list<array{aluno_id: int, curso_id: int, email: string}> $candidatos
+     * @return array<string, string>
+     */
+    private function motivosElegibilidadeSemTravaAmbiente(int $coletaId, array $candidatos): array
+    {
+        $motivos = [];
+        $trancados = $this->mapaTrancadosColeta($coletaId);
+        $enviosColeta = $this->enviosNestaColeta($coletaId);
+        $avisadosRecentes = $this->criticosJaAvisados($coletaId);
+        $diasReenvio = self::DIAS_REENVIO_ALUNO;
+
+        foreach ($candidatos as $c) {
+            $chave = $this->chaveAlunoCurso($c);
+            $email = strtolower(trim((string)($c['email'] ?? '')));
+
+            if (isset($trancados[$chave])) {
+                $motivos[$chave] = 'Aluno trancado — e-mail automático não é enviado.';
+                continue;
+            }
+
+            if (isset($avisadosRecentes[$chave])) {
+                $motivos[$chave] = 'E-mail automático já enviado neste alarme em '
+                    . $this->formatarDataEnvio($avisadosRecentes[$chave])
+                    . '; outro só sai após ' . $diasReenvio
+                    . ' dias desse e-mail, se o alarme continuar.';
+                continue;
+            }
+
+            if (isset($enviosColeta[$chave])) {
+                $motivos[$chave] = 'E-mail automático já registrado nesta coleta em '
+                    . $this->formatarDataEnvio($enviosColeta[$chave])
+                    . '.';
+                continue;
+            }
+
+            if ($email === '' || !filter_var($email, FILTER_VALIDATE_EMAIL)) {
+                $motivos[$chave] = 'Sem e-mail válido no cadastro do aluno.';
+                continue;
+            }
+
+            $motivos[$chave] = 'Elegível — processarAlunos enviaria neste momento.';
+        }
+
+        return $motivos;
+    }
+
+    /**
      * Alunos/curso cujos críticos abertos já foram avisados há menos de
      * DIAS_REENVIO_ALUNO dias (chave "aluno|curso" => email_enviado_em).
      *
@@ -1805,6 +1855,195 @@ class AlarmeEmailService
              WHERE id IN (' . implode(', ', $placeholders) . ')'
         );
         $statement->execute($params);
+    }
+
+    /**
+     * Diagnóstico do envio automático aos alunos (não envia nada).
+     * Opcional: filtrar por matrícula, e-mail, nome ou aluno_id.
+     *
+     * @return array{
+     *   coleta_id: int|null,
+     *   hoje: string,
+     *   limite_reenvio: string,
+     *   dias_reenvio: int,
+     *   email_send: bool,
+     *   alarmes_alunos_enabled: bool,
+     *   smtp_configurado: bool,
+     *   total_grupos_elegiveis: int,
+     *   linhas: list<string>
+     * }
+     */
+    public function diagnosticarEnvioAlunos(?int $coletaId = null, ?string $filtro = null): array
+    {
+        $dias = (int)self::DIAS_REENVIO_ALUNO;
+        $hoje = (string)$this->pdo->query("SELECT date('now', 'localtime')")->fetchColumn();
+        $limite = (string)$this->pdo->query(
+            "SELECT date('now', 'localtime', '-{$dias} days')"
+        )->fetchColumn();
+
+        $emailConfig = $this->config->getEmailConfig();
+        $emailSend = $this->config->permiteEnvioEmail();
+        $alunosOn = !empty($emailConfig['alarmes_alunos_enabled']);
+        $smtpOk = $this->config->isEmailConfigured();
+
+        $saida = [
+            'coleta_id' => null,
+            'hoje' => $hoje,
+            'limite_reenvio' => $limite,
+            'dias_reenvio' => $dias,
+            'email_send' => $emailSend,
+            'alarmes_alunos_enabled' => $alunosOn,
+            'smtp_configurado' => $smtpOk,
+            'total_grupos_elegiveis' => 0,
+            'linhas' => [],
+        ];
+
+        $coleta = $coletaId !== null
+            ? ['id' => $coletaId]
+            : $this->analytics->ultimaColeta();
+        if ($coleta === null) {
+            $saida['linhas'][] = 'Nenhuma coleta completa encontrada.';
+            return $saida;
+        }
+        $coletaId = (int)$coleta['id'];
+        $saida['coleta_id'] = $coletaId;
+
+        $saida['linhas'][] = "Coleta {$coletaId} | hoje={$hoje} | reenvio se e-mail ≤ {$limite} (após {$dias} dias)";
+        $saida['linhas'][] = 'EMAIL_SEND=' . ($emailSend ? 'true' : 'false')
+            . ' | alarmes_alunos=' . ($alunosOn ? 'on' : 'off')
+            . ' | smtp=' . ($smtpOk ? 'ok' : 'incompleto');
+
+        $filtroNorm = $filtro !== null ? trim($filtro) : '';
+        $params = ['coleta_id' => $coletaId];
+        $whereFiltro = '';
+        if ($filtroNorm !== '') {
+            $whereFiltro = ' AND (
+                CAST(al.aluno_id AS TEXT) = :filtro
+                OR a.matricula = :filtro
+                OR lower(a.email) = lower(:filtro)
+                OR a.nome LIKE :filtro_like
+                OR IFNULL(a.nome_social, \'\') LIKE :filtro_like
+            )';
+            $params['filtro'] = $filtroNorm;
+            $params['filtro_like'] = '%' . $filtroNorm . '%';
+        }
+
+        $emailRecente = $this->sqlEmailRecenteDoAlarme('al');
+        $statement = $this->pdo->prepare(
+            'SELECT al.id, al.aluno_id, al.curso_id, al.codigo_disciplina, al.disciplina,
+                    al.tipo, al.severidade, al.visualizado, al.gerado_em, al.email_enviado_em,
+                    a.nome AS aluno_nome, a.matricula, a.email AS aluno_email,
+                    c.nome_curso,
+                    CASE WHEN ' . $emailRecente . ' THEN 1 ELSE 0 END AS email_recente,
+                    CASE WHEN EXISTS (
+                        SELECT 1 FROM alunos_trancados at
+                        WHERE at.coleta_id = al.coleta_id
+                          AND at.aluno_id = al.aluno_id
+                          AND at.curso_id = al.curso_id
+                    ) THEN 1 ELSE 0 END AS trancado
+             FROM alarmes al
+             INNER JOIN alunos a ON a.id = al.aluno_id
+             INNER JOIN cursos c ON c.id = al.curso_id
+             WHERE al.coleta_id = :coleta_id
+               AND al.severidade = \'critico\'
+               AND al.visualizado = 0'
+            . $whereFiltro
+            . ' ORDER BY a.nome, al.curso_id, al.codigo_disciplina, al.tipo'
+        );
+        $statement->execute($params);
+        $rows = $statement->fetchAll();
+
+        if ($rows === []) {
+            $saida['linhas'][] = $filtroNorm !== ''
+                ? "Nenhum alarme crítico aberto para o filtro \"{$filtroNorm}\"."
+                : 'Nenhum alarme crítico aberto (visualizado=0) nesta coleta.';
+            return $saida;
+        }
+
+        $grupos = $this->agruparAlarmesParaEnvio($coletaId);
+        $saida['total_grupos_elegiveis'] = count($grupos);
+        $chavesGrupo = [];
+        foreach ($grupos as $g) {
+            $chavesGrupo[(int)$g['aluno_id'] . '|' . (int)$g['curso_id']] = true;
+        }
+
+        $candidatos = [];
+        $vistos = [];
+        foreach ($rows as $row) {
+            $chave = (int)$row['aluno_id'] . '|' . (int)$row['curso_id'];
+            if (isset($vistos[$chave])) {
+                continue;
+            }
+            $vistos[$chave] = true;
+            $candidatos[] = [
+                'aluno_id' => (int)$row['aluno_id'],
+                'curso_id' => (int)$row['curso_id'],
+                'email' => (string)$row['aluno_email'],
+            ];
+        }
+        $motivos = $this->motivosNaoEnvioCritico($coletaId, $candidatos);
+        // Com EMAIL_SEND=false o motivo global esconde o resto; recalcula só as
+        // regras de elegibilidade (trancado / 14 dias / coleta / e-mail válido).
+        $motivosSeEnvioLigado = $this->motivosElegibilidadeSemTravaAmbiente($coletaId, $candidatos);
+
+        $porGrupo = [];
+        foreach ($rows as $row) {
+            $chave = (int)$row['aluno_id'] . '|' . (int)$row['curso_id'];
+            $porGrupo[$chave][] = $row;
+        }
+
+        foreach ($porGrupo as $chave => $alarmes) {
+            $primeiro = $alarmes[0];
+            $nome = trim((string)$primeiro['aluno_nome']);
+            $matricula = trim((string)$primeiro['matricula']);
+            $email = trim((string)$primeiro['aluno_email']);
+            $curso = trim((string)$primeiro['nome_curso']);
+            $noGrupo = isset($chavesGrupo[$chave]);
+            $motivo = $motivos[$chave] ?? '(sem motivo)';
+            $motivoDados = $motivosSeEnvioLigado[$chave] ?? '(sem motivo)';
+
+            $saida['linhas'][] = '';
+            $saida['linhas'][] = "=== {$nome} | matrícula {$matricula} | aluno_id={$primeiro['aluno_id']} curso_id={$primeiro['curso_id']}";
+            $saida['linhas'][] = "    curso: {$curso}";
+            $saida['linhas'][] = "    e-mail cadastro: {$email}";
+            $saida['linhas'][] = '    entra em agruparAlarmesParaEnvio? ' . ($noGrupo ? 'SIM' : 'NÃO');
+            $saida['linhas'][] = "    motivoNaoEnvio: {$motivo}";
+            if ($motivo !== $motivoDados) {
+                $saida['linhas'][] = "    se EMAIL_SEND+interruptor ok: {$motivoDados}";
+            }
+
+            foreach ($alarmes as $al) {
+                $cod = (string)$al['codigo_disciplina'];
+                $enviado = $al['email_enviado_em'] !== null && $al['email_enviado_em'] !== ''
+                    ? (string)$al['email_enviado_em']
+                    : '(nunca)';
+                $recente = (int)$al['email_recente'] === 1 ? 'SIM (<14d → bloqueia)' : 'NÃO (ok reenviar)';
+                $trancado = (int)$al['trancado'] === 1 ? 'SIM' : 'não';
+                $elegivelAlarme = (int)$al['email_recente'] === 0 && (int)$al['trancado'] === 0;
+
+                $saida['linhas'][] = sprintf(
+                    '    - alarme #%s %s | %s | gerado=%s | email_enviado_em=%s | recente=%s | trancado=%s | elegível_alarme=%s',
+                    (string)$al['id'],
+                    $cod,
+                    (string)$al['tipo'],
+                    (string)$al['gerado_em'],
+                    $enviado,
+                    $recente,
+                    $trancado,
+                    $elegivelAlarme ? 'SIM' : 'NÃO'
+                );
+            }
+        }
+
+        $saida['linhas'][] = '';
+        $saida['linhas'][] = "Total de grupos que processarAlunos tentaria enviar agora: {$saida['total_grupos_elegiveis']}";
+        if (!$emailSend) {
+            $saida['linhas'][] = 'Obs.: processarAlunos aborta no início por EMAIL_SEND=false (mesmo com elegíveis).';
+        } elseif (!$alunosOn) {
+            $saida['linhas'][] = 'Obs.: processarAlunos aborta porque alarmes_alunos está desligado.';
+        }
+
+        return $saida;
     }
 
     /**
