@@ -72,11 +72,60 @@ class IngressantesController extends Controller
         }
         unset($grupo);
 
+        $dadosFrequenciaCorrente = [];
+        if ($coleta !== null && $linhas !== []) {
+            $coletaId = (int)$coleta['id'];
+            $idsAlunos = array_values(array_unique(array_map(
+                static fn(array $linha): int => (int)($linha['aluno_id'] ?? 0),
+                $linhas
+            )));
+            $disciplinasFreq = $repo->disciplinasFrequenciaCorrente($coletaId, $idsAlunos);
+            $freqCurso = $repo->frequenciaCursoPorAlunos($coletaId, $idsAlunos);
+            $vistos = [];
+            foreach ($linhas as $linha) {
+                $chaveFreq = (int)($linha['aluno_id'] ?? 0) . '-' . (int)($linha['curso_id'] ?? 0);
+                if (isset($vistos[$chaveFreq])) {
+                    continue;
+                }
+                $vistos[$chaveFreq] = true;
+                $nomeSocial = trim((string)($linha['aluno_nome_social'] ?? ''));
+                $nome = $nomeSocial !== ''
+                    ? $nomeSocial
+                    : trim((string)($linha['aluno_nome'] ?? ''));
+                $fc = $freqCurso[$chaveFreq] ?? [];
+                $desdeRaw = trim((string)($linha['frequencia_desde'] ?? $fc['frequencia_desde'] ?? ''));
+                $desdeTs = $desdeRaw !== '' ? strtotime($desdeRaw) : false;
+                $disciplinas = $disciplinasFreq[$chaveFreq] ?? [];
+                $dadosFrequenciaCorrente[$chaveFreq] = [
+                    'nome' => $nome,
+                    'matricula' => (string)($linha['matricula'] ?? ''),
+                    'curso' => (string)($linha['nome_curso'] ?? ''),
+                    'periodo' => $periodo,
+                    'anual_desde' => $desdeTs !== false ? date('d/m/Y', $desdeTs) : '',
+                    'ingresso' => (string)($linha['ano_semestre_ingresso'] ?? ''),
+                    'frequencia' => $linha['percentual_frequencia'] ?? ($fc['frequencia'] ?? null),
+                    'disciplinas' => array_map(
+                        static function (array $d): array {
+                            return array_filter([
+                                'codigo' => (string)($d['codigo_disciplina'] ?? ''),
+                                'nome' => (string)($d['disciplina'] ?? ''),
+                                'frequencia' => $d['frequencia'] ?? null,
+                                'situacao' => (string)($d['situacao'] ?? ''),
+                                'data_trancamento' => (string)($d['data_trancamento'] ?? ''),
+                            ], static fn($v): bool => $v !== '' && $v !== null);
+                        },
+                        $disciplinas
+                    ),
+                ];
+            }
+        }
+
         $this->render('ingressantes/index', [
             'coleta' => $coleta,
             'periodo' => $periodo,
             'periodoAnual' => AnalyticsRepository::periodoIngressoAnual($periodo),
             'porCurso' => array_values($porCurso),
+            'dadosFrequenciaCorrente' => $dadosFrequenciaCorrente,
             'totalAlunos' => count($alunosUnicos),
             'totalCursos' => count($porCurso),
             'emailsZero' => $emailsZero,
