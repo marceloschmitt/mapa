@@ -27,8 +27,13 @@ $alunosNaoTratados = (int)($alunosNaoTratados ?? 0);
 $alunosComAlarmes = (int)($alunosComAlarmes ?? 0);
 $alunosSemContato = (int)($alunosSemContato ?? 0);
 $alunosAguardandoRetorno = (int)($alunosAguardandoRetorno ?? 0);
+$resumoStatus = $resumoStatus ?? [];
+$alunosAbertos = (int)($resumoStatus['alunos_abertos'] ?? 0);
+$alunosTratados = (int)($resumoStatus['alunos_tratados'] ?? 0);
+$alunosNaoTratadosStatus = (int)($resumoStatus['alunos_nao_tratados'] ?? $alunosNaoTratados);
+$diasNaoTratado = (int)($diasNaoTratado ?? 14);
+$statusFiltro = (string)($statusFiltro ?? 'abertos');
 $coletaId = $coleta !== null ? (int)$coleta['id'] : 0;
-$filtroAbertos = !empty($somenteAbertos) ? '1' : '0';
 $mostrarMensagem = true;
 $semSeletorCurso = !empty($semSeletorCurso);
 $cursoSelecionado = (string)($cursoSelecionado ?? 'todos');
@@ -193,14 +198,15 @@ if (!function_exists('mapaResumoContato')) {
                 <span class="badge text-bg-secondary">
                     <?= $alunosComAlarmes ?> aluno<?= $alunosComAlarmes === 1 ? '' : 's' ?> com alarmes
                 </span>
-                <span class="badge text-bg-warning text-dark">
-                    <?= $alunosNaoTratados ?> aluno<?= $alunosNaoTratados === 1 ? '' : 's' ?> com casos abertos
+                <span class="badge alarme-badge-aberto">
+                    <?= $alunosAbertos ?> aberto<?= $alunosAbertos === 1 ? '' : 's' ?>
                 </span>
-                <span class="badge text-bg-danger">
-                    <?= $alunosSemContato ?> sem nenhum contato
+                <span class="badge alarme-badge-tratado">
+                    <?= $alunosTratados ?> tratado<?= $alunosTratados === 1 ? '' : 's' ?>
                 </span>
-                <span class="badge text-bg-info text-dark">
-                    <?= $alunosAguardandoRetorno ?> contatado<?= $alunosAguardandoRetorno === 1 ? '' : 's' ?>, aguardando retorno
+                <span class="badge alarme-badge-nao-tratado">
+                    <?= $alunosNaoTratadosStatus ?> não tratado<?= $alunosNaoTratadosStatus === 1 ? '' : 's' ?>
+                    <span class="fw-normal">(≥ <?= $diasNaoTratado ?> dias sem ação)</span>
                 </span>
             </div>
         <?php endif; ?>
@@ -208,7 +214,7 @@ if (!function_exists('mapaResumoContato')) {
     <div class="d-flex flex-column align-items-stretch align-items-md-end gap-2">
         <?php if (!$semSeletorCurso && $cursosDisponiveis !== []): ?>
             <form method="get" action="<?= htmlspecialchars(url('/alarmes'), ENT_QUOTES, 'UTF-8') ?>" class="d-flex align-items-center gap-2">
-                <input type="hidden" name="abertos" value="<?= $filtroAbertos ?>">
+                <input type="hidden" name="status" value="<?= htmlspecialchars($statusFiltro, ENT_QUOTES, 'UTF-8') ?>">
                 <label for="curso" class="form-label mb-0 text-nowrap">Curso</label>
                 <select class="form-select" id="curso" name="curso" style="min-width: 260px;"
                         onchange="this.form.submit()">
@@ -224,15 +230,21 @@ if (!function_exists('mapaResumoContato')) {
                 </select>
             </form>
         <?php endif; ?>
-        <div class="btn-group">
-            <a href="<?= htmlspecialchars(url('/alarmes?abertos=1' . $queryCurso), ENT_QUOTES, 'UTF-8') ?>"
-               class="btn btn-sm <?= !empty($somenteAbertos) ? 'btn-primary' : 'btn-outline-primary' ?>">
-                Abertos
-            </a>
-            <a href="<?= htmlspecialchars(url('/alarmes?abertos=0' . $queryCurso), ENT_QUOTES, 'UTF-8') ?>"
-               class="btn btn-sm <?= empty($somenteAbertos) ? 'btn-primary' : 'btn-outline-primary' ?>">
-                Todos
-            </a>
+        <?php
+        $filtrosStatus = [
+            'abertos' => 'Abertos',
+            'tratados' => 'Tratados',
+            'nao_tratados' => 'Não tratados',
+            'todos' => 'Todos',
+        ];
+        ?>
+        <div class="btn-group flex-wrap">
+            <?php foreach ($filtrosStatus as $valor => $rotulo): ?>
+                <a href="<?= htmlspecialchars(url('/alarmes?status=' . $valor . $queryCurso), ENT_QUOTES, 'UTF-8') ?>"
+                   class="btn btn-sm <?= $statusFiltro === $valor ? 'btn-primary' : 'btn-outline-primary' ?>">
+                    <?= $rotulo ?>
+                </a>
+            <?php endforeach; ?>
         </div>
     </div>
 </div>
@@ -265,14 +277,12 @@ if (!function_exists('mapaResumoContato')) {
     // Os menus de ação ficam vazios e são preenchidos ao abrir, a partir dos <template> abaixo;
     // o formulário é montado no clique. Com formulários em cada menu, a lista de todos os
     // cursos passava de 60 MB de HTML e estourava a memória do PHP.
-    // Registrar contato não encerra o caso; encerrar é uma ação à parte.
     $itemContato = '<li><button type="button" class="dropdown-item js-acao-alarme" data-acao="contato">Registrar contato realizado fora do sistema…</button></li>';
     $itemEmail = '<li><button type="button" class="dropdown-item js-acao-alarme" data-acao="email">Enviar e-mail automático</button></li>';
-    $divisor = '<li><hr class="dropdown-divider"></li>';
     ?>
-    <template id="tpl-menu-geral"><?= $itemContato . $itemEmail . $divisor ?><li><button type="button" class="dropdown-item js-acao-alarme" data-acao="encerrar">Encerrar caso</button></li></template>
+    <template id="tpl-menu-geral"><?= $itemContato . $itemEmail ?></template>
     <template id="tpl-menu-geral-fechado"><?= $itemContato ?></template>
-    <template id="tpl-menu-alarme"><?= $itemContato . $itemEmail . $divisor ?><li><button type="button" class="dropdown-item js-acao-alarme" data-acao="encerrar">Encerrar este alarme</button></li></template>
+    <template id="tpl-menu-alarme"><?= $itemContato . $itemEmail ?></template>
     <?php ob_start(); ?>
     <div class="d-flex flex-column gap-4 lista-alarmes-alunos">
             <?php foreach ($alarmesPorAluno as $grupo): ?>
@@ -283,12 +293,23 @@ if (!function_exists('mapaResumoContato')) {
                 $emailAluno = trim((string)($aluno['email'] ?? ''));
                 $ingresso = trim((string)($aluno['ano_semestre_ingresso'] ?? ''));
                 $turmaEntrada = trim((string)($aluno['turma_entrada'] ?? ''));
-                $abertos = (int)($grupo['abertos'] ?? 0);
+                $pendentes = (int)($grupo['pendentes'] ?? $grupo['abertos'] ?? 0);
+                $statusCasoGrupo = (string)($grupo['status_caso'] ?? 'aberto');
+                $classeFundo = match ($statusCasoGrupo) {
+                    'tratado' => 'alarme-card-tratado',
+                    'nao_tratado' => 'alarme-card-nao-tratado',
+                    default => 'alarme-card-aberto',
+                };
+                $rotuloStatusGrupo = match ($statusCasoGrupo) {
+                    'tratado' => 'Tratado',
+                    'nao_tratado' => 'Não tratado',
+                    default => 'Aberto',
+                };
                 ?>
-                <article class="card border-0 shadow-sm aluno-alarme-card"
+                <article class="card border-0 shadow-sm aluno-alarme-card <?= $classeFundo ?>"
                          data-aluno-id="<?= (int)$aluno['id'] ?>"
                          data-curso-id="<?= (int)$aluno['curso_id'] ?>">
-                    <div class="card-header bg-white border-0 pb-0 pt-3 px-3">
+                    <div class="card-header border-0 pb-0 pt-3 px-3 bg-transparent">
                     <div class="d-flex justify-content-between align-items-start gap-2">
                         <div>
                             <div class="fw-semibold fs-6">
@@ -325,11 +346,14 @@ if (!function_exists('mapaResumoContato')) {
                                     <i class="bi bi-chat-left-text" aria-hidden="true"></i>
                                     <?= htmlspecialchars(mapaResumoContato($contatosAluno, $rotulosContatoExibicao, $rotulosMotivo), ENT_QUOTES, 'UTF-8') ?>
                                 </div>
-                            <?php elseif ($abertos > 0): ?>
+                            <?php elseif ($pendentes > 0): ?>
                                 <div class="small mt-1 text-danger-emphasis">Nenhum contato registrado.</div>
                             <?php endif; ?>
                         </div>
                         <div class="d-flex align-items-center gap-2 flex-wrap justify-content-end">
+                            <span class="badge alarme-badge-<?= htmlspecialchars(str_replace('_', '-', $statusCasoGrupo), ENT_QUOTES, 'UTF-8') ?>">
+                                <?= htmlspecialchars($rotuloStatusGrupo, ENT_QUOTES, 'UTF-8') ?>
+                            </span>
                             <span class="badge text-bg-light text-dark border">
                                 <?= (int)$grupo['total_alarmes'] ?>
                                 <?= (int)$grupo['total_alarmes'] === 1 ? 'alarme' : 'alarmes' ?>
@@ -342,7 +366,7 @@ if (!function_exists('mapaResumoContato')) {
                                     Ação geral
                                 </button>
                                 <ul class="dropdown-menu dropdown-menu-end"
-                                    data-menu="<?= $abertos > 0 ? 'tpl-menu-geral' : 'tpl-menu-geral-fechado' ?>"></ul>
+                                    data-menu="<?= $pendentes > 0 ? 'tpl-menu-geral' : 'tpl-menu-geral-fechado' ?>"></ul>
                             </div>
                         </div>
                     </div>
@@ -376,10 +400,10 @@ if (!function_exists('mapaResumoContato')) {
                             <tbody>
                                 <?php foreach ($grupo['disciplinas'] as $disciplina): ?>
                                     <?php
-                                    $todosVisualizados = true;
+                                    $todosTratados = true;
                                     foreach ($disciplina['alarmes'] as $alarme) {
-                                        if ((int)$alarme['visualizado'] === 0) {
-                                            $todosVisualizados = false;
+                                        if ((string)($alarme['status_caso'] ?? '') !== 'tratado') {
+                                            $todosTratados = false;
                                             break;
                                         }
                                     }
@@ -397,7 +421,7 @@ if (!function_exists('mapaResumoContato')) {
                                         ? 'Outra turma'
                                         : 'Outra disciplina';
                                     ?>
-                                    <tr class="<?= trim(($outraDisciplina ? 'linha-outra-disciplina ' : '') . ($todosVisualizados ? 'table-secondary' : '')) ?>">
+                                    <tr class="<?= trim(($outraDisciplina ? 'linha-outra-disciplina ' : '') . ($todosTratados ? 'table-secondary' : '')) ?>">
                                         <td class="td-codigo">
                                             <?php if ($disciplina['codigo'] !== ''): ?>
                                                 <code><?= htmlspecialchars($disciplina['codigo'], ENT_QUOTES, 'UTF-8') ?></code>
@@ -496,8 +520,13 @@ if (!function_exists('mapaResumoContato')) {
                                         <td class="td-acao">
                                             <div class="alarme-stack">
                                                 <?php foreach ($disciplina['alarmes'] as $alarme): ?>
+                                                    <?php
+                                                    $statusAlarme = (string)($alarme['status_caso'] ?? 'aberto');
+                                                    $pendenteAlarme = $statusAlarme === 'aberto' || $statusAlarme === 'nao_tratado';
+                                                    $enviadoEm = trim((string)($alarme['email_enviado_em'] ?? ''));
+                                                    ?>
                                                     <div class="alarme-slot">
-                                                        <?php if ((int)$alarme['visualizado'] === 0): ?>
+                                                        <?php if ($pendenteAlarme): ?>
                                                             <?php if ($outraDisciplina): ?>
                                                                 <span class="small text-secondary">—</span>
                                                             <?php else: ?>
@@ -515,11 +544,10 @@ if (!function_exists('mapaResumoContato')) {
                                                                     data-menu="tpl-menu-alarme"></ul>
                                                             </div>
                                                             <?php endif; ?>
-                                                            <?php $enviadoEm = trim((string)($alarme['email_enviado_em'] ?? '')); ?>
-                                                            <?php if ($enviadoEm !== '' && ($ts = strtotime($enviadoEm)) !== false): ?>
-                                                                <span class="small text-body-secondary ms-2 align-self-center">E-mail em <?= date('d/m', $ts) ?></span>
+                                                            <?php if ($statusAlarme === 'nao_tratado'): ?>
+                                                                <span class="small text-danger-emphasis ms-2 align-self-center">Não tratado</span>
                                                             <?php endif; ?>
-                                                        <?php else: ?>
+                                                        <?php elseif ((int)$alarme['visualizado'] === 1): ?>
                                                             <?php $info = mapaFormatarContatoAlarme($alarme, $rotulosContatoExibicao); ?>
                                                             <div class="small" title="<?= htmlspecialchars($info['titulo'], ENT_QUOTES, 'UTF-8') ?>">
                                                                 <div class="fw-semibold"><?= htmlspecialchars($info['rotulo'], ENT_QUOTES, 'UTF-8') ?></div>
@@ -537,6 +565,13 @@ if (!function_exists('mapaResumoContato')) {
                                                                     </div>
                                                                 <?php endif; ?>
                                                             </div>
+                                                        <?php elseif ($enviadoEm !== '' && ($ts = strtotime($enviadoEm)) !== false): ?>
+                                                            <div class="small">
+                                                                <div class="fw-semibold">E-mail automático</div>
+                                                                <div class="text-secondary"><?= date('d/m/Y', $ts) ?></div>
+                                                            </div>
+                                                        <?php else: ?>
+                                                            <div class="small fw-semibold">Tratado</div>
                                                         <?php endif; ?>
                                                     </div>
                                                 <?php endforeach; ?>
@@ -572,7 +607,7 @@ if (!function_exists('mapaResumoContato')) {
                     <input type="hidden" name="aluno_id" value="">
                     <input type="hidden" name="curso_id" value="">
                     <input type="hidden" name="codigo_disciplina" value="">
-                    <input type="hidden" name="abertos" value="<?= $filtroAbertos ?>">
+                    <input type="hidden" name="status" value="<?= htmlspecialchars($statusFiltro, ENT_QUOTES, 'UTF-8') ?>">
                     <input type="hidden" name="curso" value="<?= htmlspecialchars($cursoSelecionado, ENT_QUOTES, 'UTF-8') ?>">
                     <div class="row g-3">
                         <div class="col-sm-7">
@@ -624,7 +659,7 @@ if (!function_exists('mapaResumoContato')) {
                                   maxlength="<?= $maxObservacao ?>"></textarea>
                     </div>
                     <p class="small text-secondary mb-0">
-                        O caso continua aberto até o aluno voltar a frequentar ou alguém encerrar.
+                        Com o contato registrado, o alarme passa a constar como tratado.
                     </p>
                 </div>
                 <div class="modal-footer">
@@ -639,9 +674,8 @@ if (!function_exists('mapaResumoContato')) {
     (function () {
         const config = <?= json_encode([
             'urlEmail' => url('/alarmes/enviar-email'),
-            'urlEncerrar' => url('/alarmes/encerrar'),
             'coletaId' => (int)$coletaId,
-            'abertos' => (string)$filtroAbertos,
+            'status' => (string)$statusFiltro,
             'curso' => (string)$cursoSelecionado,
         ], JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?>;
 
@@ -684,7 +718,7 @@ if (!function_exists('mapaResumoContato')) {
             }
             // Dentro da linha de uma disciplina, a ação vale só para aquele alarme/disciplina.
             const alarme = botao.closest('[data-alarme-id]');
-            const campos = { abertos: config.abertos, curso: config.curso };
+            const campos = { status: config.status, curso: config.curso };
             const doAluno = {
                 coleta_id: config.coletaId,
                 aluno_id: cartao.dataset.alunoId,
@@ -718,22 +752,6 @@ if (!function_exists('mapaResumoContato')) {
                     campos.codigo_disciplina = alarme.dataset.disciplina || '';
                 }
                 enviar(config.urlEmail, campos);
-                return;
-            }
-
-            if (botao.dataset.acao === 'encerrar') {
-                const pergunta = alarme
-                    ? 'Encerrar este alarme? Ele só volta se a situação persistir.'
-                    : 'Encerrar o caso deste aluno (todos os alarmes abertos)?';
-                if (!confirm(pergunta)) {
-                    return;
-                }
-                if (alarme) {
-                    campos.alarme_id = alarme.dataset.alarmeId;
-                } else {
-                    Object.assign(campos, doAluno);
-                }
-                enviar(config.urlEncerrar, campos);
             }
         });
     })();

@@ -290,6 +290,25 @@ def emails_enviados_abertos(cursor: Any, coleta_id: int) -> dict[ChaveAlarme, st
     }
 
 
+def gerado_em_abertos(cursor: Any, coleta_id: int) -> dict[ChaveAlarme, str]:
+    """Inicio do episodio (gerado_em) dos alarmes abertos da coleta.
+
+    Precisa sobreviver a regeneracao: o relogio de "nao tratado" (14 dias)
+    conta desde a primeira aparicao do episodio, nao da ultima coleta.
+    """
+    return {
+        (int(r[0]), int(r[1]), str(r[2]), str(r[3])): str(r[4])
+        for r in cursor.execute(
+            """
+            SELECT aluno_id, curso_id, codigo_disciplina, tipo, gerado_em
+            FROM alarmes
+            WHERE coleta_id = ? AND visualizado = 0 AND gerado_em IS NOT NULL
+            """,
+            (coleta_id,),
+        ).fetchall()
+    }
+
+
 def herdar_emails_enviados(
     cursor: Any,
     coleta_id: int,
@@ -318,6 +337,41 @@ def herdar_emails_enviados(
               AND visualizado = 0 AND email_enviado_em IS NULL
             """,
             (enviado, coleta_id, aluno_id, curso_id, codigo, tipo),
+        )
+        total += int(cursor.rowcount or 0)
+    return total
+
+
+def herdar_gerado_em(
+    cursor: Any,
+    coleta_id: int,
+    guardados: dict[ChaveAlarme, str],
+) -> int:
+    """Preserva o gerado_em mais antigo do episodio nos alarmes abertos.
+
+    Fontes: a propria coleta (antes do limpar) e a coleta completa anterior.
+    """
+    herdados = dict(guardados)
+    anterior = coleta_anterior_id(cursor, coleta_id)
+    if anterior is not None:
+        for chave, gerado in gerado_em_abertos(cursor, anterior).items():
+            atual = herdados.get(chave)
+            if atual is None or gerado < atual:
+                herdados[chave] = gerado
+    if not herdados:
+        return 0
+
+    total = 0
+    for (aluno_id, curso_id, codigo, tipo), gerado in herdados.items():
+        cursor.execute(
+            """
+            UPDATE alarmes SET gerado_em = ?
+            WHERE coleta_id = ? AND aluno_id = ? AND curso_id = ?
+              AND codigo_disciplina = ? AND tipo = ?
+              AND visualizado = 0
+              AND (gerado_em IS NULL OR gerado_em > ?)
+            """,
+            (gerado, coleta_id, aluno_id, curso_id, codigo, tipo, gerado),
         )
         total += int(cursor.rowcount or 0)
     return total
@@ -999,12 +1053,14 @@ def gerar(coleta_id: int | None = None) -> dict[str, Any]:
     config = carregar_config_alarmes(cursor)
 
     emails_guardados = emails_enviados_abertos(cursor, coleta_id)
+    gerado_guardados = gerado_em_abertos(cursor, coleta_id)
     limpar_alarmes_coleta(cursor, coleta_id)
     n_tratados = trazer_alarmes_tratados(cursor, coleta_id)
     n_percentual = gerar_percentual_baixo(cursor, coleta_id, referencia, config)
     n_4dias = gerar_faltas_4dias(cursor, coleta_id, referencia, config)
     n_3semanas = gerar_faltas_3semanas(cursor, coleta_id, referencia, config)
     herdar_emails_enviados(cursor, coleta_id, emails_guardados)
+    herdar_gerado_em(cursor, coleta_id, gerado_guardados)
     n_staff_cancelados = cancelar_avisos_staff_alunos_ausentes(cursor, coleta_id)
 
     conn.commit()

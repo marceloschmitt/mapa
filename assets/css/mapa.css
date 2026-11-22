@@ -222,6 +222,29 @@ a.indicador-card:hover {
     font-weight: 600;
     color: var(--mapa-vermelho);
 }
+/* Alarmes de risco — status do caso */
+.alarme-card-aberto {
+    background: #fff6e8;
+}
+.alarme-card-tratado {
+    background: #eaf5ea;
+}
+.alarme-card-nao-tratado {
+    background: #fdecec;
+}
+.alarme-badge-aberto {
+    background: #ffe2b8;
+    color: #7a3d06;
+}
+.alarme-badge-tratado {
+    background: #cfe9cf;
+    color: #1e5a28;
+}
+.alarme-badge-nao-tratado {
+    background: #f5c6c6;
+    color: #7a1f1f;
+}
+
 /* Eficácia dos alarmes */
 .selo-comparacao {
     flex-shrink: 0;

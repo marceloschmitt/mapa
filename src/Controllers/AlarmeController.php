@@ -35,7 +35,10 @@ class AlarmeController extends Controller
         $codigosDisciplina = $escopo['codigosDisciplina'];
         $cursoExibido = $this->rotuloEscopoExibido($repo, $cursoIds, $codigosDisciplina);
         $avisoEscopo = $this->avisoEscopo($cursoIds, $codigosDisciplina);
-        $somenteAbertos = ($_GET['abertos'] ?? '1') === '1';
+        $statusFiltro = AnalyticsRepository::normalizarStatusFiltro(
+            $_GET['status'] ?? null,
+            array_key_exists('abertos', $_GET) ? $_GET['abertos'] : null
+        );
 
         $dadosBase = [
             'cursosDisponiveis' => $cursosDisponiveis,
@@ -46,7 +49,8 @@ class AlarmeController extends Controller
             'isCoordenador' => $isCoordenador,
             'isProfessor' => $isProfessor,
             'codigosMinhasDisciplinas' => $isProfessor ? ($codigosDisciplina ?? []) : [],
-            'somenteAbertos' => $somenteAbertos,
+            'statusFiltro' => $statusFiltro,
+            'diasNaoTratado' => AnalyticsRepository::DIAS_NAO_TRATADO,
             'rotulosContato' => ContatoRepository::CANAIS,
             'rotulosContatoExibicao' => ContatoRepository::ROTULOS_CANAL,
             'rotulosMotivo' => ContatoRepository::MOTIVOS,
@@ -55,6 +59,14 @@ class AlarmeController extends Controller
             'maxObservacao' => ContatoRepository::MAX_OBSERVACAO,
             'alunosSemContato' => 0,
             'alunosAguardandoRetorno' => 0,
+            'resumoStatus' => [
+                'alunos_abertos' => 0,
+                'alarmes_abertos' => 0,
+                'alunos_tratados' => 0,
+                'alarmes_tratados' => 0,
+                'alunos_nao_tratados' => 0,
+                'alarmes_nao_tratados' => 0,
+            ],
             'isAdmin' => Auth::isAdmin(),
         ];
 
@@ -92,7 +104,7 @@ class AlarmeController extends Controller
         }
 
         $incluirOutras = $isProfessor;
-        $resumoAbertos = $repo->resumoAlarmesNaoTratados(
+        $resumoStatus = $repo->resumoAlarmesNaoTratados(
             $coletaId,
             $cursoIds,
             $codigosDisciplina,
@@ -100,7 +112,7 @@ class AlarmeController extends Controller
         );
         $alarmes = $repo->alarmes(
             $coletaId,
-            $somenteAbertos,
+            $statusFiltro,
             null,
             null,
             $cursoIds,
@@ -109,7 +121,7 @@ class AlarmeController extends Controller
         );
         $totaisPorTipo = $repo->contagemAlarmesPorTipo(
             $coletaId,
-            $somenteAbertos,
+            $statusFiltro,
             $cursoIds,
             $codigosDisciplina,
             $incluirOutras
@@ -136,6 +148,8 @@ class AlarmeController extends Controller
                     'disciplinas' => [],
                     'total_alarmes' => 0,
                     'abertos' => 0,
+                    'pendentes' => 0,
+                    'status_caso' => 'tratado',
                 ];
             }
 
@@ -165,9 +179,17 @@ class AlarmeController extends Controller
 
             $alarmesPorAluno[$chaveAluno]['disciplinas'][$chaveDisc]['alarmes'][] = $alarme;
             $alarmesPorAluno[$chaveAluno]['total_alarmes']++;
-            if ((int)$alarme['visualizado'] === 0) {
+            $statusCaso = (string)($alarme['status_caso'] ?? 'aberto');
+            if ($statusCaso === 'aberto') {
                 $alarmesPorAluno[$chaveAluno]['abertos']++;
+                $alarmesPorAluno[$chaveAluno]['pendentes']++;
+            } elseif ($statusCaso === 'nao_tratado') {
+                $alarmesPorAluno[$chaveAluno]['pendentes']++;
             }
+            $alarmesPorAluno[$chaveAluno]['status_caso'] = $this->piorStatusCaso(
+                (string)$alarmesPorAluno[$chaveAluno]['status_caso'],
+                $statusCaso
+            );
         }
 
         $codigosDisc = [];
@@ -218,20 +240,21 @@ class AlarmeController extends Controller
                 );
             }
 
-            $temCriticoAberto = false;
+            $temCriticoPendente = false;
             foreach ($grupo['disciplinas'] as $disciplina) {
                 foreach ($disciplina['alarmes'] as $alarme) {
+                    $statusCaso = (string)($alarme['status_caso'] ?? '');
                     if (
                         (string)($alarme['severidade'] ?? '') === 'critico'
-                        && (int)($alarme['visualizado'] ?? 0) === 0
+                        && ($statusCaso === 'aberto' || $statusCaso === 'nao_tratado')
                     ) {
-                        $temCriticoAberto = true;
+                        $temCriticoPendente = true;
                         break 2;
                     }
                 }
             }
             $grupo['email_critico_motivo'] = null;
-            if ($temCriticoAberto) {
+            if ($temCriticoPendente) {
                 $candidatosEmailCritico[] = [
                     'aluno_id' => (int)$grupo['aluno']['id'],
                     'curso_id' => (int)$grupo['aluno']['curso_id'],
@@ -255,7 +278,7 @@ class AlarmeController extends Controller
             unset($grupo);
         }
 
-        // Contatos de cada aluno; com casos abertos, quem ainda não teve contato e quem aguarda retorno.
+        // Contatos de cada aluno; com pendentes, quem ainda não teve contato e quem aguarda retorno.
         $resumoContatos = (new ContatoRepository())->resumoPorAluno(array_map(
             static fn(array $grupo): int => (int)$grupo['aluno']['id'],
             array_values($alarmesPorAluno)
@@ -265,7 +288,7 @@ class AlarmeController extends Controller
         foreach ($alarmesPorAluno as &$grupo) {
             $chave = (int)$grupo['aluno']['id'] . '|' . (int)$grupo['aluno']['curso_id'];
             $grupo['contatos'] = $resumoContatos[$chave] ?? null;
-            if ((int)$grupo['abertos'] > 0) {
+            if ((int)$grupo['pendentes'] > 0) {
                 $grupo['contatos'] === null ? $alunosSemContato++ : $alunosAguardandoRetorno++;
             }
         }
@@ -274,23 +297,33 @@ class AlarmeController extends Controller
         $this->render('alarmes/index', array_merge($dadosBase, [
             'alunosSemContato' => $alunosSemContato,
             'alunosAguardandoRetorno' => $alunosAguardandoRetorno,
+            'resumoStatus' => $resumoStatus,
             'coleta' => $coleta,
             'alarmesPorAluno' => array_values($alarmesPorAluno),
             'totalAlarmes' => $totalAlarmes,
             'exibidos' => count($alarmes),
-            'alunosNaoTratados' => (int)$resumoAbertos['alunos'],
-            'alarmesNaoTratados' => (int)$resumoAbertos['alarmes'],
-            'alunosComAlarmes' => (int)$resumoAbertos['alunos_total'],
+            'alunosNaoTratados' => (int)$resumoStatus['alunos_nao_tratados'],
+            'alarmesNaoTratados' => (int)$resumoStatus['alarmes_nao_tratados'],
+            'alunosComAlarmes' => (int)$resumoStatus['alunos_total'],
             'avisoCoordenador' => null,
             'sucesso' => Session::flash('sucesso'),
             'erro' => Session::flash('erro'),
         ]));
     }
 
+    /** Prioridade visual: não tratado > aberto > tratado. */
+    private function piorStatusCaso(string $atual, string $novo): string
+    {
+        $ordem = ['tratado' => 0, 'aberto' => 1, 'nao_tratado' => 2];
+        $atualN = $ordem[$atual] ?? 0;
+        $novoN = $ordem[$novo] ?? 0;
+
+        return $novoN >= $atualN ? $novo : $atual;
+    }
+
     /**
      * Registra um contato com o aluno (data real, canal, se conseguiu falar,
-     * motivo). Não encerra o caso: ele segue aberto até o aluno voltar a
-     * frequentar ou alguém encerrar.
+     * motivo). O alarme passa a contar como tratado na tela de alarmes.
      */
     public function contato(): void
     {
@@ -325,10 +358,7 @@ class AlarmeController extends Controller
             'registrado_por' => (int)$user['id'],
         ]);
 
-        Session::flash(
-            'sucesso',
-            'Contato registrado. O caso continua aberto até o aluno voltar a frequentar ou alguém encerrar.'
-        );
+        Session::flash('sucesso', 'Contato registrado. O alarme passa a constar como tratado.');
         $this->redirect($redirect);
     }
 
@@ -395,12 +425,15 @@ class AlarmeController extends Controller
      */
     private function destinoRetorno(): array
     {
-        $abertos = ($_POST['abertos'] ?? '1') === '1' ? '1' : '0';
+        $status = AnalyticsRepository::normalizarStatusFiltro(
+            $_POST['status'] ?? null,
+            array_key_exists('abertos', $_POST) ? $_POST['abertos'] : null
+        );
         $cursoParam = trim((string)($_POST['curso'] ?? 'todos'));
         if ($cursoParam === '') {
             $cursoParam = 'todos';
         }
-        $redirect = '/alarmes?abertos=' . $abertos;
+        $redirect = '/alarmes?status=' . rawurlencode($status);
         if ($cursoParam !== 'todos') {
             $redirect .= '&curso=' . rawurlencode($cursoParam);
         }
@@ -459,12 +492,15 @@ class AlarmeController extends Controller
         $codigoDisciplina = array_key_exists('codigo_disciplina', $_POST)
             ? trim((string)$_POST['codigo_disciplina'])
             : null;
-        $abertos = ($_POST['abertos'] ?? '1') === '1' ? '1' : '0';
+        $status = AnalyticsRepository::normalizarStatusFiltro(
+            $_POST['status'] ?? null,
+            array_key_exists('abertos', $_POST) ? $_POST['abertos'] : null
+        );
         $cursoParam = trim((string)($_POST['curso'] ?? 'todos'));
         if ($cursoParam === '') {
             $cursoParam = 'todos';
         }
-        $redirect = '/alarmes?abertos=' . $abertos;
+        $redirect = '/alarmes?status=' . rawurlencode($status);
         if ($cursoParam !== 'todos') {
             $redirect .= '&curso=' . rawurlencode($cursoParam);
         }

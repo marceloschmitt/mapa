@@ -137,6 +137,22 @@ class EmailDoEpisodioTest(unittest.TestCase):
         gerar_alarmes.herdar_emails_enviados(self.conn.cursor(), 5, {})
         self.assertEqual(self.enviados(5), {1: None})
 
+    def test_gerado_em_do_episodio_e_preservado(self) -> None:
+        self.conn.execute(
+            "UPDATE alarmes SET gerado_em = '2026-10-01 08:00:00' "
+            "WHERE coleta_id = 1 AND aluno_id = 1"
+        )
+        self.alarme(3, 1, "X", None)
+        self.conn.execute(
+            "UPDATE alarmes SET gerado_em = '2026-11-10 12:00:00' "
+            "WHERE coleta_id = 3 AND aluno_id = 1"
+        )
+        gerar_alarmes.herdar_gerado_em(self.conn.cursor(), 3, {})
+        gerado = self.conn.execute(
+            "SELECT gerado_em FROM alarmes WHERE coleta_id = 3 AND aluno_id = 1"
+        ).fetchone()[0]
+        self.assertEqual(gerado, "2026-10-01 08:00:00")
+
 
 if __name__ == "__main__":
     unittest.main()

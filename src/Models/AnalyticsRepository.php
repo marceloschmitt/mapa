@@ -1559,6 +1559,33 @@ class AnalyticsRepository
         return self::STATUS_ABERTOS;
     }
 
+    /** Cláusula AND do filtro por status do caso (string vazia = todos). */
+    public function sqlFiltroStatusCaso(string $alias, string $status): string
+    {
+        $status = self::normalizarStatusFiltro($status);
+        if ($status === self::STATUS_TODOS) {
+            return '';
+        }
+
+        return ' AND (' . $this->sqlStatusCaso($alias) . ') = \''
+            . match ($status) {
+                self::STATUS_TRATADOS => 'tratado',
+                self::STATUS_NAO_TRATADOS => 'nao_tratado',
+                default => 'aberto',
+            }
+            . '\'';
+    }
+
+    /** Converte bool legado ou string de status no filtro canônico. */
+    private function statusDeParametro(bool|string $somenteNaoVisualizadosOuStatus): string
+    {
+        if (is_string($somenteNaoVisualizadosOuStatus)) {
+            return self::normalizarStatusFiltro($somenteNaoVisualizadosOuStatus);
+        }
+
+        return $somenteNaoVisualizadosOuStatus ? self::STATUS_ABERTOS : self::STATUS_TODOS;
+    }
+
     /**
      * @param list<int>|null $cursoIds
      * @param list<string>|null $codigosDisciplina
@@ -1579,9 +1606,7 @@ class AnalyticsRepository
             return [];
         }
 
-        $status = is_string($somenteNaoVisualizadosOuStatus)
-            ? self::normalizarStatusFiltro($somenteNaoVisualizadosOuStatus)
-            : ($somenteNaoVisualizadosOuStatus ? self::STATUS_ABERTOS : self::STATUS_TODOS);
+        $status = $this->statusDeParametro($somenteNaoVisualizadosOuStatus);
 
         $sqlStatus = $this->sqlStatusCaso('al');
         $sql = 'SELECT al.id, al.tipo, al.severidade, al.mensagem, al.codigo_disciplina,
@@ -1667,7 +1692,7 @@ class AnalyticsRepository
      */
     public function contagemAlarmesPorTipo(
         int $coletaId,
-        bool $somenteNaoVisualizados = false,
+        bool|string $somenteNaoVisualizadosOuStatus = false,
         ?array $cursoIds = null,
         ?array $codigosDisciplina = null,
         bool $incluirOutrasDisciplinasDosAlunos = false
@@ -1684,31 +1709,30 @@ class AnalyticsRepository
             return $vazio;
         }
 
-        $sql = 'SELECT tipo, COUNT(*) AS total
-                FROM alarmes
-                WHERE coleta_id = :coleta_id';
+        $status = $this->statusDeParametro($somenteNaoVisualizadosOuStatus);
 
-        if ($somenteNaoVisualizados) {
-            $sql .= ' AND visualizado = 0';
-        }
+        $sql = 'SELECT al.tipo, COUNT(*) AS total
+                FROM alarmes al
+                WHERE al.coleta_id = :coleta_id';
+        $sql .= $this->sqlFiltroStatusCaso('al', $status);
 
-        [$sql, $cursoParams] = $this->appendCursoFilter($sql, $cursoIds, 'curso_id');
+        [$sql, $cursoParams] = $this->appendCursoFilter($sql, $cursoIds, 'al.curso_id');
         if ($incluirOutrasDisciplinasDosAlunos) {
             [$sql, $discParams] = $this->appendFiltroAlunosDasDisciplinas(
                 $sql,
                 $codigosDisciplina,
-                'alarmes'
+                'al'
             );
         } else {
         [$sql, $discParams] = $this->appendCodigoDisciplinaFilter(
             $sql,
             $codigosDisciplina,
-            'codigo_disciplina',
-            'id_turma'
+            'al.codigo_disciplina',
+            'al.id_turma'
         );
         }
 
-        $sql .= ' GROUP BY tipo';
+        $sql .= ' GROUP BY al.tipo';
 
         $statement = $this->db->prepare($sql);
         $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
@@ -1729,9 +1753,18 @@ class AnalyticsRepository
     }
 
     /**
+     * Contagens por status do caso. `alunos`/`alarmes` = abertos + não tratados
+     * (pendentes de atenção), para o painel geral continuar mostrando o que falta.
+     *
      * @param list<int>|null $cursoIds
      * @param list<string>|null $codigosDisciplina
-     * @return array{alunos: int, alarmes: int, alunos_total: int, alarmes_total: int}
+     * @return array{
+     *   alunos: int, alarmes: int,
+     *   alunos_abertos: int, alarmes_abertos: int,
+     *   alunos_tratados: int, alarmes_tratados: int,
+     *   alunos_nao_tratados: int, alarmes_nao_tratados: int,
+     *   alunos_total: int, alarmes_total: int
+     * }
      */
     public function resumoAlarmesNaoTratados(
         int $coletaId,
@@ -1742,6 +1775,12 @@ class AnalyticsRepository
         $vazio = [
             'alunos' => 0,
             'alarmes' => 0,
+            'alunos_abertos' => 0,
+            'alarmes_abertos' => 0,
+            'alunos_tratados' => 0,
+            'alarmes_tratados' => 0,
+            'alunos_nao_tratados' => 0,
+            'alarmes_nao_tratados' => 0,
             'alunos_total' => 0,
             'alarmes_total' => 0,
         ];
@@ -1752,38 +1791,55 @@ class AnalyticsRepository
             return $vazio;
         }
 
-        $sqlBase = 'FROM alarmes WHERE coleta_id = :coleta_id';
-        [$sqlBase, $cursoParams] = $this->appendCursoFilter($sqlBase, $cursoIds, 'curso_id');
+        $sqlBase = 'FROM alarmes al WHERE al.coleta_id = :coleta_id';
+        [$sqlBase, $cursoParams] = $this->appendCursoFilter($sqlBase, $cursoIds, 'al.curso_id');
         if ($incluirOutrasDisciplinasDosAlunos) {
             [$sqlBase, $discParams] = $this->appendFiltroAlunosDasDisciplinas(
                 $sqlBase,
                 $codigosDisciplina,
-                'alarmes'
+                'al'
             );
         } else {
         [$sqlBase, $discParams] = $this->appendCodigoDisciplinaFilter(
             $sqlBase,
             $codigosDisciplina,
-            'codigo_disciplina',
-            'id_turma'
+            'al.codigo_disciplina',
+            'al.id_turma'
         );
         }
 
-        $sqlAbertos = 'SELECT COUNT(*) AS alarmes,
-                              COUNT(DISTINCT aluno_id || \'-\' || curso_id) AS alunos
-                       ' . $sqlBase . ' AND visualizado = 0';
+        $statusExpr = $this->sqlStatusCaso('al');
+        $sql = 'SELECT (' . $statusExpr . ') AS status_caso,
+                       COUNT(*) AS alarmes,
+                       COUNT(DISTINCT al.aluno_id || \'-\' || al.curso_id) AS alunos
+                ' . $sqlBase . '
+                GROUP BY status_caso';
+
+        $statement = $this->db->prepare($sql);
+        $statement->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $this->bindNamedParams($statement, $cursoParams);
+        $this->bindNamedParams($statement, $discParams);
+        $statement->execute();
+
+        $porStatus = [
+            'aberto' => ['alunos' => 0, 'alarmes' => 0],
+            'tratado' => ['alunos' => 0, 'alarmes' => 0],
+            'nao_tratado' => ['alunos' => 0, 'alarmes' => 0],
+        ];
+        $alarmesTotal = 0;
+        foreach ($statement->fetchAll() as $row) {
+            $chave = (string)($row['status_caso'] ?? '');
+            $alunos = (int)($row['alunos'] ?? 0);
+            $alarmes = (int)($row['alarmes'] ?? 0);
+            $alarmesTotal += $alarmes;
+            if (isset($porStatus[$chave])) {
+                $porStatus[$chave] = ['alunos' => $alunos, 'alarmes' => $alarmes];
+            }
+        }
 
         $sqlTotal = 'SELECT COUNT(*) AS alarmes,
-                            COUNT(DISTINCT aluno_id || \'-\' || curso_id) AS alunos
+                            COUNT(DISTINCT al.aluno_id || \'-\' || al.curso_id) AS alunos
                      ' . $sqlBase;
-
-        $abertos = $this->db->prepare($sqlAbertos);
-        $abertos->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
-        $this->bindNamedParams($abertos, $cursoParams);
-        $this->bindNamedParams($abertos, $discParams);
-        $abertos->execute();
-        $rowAbertos = $abertos->fetch() ?: [];
-
         $total = $this->db->prepare($sqlTotal);
         $total->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
         $this->bindNamedParams($total, $cursoParams);
@@ -1791,11 +1847,28 @@ class AnalyticsRepository
         $total->execute();
         $rowTotal = $total->fetch() ?: [];
 
+        $sqlPendentes = 'SELECT COUNT(*) AS alarmes,
+                                COUNT(DISTINCT al.aluno_id || \'-\' || al.curso_id) AS alunos
+                         ' . $sqlBase
+            . ' AND (' . $statusExpr . ') IN (\'aberto\', \'nao_tratado\')';
+        $pendentes = $this->db->prepare($sqlPendentes);
+        $pendentes->bindValue('coleta_id', $coletaId, PDO::PARAM_INT);
+        $this->bindNamedParams($pendentes, $cursoParams);
+        $this->bindNamedParams($pendentes, $discParams);
+        $pendentes->execute();
+        $rowPendentes = $pendentes->fetch() ?: [];
+
         return [
-            'alunos' => (int)($rowAbertos['alunos'] ?? 0),
-            'alarmes' => (int)($rowAbertos['alarmes'] ?? 0),
+            'alunos' => (int)($rowPendentes['alunos'] ?? 0),
+            'alarmes' => (int)($rowPendentes['alarmes'] ?? 0),
+            'alunos_abertos' => $porStatus['aberto']['alunos'],
+            'alarmes_abertos' => $porStatus['aberto']['alarmes'],
+            'alunos_tratados' => $porStatus['tratado']['alunos'],
+            'alarmes_tratados' => $porStatus['tratado']['alarmes'],
+            'alunos_nao_tratados' => $porStatus['nao_tratado']['alunos'],
+            'alarmes_nao_tratados' => $porStatus['nao_tratado']['alarmes'],
             'alunos_total' => (int)($rowTotal['alunos'] ?? 0),
-            'alarmes_total' => (int)($rowTotal['alarmes'] ?? 0),
+            'alarmes_total' => (int)($rowTotal['alarmes'] ?? $alarmesTotal),
         ];
     }
 
