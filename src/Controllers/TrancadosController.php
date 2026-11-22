@@ -6,6 +6,7 @@ namespace Mapa\Controllers;
 use Mapa\Core\Auth;
 use Mapa\Core\Controller;
 use Mapa\Models\AnalyticsRepository;
+use Mapa\Models\ConfigRepository;
 
 class TrancadosController extends Controller
 {
@@ -23,6 +24,7 @@ class TrancadosController extends Controller
         $cursosDisponiveis = $semSeletorCurso ? [] : $repo->listarCursos(null);
         $cursoSelecionado = $this->cursoSelecionado($cursosDisponiveis);
         $escopo = $this->resolverEscopo($repo, $cursoSelecionado);
+        $periodoAtual = trim((string)((new ConfigRepository())->get(ConfigRepository::API_PERIODO_LETIVO) ?? ''));
 
         $linhas = [];
         if ($coleta !== null && $escopo['aviso'] === null) {
@@ -56,9 +58,58 @@ class TrancadosController extends Controller
         }
         unset($grupo);
 
+        $dadosFrequenciaCorrente = [];
+        if ($coleta !== null && $linhas !== []) {
+            $coletaId = (int)$coleta['id'];
+            $idsAlunos = array_values(array_unique(array_map(
+                static fn(array $linha): int => (int)($linha['aluno_id'] ?? 0),
+                $linhas
+            )));
+            $disciplinasFreq = $repo->disciplinasFrequenciaCorrente($coletaId, $idsAlunos);
+            $freqCurso = $repo->frequenciaCursoPorAlunos($coletaId, $idsAlunos);
+            $vistos = [];
+            foreach ($linhas as $linha) {
+                $chaveFreq = (int)($linha['aluno_id'] ?? 0) . '-' . (int)($linha['curso_id'] ?? 0);
+                if (isset($vistos[$chaveFreq])) {
+                    continue;
+                }
+                $vistos[$chaveFreq] = true;
+                $nomeSocial = trim((string)($linha['nome_social'] ?? ''));
+                $nome = $nomeSocial !== ''
+                    ? $nomeSocial
+                    : trim((string)($linha['nome'] ?? ''));
+                $fc = $freqCurso[$chaveFreq] ?? [];
+                $desdeRaw = trim((string)($fc['frequencia_desde'] ?? ''));
+                $desdeTs = $desdeRaw !== '' ? strtotime($desdeRaw) : false;
+                $disciplinas = $disciplinasFreq[$chaveFreq] ?? [];
+                $dadosFrequenciaCorrente[$chaveFreq] = [
+                    'nome' => $nome,
+                    'matricula' => (string)($linha['matricula'] ?? ''),
+                    'curso' => (string)($linha['nome_curso'] ?? ''),
+                    'periodo' => $periodoAtual,
+                    'anual_desde' => $desdeTs !== false ? date('d/m/Y', $desdeTs) : '',
+                    'ingresso' => (string)($linha['ano_semestre_ingresso'] ?? ''),
+                    'frequencia' => $fc['frequencia'] ?? null,
+                    'disciplinas' => array_map(
+                        static function (array $d): array {
+                            return array_filter([
+                                'codigo' => (string)($d['codigo_disciplina'] ?? ''),
+                                'nome' => (string)($d['disciplina'] ?? ''),
+                                'frequencia' => $d['frequencia'] ?? null,
+                                'situacao' => (string)($d['situacao'] ?? ''),
+                                'data_trancamento' => (string)($d['data_trancamento'] ?? ''),
+                            ], static fn($v): bool => $v !== '' && $v !== null);
+                        },
+                        $disciplinas
+                    ),
+                ];
+            }
+        }
+
         $this->render('trancados/index', [
             'coleta' => $coleta,
             'porCurso' => array_values($porCurso),
+            'dadosFrequenciaCorrente' => $dadosFrequenciaCorrente,
             'totalAlunos' => count($alunosUnicos),
             'totalCursos' => count($porCurso),
             'totalRegistros' => count($linhas),
