@@ -3221,4 +3221,97 @@ class AnalyticsRepository
 
         return $row === false ? null : $row;
     }
+
+    /**
+     * Taxa de alarmes por modalidade de ingresso na coleta.
+     * População = vínculos em frequencia_curso; com alarme = pelo menos 1 alarme
+     * no mesmo aluno/curso. Ordenado pela taxa (maior primeiro).
+     *
+     * @return list<array{
+     *   modalidade: string,
+     *   codigo: string,
+     *   populacao: int,
+     *   com_alarme: int,
+     *   alarmes: int,
+     *   taxa_pct: float|null
+     * }>
+     */
+    public function alarmesPorModalidadeIngresso(int $coletaId): array
+    {
+        $sql = 'WITH pop AS (
+                    SELECT fc.aluno_id, fc.curso_id,
+                           COALESCE(NULLIF(TRIM(ac.modalidade_ingresso), \'\'), \'(sem modalidade)\')
+                               AS modalidade
+                    FROM frequencia_curso fc
+                    LEFT JOIN aluno_cursos ac
+                      ON ac.aluno_id = fc.aluno_id AND ac.curso_id = fc.curso_id
+                    WHERE fc.coleta_id = :coleta_id
+                ),
+                alarmados AS (
+                    SELECT DISTINCT aluno_id, curso_id
+                    FROM alarmes
+                    WHERE coleta_id = :coleta_id
+                ),
+                contagem_alarmes AS (
+                    SELECT aluno_id, curso_id, COUNT(*) AS n_alarmes
+                    FROM alarmes
+                    WHERE coleta_id = :coleta_id
+                    GROUP BY aluno_id, curso_id
+                )
+                SELECT p.modalidade,
+                       COUNT(*) AS populacao,
+                       SUM(CASE WHEN a.aluno_id IS NOT NULL THEN 1 ELSE 0 END) AS com_alarme,
+                       COALESCE(SUM(ca.n_alarmes), 0) AS alarmes
+                FROM pop p
+                LEFT JOIN alarmados a
+                  ON a.aluno_id = p.aluno_id AND a.curso_id = p.curso_id
+                LEFT JOIN contagem_alarmes ca
+                  ON ca.aluno_id = p.aluno_id AND ca.curso_id = p.curso_id
+                GROUP BY p.modalidade';
+
+        $statement = $this->db->prepare($sql);
+        $statement->execute(['coleta_id' => $coletaId]);
+        $linhas = [];
+        foreach ($statement->fetchAll() as $row) {
+            $modalidade = (string)($row['modalidade'] ?? '(sem modalidade)');
+            $populacao = (int)($row['populacao'] ?? 0);
+            $comAlarme = (int)($row['com_alarme'] ?? 0);
+            $alarmes = (int)($row['alarmes'] ?? 0);
+            $codigo = '';
+            if (preg_match('/^(\d+)\s*-/', $modalidade, $m) === 1) {
+                $codigo = $m[1];
+            }
+            $linhas[] = [
+                'modalidade' => $modalidade,
+                'codigo' => $codigo,
+                'populacao' => $populacao,
+                'com_alarme' => $comAlarme,
+                'alarmes' => $alarmes,
+                'taxa_pct' => $populacao > 0
+                    ? round(100.0 * $comAlarme / $populacao, 1)
+                    : null,
+            ];
+        }
+
+        usort($linhas, static function (array $a, array $b): int {
+            $ta = $a['taxa_pct'];
+            $tb = $b['taxa_pct'];
+            if ($ta === null && $tb === null) {
+                return strcmp((string)$a['modalidade'], (string)$b['modalidade']);
+            }
+            if ($ta === null) {
+                return 1;
+            }
+            if ($tb === null) {
+                return -1;
+            }
+            if ($ta === $tb) {
+                return ((int)$b['populacao']) <=> ((int)$a['populacao']);
+            }
+
+            return $tb <=> $ta;
+        });
+
+        return $linhas;
+    }
 }

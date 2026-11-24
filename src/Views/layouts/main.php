@@ -59,6 +59,7 @@ $itensSituacao = [
 $itensAdmin = [
     ['/usuarios', 'bi-people', 'Usuários', true],
     ['/estatisticas-uso', 'bi-bar-chart', 'Estatísticas de uso', true],
+    ['/modalidade-ingresso', 'bi-pie-chart', 'Modalidade de ingresso', true],
     ['divisor', '', 'Integrações', true],
     ['/configuracoes/api', 'bi-plug', 'API', true],
     ['/configuracoes/ldap', 'bi-diagram-3', 'LDAP', true],

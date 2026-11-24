@@ -57,13 +57,14 @@ CREATE TABLE IF NOT EXISTS cursos (
     curso_nivel TEXT
 );
 
--- Ingresso do aluno no curso (ano/semestre e turma de entrada).
+-- Ingresso do aluno no curso (ano/semestre, turma e modalidade/cota).
 CREATE TABLE IF NOT EXISTS aluno_cursos (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     aluno_id INTEGER NOT NULL,
     curso_id INTEGER NOT NULL,
     ano_semestre_ingresso TEXT,
     turma_entrada TEXT,
+    modalidade_ingresso TEXT,
     FOREIGN KEY (aluno_id) REFERENCES alunos(id) ON DELETE CASCADE,
     FOREIGN KEY (curso_id) REFERENCES cursos(id) ON DELETE CASCADE,
     UNIQUE (aluno_id, curso_id)

@@ -306,6 +306,11 @@ def montar_resultado(
                 or ""
             ).strip() or None,
             "turma_entrada": str(curso.get("turma_entrada") or "").strip() or None,
+            "modalidade_ingresso": str(
+                curso.get("modalidade_ingresso")
+                or vinculo.get("modalidade_ingresso")
+                or ""
+            ).strip() or None,
             "status_discente": status_discente,
             "frequencia_geral": frequencia_geral,
             "disciplinas": disciplinas,

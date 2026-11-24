@@ -103,14 +103,15 @@ def upsert_aluno_curso(
     curso_id: int,
     registro: dict[str, Any],
 ) -> None:
-    """Persiste ano/semestre de ingresso e turma de entrada do aluno no curso."""
+    """Persiste ingresso, turma e modalidade/cota do aluno no curso."""
     ingresso = str(registro.get("ano_semestre_ingresso") or "").strip() or None
     turma = str(registro.get("turma_entrada") or "").strip() or None
+    modalidade = str(registro.get("modalidade_ingresso") or "").strip() or None
     cursor.execute(
         """
         INSERT INTO aluno_cursos (
-            aluno_id, curso_id, ano_semestre_ingresso, turma_entrada
-        ) VALUES (?, ?, ?, ?)
+            aluno_id, curso_id, ano_semestre_ingresso, turma_entrada, modalidade_ingresso
+        ) VALUES (?, ?, ?, ?, ?)
         ON CONFLICT(aluno_id, curso_id) DO UPDATE SET
             ano_semestre_ingresso = COALESCE(
                 excluded.ano_semestre_ingresso,
@@ -119,9 +120,13 @@ def upsert_aluno_curso(
             turma_entrada = COALESCE(
                 excluded.turma_entrada,
                 aluno_cursos.turma_entrada
+            ),
+            modalidade_ingresso = COALESCE(
+                excluded.modalidade_ingresso,
+                aluno_cursos.modalidade_ingresso
             )
         """,
-        (aluno_id, curso_id, ingresso, turma),
+        (aluno_id, curso_id, ingresso, turma, modalidade),
     )
 
 

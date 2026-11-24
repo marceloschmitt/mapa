@@ -366,6 +366,7 @@ def garantir_schema(conexao: sqlite3.Connection | None = None) -> None:
     _ensure_column(conn, "alarmes", "id_turma", "INTEGER")
     _ensure_column(conn, "alarmes", "email_enviado_em", "TEXT")
     _ensure_column(conn, "alarmes", "fechamento", "TEXT")
+    _ensure_column(conn, "aluno_cursos", "modalidade_ingresso", "TEXT")
     _ensure_column(conn, "efeito_contatos_series", "alarme_tipo", "TEXT")
     _ensure_column(conn, "efeito_contatos_series", "dias_ate_contato", "INTEGER")
     _ensure_column(conn, "efeito_contatos_series", "ingressante", "INTEGER NOT NULL DEFAULT 0")

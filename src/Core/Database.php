@@ -144,6 +144,7 @@ class Database
         self::ensureColumn('alarmes', 'id_turma', 'INTEGER');
         self::ensureColumn('alarmes', 'email_enviado_em', 'TEXT');
         self::ensureColumn('alarmes', 'fechamento', 'TEXT');
+        self::ensureColumn('aluno_cursos', 'modalidade_ingresso', 'TEXT');
         self::migrarContatosAluno();
         self::migrarContatoAlarmesDeEmails();
         self::migrarAlarmesSemVisualizado();

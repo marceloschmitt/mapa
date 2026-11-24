@@ -17,6 +17,7 @@ use Mapa\Controllers\FeriadoController;
 use Mapa\Controllers\FrequenciaAnualController;
 use Mapa\Controllers\IngressantesController;
 use Mapa\Controllers\LdapConfigController;
+use Mapa\Controllers\ModalidadeIngressoController;
 use Mapa\Controllers\TrancadosController;
 use Mapa\Controllers\DisciplinasSemCursoController;
 use Mapa\Controllers\DisciplinasTrancadasController;
@@ -63,6 +64,7 @@ return static function (Router $router): void {
     $router->post('/acompanhamento/gerar', [AcompanhamentoController::class, 'gerar']);
     $router->get('/efeito-contatos', [EfeitoContatosController::class, 'index']);
     $router->post('/efeito-contatos/gerar', [EfeitoContatosController::class, 'gerar']);
+    $router->get('/modalidade-ingresso', [ModalidadeIngressoController::class, 'index']);
 
     $router->get('/usuarios', [UserController::class, 'index']);
     $router->get('/estatisticas-uso', [EstatisticasUsoController::class, 'index']);

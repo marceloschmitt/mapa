@@ -56,6 +56,7 @@ def carregar_trancados(caminho: Path) -> list[dict[str, Any]]:
                 "nome_curso": _texto(curso.get("nome_curso")) or "",
                 "ano_semestre_ingresso": _texto(curso.get("ano_semestre_ingresso")),
                 "turma_entrada": _texto(curso.get("turma_entrada")),
+                "modalidade_ingresso": _texto(curso.get("modalidade_ingresso")),
                 "status_discente": status,
             })
     return trancados
@@ -139,12 +140,32 @@ def importar(registros: list[dict[str, Any]], coleta_id: int) -> int:
         status = str(registro.get("status_discente") or "").strip() or "TRANCADO"
         ingresso = str(registro.get("ano_semestre_ingresso") or "").strip() or None
         turma = str(registro.get("turma_entrada") or "").strip() or None
+        modalidade = str(registro.get("modalidade_ingresso") or "").strip() or None
         email = registro.get("email")
         email_str = str(email).strip() if email else None
         nome = str(registro.get("nome") or "").strip()
         nome_social = str(registro.get("nome_social") or "").strip() or None
         matricula = str(registro.get("matricula") or "").strip()
         nome_curso = str(registro.get("nome_curso") or "").strip()
+
+        cursor.execute(
+            """
+            INSERT INTO aluno_cursos (
+                aluno_id, curso_id, ano_semestre_ingresso, turma_entrada, modalidade_ingresso
+            ) VALUES (?, ?, ?, ?, ?)
+            ON CONFLICT(aluno_id, curso_id) DO UPDATE SET
+                ano_semestre_ingresso = COALESCE(
+                    excluded.ano_semestre_ingresso, aluno_cursos.ano_semestre_ingresso
+                ),
+                turma_entrada = COALESCE(
+                    excluded.turma_entrada, aluno_cursos.turma_entrada
+                ),
+                modalidade_ingresso = COALESCE(
+                    excluded.modalidade_ingresso, aluno_cursos.modalidade_ingresso
+                )
+            """,
+            (aluno_id, curso_id, ingresso, turma, modalidade),
+        )
 
         cursor.execute(
             """

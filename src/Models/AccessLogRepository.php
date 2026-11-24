@@ -49,6 +49,7 @@ class AccessLogRepository
         '/configuracoes/feriados' => 'Configurações — feriados',
         '/configuracoes/feriados/excluir' => 'Configurações — excluir feriado',
         '/estatisticas-uso' => 'Estatísticas de uso',
+        '/modalidade-ingresso' => 'Modalidade de ingresso',
     ];
 
     private PDO $db;
